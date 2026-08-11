@@ -106,6 +106,11 @@ class App(ctk.CTk):
         self.catalog_file_path = self.get_catalog_file_path()
         self.load_catalog_values()
 
+        # Token Discogs (leído del archivo de config, con fallback a variable de entorno)
+        self.discogs_token = os.getenv("DISCOGS_TOKEN", "").strip()
+        self.settings_file_path = self._get_settings_file_path()
+        self._load_settings()
+
         self.gui_log_handler = TextHandler(self)
         self.gui_log_handler.setFormatter(formatter)
         logger.addHandler(self.gui_log_handler)
@@ -195,6 +200,10 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         logger.info("Aplicación Sonometa iniciada correctamente.")
+        if self.discogs_token:
+            logger.info("Token de Discogs activo ✓")
+        else:
+            logger.warning("No hay token de Discogs configurado. Ve a Archivo → ⚙ Configuración.")
 
     def maximize_window(self):
         try:
@@ -259,6 +268,37 @@ class App(ctk.CTk):
         app_dir = os.path.join(base_dir, "Sonometa")
         os.makedirs(app_dir, exist_ok=True)
         return os.path.join(app_dir, "catalogos.json")
+
+    def _get_settings_file_path(self):
+        base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
+        app_dir = os.path.join(base_dir, "Sonometa")
+        os.makedirs(app_dir, exist_ok=True)
+        return os.path.join(app_dir, "settings.json")
+
+    def _load_settings(self):
+        if not os.path.exists(self.settings_file_path):
+            return
+        try:
+            # utf-8-sig elimina el BOM que añaden herramientas como PowerShell
+            with open(self.settings_file_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            token = data.get("discogs_token", "").strip()
+            if token:
+                self.discogs_token = token
+                # El handler de GUI todavía no está registrado en __init__, el log irá solo a consola
+                logger.info("Token de Discogs cargado desde configuración.")
+            else:
+                logger.warning("settings.json encontrado pero sin token de Discogs.")
+        except Exception as e:
+            logger.warning(f"No se pudo cargar la configuración: {str(e)}")
+
+    def _save_settings(self):
+        try:
+            data = {"discogs_token": self.discogs_token}
+            with open(self.settings_file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"No se pudo guardar la configuración: {str(e)}")
 
     def load_catalog_values(self):
         if not os.path.exists(self.catalog_file_path):
@@ -386,6 +426,8 @@ class App(ctk.CTk):
         self.menu_archivo = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1)
         self.menu_archivo.add_command(label="Seleccionar carpeta...  (Ctrl+O)", command=self.browse_folder)
         self.menu_archivo.add_command(label="Actualizar  (F5)", command=self.refresh_folder)
+        self.menu_archivo.add_separator()
+        self.menu_archivo.add_command(label="⚙ Configuración (Token Discogs)", command=self.show_settings_dialog)
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(label="Cerrar  (Ctrl+Q)", command=self.destroy)
 
@@ -703,7 +745,6 @@ class App(ctk.CTk):
             arrowcolor=[("readonly", "#181818"), ("focus", "#181818")]
         )
 
-        # ...existing code...
         style.configure(
             "Treeview",
             background="#181818",
@@ -1180,6 +1221,8 @@ class App(ctk.CTk):
             if not file_path or not os.path.exists(file_path):
                 continue
 
+            values = list(self.tree.item(row_id, "values"))
+
             # --- PASO 1: Formatear y Renombrar archivo ---
             old_filename = os.path.basename(file_path)
             new_filename = self.format_filename_pattern(old_filename)
@@ -1192,12 +1235,19 @@ class App(ctk.CTk):
                     self.file_paths_map[row_id] = new_file_path
                     file_path = new_file_path
 
-                    values = list(self.tree.item(row_id, "values"))
                     values[0] = new_filename
                     self.tree.item(row_id, values=values)
                     logger.info(f"Renombrado archivo: '{old_filename}' -> '{new_filename}'")
                 except Exception as e:
                     logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
+
+            # Si ya tiene carátula, se omite la búsqueda en Discogs
+            if self.row_has_cover(row_id):
+                logger.info(f"Se omite la búsqueda de Discogs para '{new_filename}' porque ya tiene carátula.")
+                processed += 1
+                self.progress_bar.set(processed / total_files)
+                self.update_idletasks()
+                continue
 
             # --- PASO 2: Extraer Intérprete, Título y MIXARTIST desde el nombre ---
             clean_name = os.path.splitext(new_filename)[0]
@@ -1222,7 +1272,6 @@ class App(ctk.CTk):
                 artist_parsed = parts[0].strip()
                 title_parsed = parts[1].strip()
 
-            values = list(self.tree.item(row_id, "values"))
             if artist_parsed:
                 values[1] = artist_parsed
                 self.save_single_tag(file_path, "Artist", artist_parsed)
@@ -1236,7 +1285,11 @@ class App(ctk.CTk):
                 self.save_single_tag(file_path, "MixArtist", mixartist_parsed)
 
             # --- PASO 3: Búsqueda de metadatos adicionales en Discogs (Año y Carátula) ---
-            query_term = re.sub(r'^\d+[\s\-_.]*', '', clean_name)
+            query_term = self.build_discogs_query(
+                values[1] if len(values) > 1 else "",
+                values[2] if len(values) > 2 else "",
+                fallback_text=re.sub(r'^\d+[\s\-_.]*', '', clean_name)
+            )
             query_term = omit_pattern.sub('', query_term)
             query_term = query_term.replace('_', ' ')
             query_term = re.sub(r'\s+[._-]\s+', ' ', query_term)
@@ -1254,14 +1307,22 @@ class App(ctk.CTk):
                 logger.info(f"Descargando carátula del vinilo desde: {cover_url}")
                 image_data = self.download_image_bytes(cover_url)
                 if image_data:
-                    if self.embed_cover_art(file_path, image_data):
+                    image_data = self.normalize_cover_image_bytes(image_data)
+                    if self.embed_cover_art_verified(file_path, image_data):
                         values[8] = "Sí"
                         logger.info(f"Carátula incrustada con éxito en: {new_filename}")
                         self.display_cover_art(image_data)
+                        self.update_row_cover_status(row_id, "Sí")
                     else:
-                        logger.error(f"Error al incrustar la carátula en el archivo: {new_filename}")
+                        values[8] = "No"
+                        logger.error(f"La carátula no quedó persistida en el archivo: {new_filename}")
                 else:
+                    values[8] = "No"
                     logger.warning(f"No se pudieron descargar los bytes de la carátula ({cover_url})")
+            else:
+                values[8] = "No"
+                logger.warning(f"Discogs no devolvió carátula para: '{query_term}'")
+                self.update_row_cover_status(row_id, "No")
 
             self.tree.item(row_id, values=values)
             logger.info(f"Actualizado -> Autor: '{artist_parsed}', Título: '{title_parsed}', Remix: '{mixartist_parsed}', Año: '{year}'")
@@ -1278,20 +1339,91 @@ class App(ctk.CTk):
         headers = {"User-Agent": user_agent}
         return urllib.request.Request(url, headers=headers), timeout
 
+    def _discogs_headers(self):
+        headers = {
+            "User-Agent": "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)"
+        }
+        token = self.discogs_token or os.getenv("DISCOGS_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Discogs token={token}"
+        else:
+            logger.warning("No hay token de Discogs configurado. Las carátulas pueden no estar disponibles.")
+        return headers
+
+    def row_has_cover(self, row_id):
+        try:
+            values = list(self.tree.item(row_id, "values"))
+            return len(values) > 8 and str(values[8]).strip().lower() in ("sí", "si", "yes", "true", "1")
+        except Exception:
+            return False
+
+    @staticmethod
+    def build_discogs_query(artist, title, fallback_text=""):
+        parts = [str(artist).strip(), str(title).strip()]
+        query = " ".join(part for part in parts if part)
+        if not query:
+            query = str(fallback_text).strip()
+        query = re.sub(r"\s+", " ", query).strip()
+        return query
+
+    def get_row_artist_title(self, row_id):
+        values = list(self.tree.item(row_id, "values"))
+        artist = values[1] if len(values) > 1 else ""
+        title = values[2] if len(values) > 2 else ""
+        return artist, title
+
+    def update_row_cover_status(self, row_id, status="Sí"):
+        values = list(self.tree.item(row_id, "values"))
+        if len(values) > 8:
+            values[8] = status
+            self.tree.item(row_id, values=values)
+
+    @staticmethod
+    def normalize_cover_image_bytes(image_bytes):
+        try:
+            image = Image.open(io.BytesIO(image_bytes))
+            if image.mode not in ("RGB", "RGBA"):
+                image = image.convert("RGB")
+            elif image.mode == "RGBA":
+                image = image.convert("RGB")
+
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=95, optimize=True)
+            return output.getvalue()
+        except Exception:
+            return image_bytes
+
+    def embed_cover_art_verified(self, file_path, image_bytes):
+        """Incrusta la carátula y confirma que quedó escrita en el archivo."""
+        if not self.embed_cover_art(file_path, image_bytes):
+            logger.error(f"Falló la incrustación de la carátula en: {os.path.basename(file_path)}")
+            return False
+
+        try:
+            persisted = self.extract_cover_bytes(file_path)
+            if persisted:
+                logger.info(
+                    f"Verificación post-guardado OK en {os.path.basename(file_path)} "
+                    f"({len(persisted)} bytes leídos desde disco)"
+                )
+                return True
+
+            logger.error(f"Verificación post-guardado FALLIDA: no se detectó carátula en {os.path.basename(file_path)}")
+        except Exception as e:
+            logger.error(f"Error verificando la carátula guardada en {os.path.basename(file_path)}: {str(e)}")
+
+        return False
+
     def search_discogs_api(self, query):
         try:
             encoded_query = urllib.parse.quote(query)
             url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release"
-            req, timeout = self._build_http_request(
-                url,
-                "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)",
-                5,
-            )
+            req = urllib.request.Request(url, headers=self._discogs_headers())
 
             logger.info("--- [DISCOGS REQUEST (VINYL FILTER)] ---")
             logger.info(f"URL: {url}")
 
-            with urllib.request.urlopen(req, timeout=timeout) as response:
+            with urllib.request.urlopen(req, timeout=5) as response:
                 status_code = response.status
                 raw_response = response.read().decode("utf-8")
                 data = json.loads(raw_response)
@@ -1305,6 +1437,11 @@ class App(ctk.CTk):
                     cover_url = first_result.get("cover_image") or first_result.get("thumb") or ""
                     year = first_result.get("year", "")
 
+                    logger.info(
+                        f"Discogs encontró {len(results)} resultado(s). "
+                        f"Primero: '{title_full}' ({year}) | cover_url: '{cover_url}'"
+                    )
+
                     artist = ""
                     title = title_full
                     if " - " in title_full:
@@ -1313,6 +1450,8 @@ class App(ctk.CTk):
                         title = parts[1].strip()
 
                     return artist, title, year, cover_url
+                else:
+                    logger.warning("Discogs no devolvió resultados para la búsqueda.")
 
         except urllib.error.HTTPError as e:
             logger.error(f"HTTPError Discogs API [{e.code}]: {e.reason}")
@@ -1325,17 +1464,16 @@ class App(ctk.CTk):
 
     def download_image_bytes(self, image_url):
         try:
-            req, timeout = self._build_http_request(
-                image_url,
-                "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)",
-                10,
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as response:
+            req = urllib.request.Request(image_url, headers=self._discogs_headers())
+            with urllib.request.urlopen(req, timeout=10) as response:
                 if response.status == 200:
-                    return response.read()
+                    payload = response.read()
+                    logger.info(f"Bytes descargados de carátula: {len(payload)}")
+                    return payload
         except Exception as e:
             logger.error(f"Error descargando imagen de carátula ({image_url}): {str(e)}")
         return None
+
 
     def embed_cover_art(self, file_path, image_bytes):
         from mutagen.id3 import ID3, APIC, ID3NoHeaderError
@@ -1347,6 +1485,7 @@ class App(ctk.CTk):
         ext = os.path.splitext(file_path)[1].lower()
         try:
             if ext in (".mp3", ".wav"):
+                audio_wav = None
                 if ext == ".wav":
                     audio_wav = WAVE(file_path)
                     if audio_wav.tags is None:
@@ -1367,7 +1506,7 @@ class App(ctk.CTk):
                     data=image_bytes
                 ))
 
-                if ext == ".wav":
+                if ext == ".wav" and audio_wav is not None:
                     audio_wav.save()
                 else:
                     audio_tags.save(file_path)
@@ -1389,10 +1528,10 @@ class App(ctk.CTk):
                 audio.save()
 
             else:
-                audio = MutagenFile(file_path)
-                if hasattr(audio, 'tags') and audio.tags is not None:
-                    audio.tags['covr'] = image_bytes
-                    audio.save()
+                logger.warning(
+                    f"Formato no soportado para incrustar carátula de forma fiable: {os.path.basename(file_path)}"
+                )
+                return False
 
             return True
 
@@ -1400,56 +1539,6 @@ class App(ctk.CTk):
             logger.error(f"Error incrustando la carátula en {os.path.basename(file_path)}: {str(e)}")
             return False
 
-    def update_cover_image(self, image_bytes_or_path):
-        """
-        Función para actualizar la carátula manteniendo estrictamente
-        el tamaño del contenedor y la visibilidad del botón Procesar.
-        """
-        # Dimensión fija exacta que coincide con el label por defecto
-        COVER_SIZE = (135, 135)
-
-        if not image_bytes_or_path:
-            # Caso: Sin carátula
-            self.label_cover.configure(
-                image=None,
-                text="Sin carátula",
-                width=COVER_SIZE[0],
-                height=COVER_SIZE[1]
-            )
-            return
-
-        try:
-            # Cargar imagen desde ruta o bytes
-            if isinstance(image_bytes_or_path, (str, os.PathLike)):
-                pil_img = Image.open(image_bytes_or_path)
-            else:
-                pil_img = Image.open(io.BytesIO(image_bytes_or_path))
-
-            # Forzar el escalado al tamaño exacto del cuadro (135x135)
-            ctk_img = ctk.CTkImage(
-                light_image=pil_img,
-                dark_image=pil_img,
-                size=COVER_SIZE
-            )
-
-            # Asignar la imagen y limpiar el texto
-            self.label_cover.configure(
-                image=ctk_img,
-                text="",
-                width=COVER_SIZE[0],
-                height=COVER_SIZE[1]
-            )
-            # Guardar referencia para evitar que el GC de Python elimine la imagen
-            self.label_cover._image_ref = ctk_img
-
-        except Exception as e:
-            logger.error(f"Error al cargar la carátula: {str(e)}")
-            self.label_cover.configure(
-                image=None,
-                text="Sin carátula",
-                width=COVER_SIZE[0],
-                height=COVER_SIZE[1]
-            )
 
     def save_single_tag(self, file_path, field_name, new_value):
         from mutagen.id3 import ID3, TIT2, TPE1, TPE4, TALB, TCON, TPUB, TDRC, ID3NoHeaderError
@@ -1460,6 +1549,7 @@ class App(ctk.CTk):
 
         try:
             if ext in (".mp3", ".wav"):
+                audio_wav = None
                 if ext == ".wav":
                     audio_wav = WAVE(file_path)
                     if audio_wav.tags is None:
@@ -1491,7 +1581,7 @@ class App(ctk.CTk):
                     frame_id = frame_cls.__name__
                     audio_tags.delall(frame_id)
 
-                if ext == ".wav":
+                if ext == ".wav" and audio_wav is not None:
                     audio_wav.save()
                 else:
                     audio_tags.save(file_path)
@@ -2155,6 +2245,85 @@ class App(ctk.CTk):
             command=shortcuts_win.destroy
         )
         btn_close.pack(fill="x", pady=(12, 0))
+
+    def show_settings_dialog(self):
+        """Diálogo de configuración para el Token de Discogs."""
+        win = ctk.CTkToplevel(self)
+        win.title("Configuración - Token Discogs")
+        win.geometry("500x260")
+        win.resizable(False, False)
+        self.apply_popup_style(win, is_modal=True, owner=self)
+
+        frame = ctk.CTkFrame(win, fg_color="#1E1E1E")
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(
+            frame,
+            text="Token de Discogs",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            anchor="w"
+        ).pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(
+            frame,
+            text=(
+                "El token se usa para buscar carátulas de vinilos.\n"
+                "Puedes obtenerlo en discogs.com → Ajustes → Desarrolladores."
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color="#9CA3AF",
+            anchor="w",
+            justify="left"
+        ).pack(fill="x", pady=(0, 10))
+
+        entry_token = ctk.CTkEntry(
+            frame,
+            placeholder_text="Pega aquí tu token de Discogs",
+            height=34,
+            font=ctk.CTkFont(size=12),
+            show="*"
+        )
+        entry_token.pack(fill="x", pady=(0, 4))
+        if self.discogs_token:
+            entry_token.insert(0, self.discogs_token)
+
+        # Mostrar/ocultar token
+        show_var = tk.BooleanVar(value=False)
+
+        def toggle_visibility():
+            entry_token.configure(show="" if show_var.get() else "*")
+
+        chk = ctk.CTkCheckBox(
+            frame,
+            text="Mostrar token",
+            variable=show_var,
+            command=toggle_visibility,
+            font=ctk.CTkFont(size=11)
+        )
+        chk.pack(anchor="w", pady=(0, 12))
+
+        def save_token():
+            token = entry_token.get().strip()
+            self.discogs_token = token
+            self._save_settings()
+            if token:
+                logger.info("Token de Discogs guardado correctamente.")
+            else:
+                logger.info("Token de Discogs eliminado.")
+            win.destroy()
+
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(fill="x", side="bottom")
+        ctk.CTkButton(
+            btns, text="Cancelar",
+            fg_color="#374151", hover_color="#1F2937",
+            command=win.destroy
+        ).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(
+            btns, text="Guardar",
+            fg_color=self.CORP_COLOR, hover_color=self.CORP_HOVER,
+            command=save_token
+        ).pack(side="right")
 
 
 if __name__ == "__main__":
