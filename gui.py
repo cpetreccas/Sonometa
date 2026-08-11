@@ -82,6 +82,11 @@ class App(ctk.CTk):
 
         self.after(10, self.maximize_window)
 
+        # Aplicar dark title bar a la ventana principal
+        self.after(50, lambda: self.apply_dark_title_bar(self))
+        self.after(150, lambda: self.apply_dark_title_bar(self))
+        self.after(300, lambda: self.apply_dark_title_bar(self))
+
         self.folder_path = ""
         self.sort_directions = {}
         self.file_paths_map = {}
@@ -441,6 +446,7 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+
     @staticmethod
     def center_popup_on_screen(win):
         geometry = win.geometry().split("+")[0]
@@ -481,6 +487,7 @@ class App(ctk.CTk):
                 )
         except Exception:
             pass
+
 
     def show_themed_dialog(self, title, message, level="info", is_confirm=False, parent=None):
         host = parent if parent is not None else self
@@ -743,20 +750,18 @@ class App(ctk.CTk):
         self.after_idle(self._update_tree_scrollbars)
 
     def _on_tree_y_scroll(self, first, last):
-        self.vsb.set(first, last)
-        needs_scroll = float(first) > 0.0 or float(last) < 1.0
-        if needs_scroll and not self.vsb.winfo_ismapped():
-            self.vsb.pack(side="right", fill="y")
-        elif not needs_scroll and self.vsb.winfo_ismapped():
-            self.vsb.pack_forget()
+        self._update_scrollbar(self.vsb, first, last, side="right", fill="y")
 
     def _on_tree_x_scroll(self, first, last):
-        self.hsb.set(first, last)
+        self._update_scrollbar(self.hsb, first, last, side="bottom", fill="x")
+
+    def _update_scrollbar(self, scrollbar, first, last, side, fill):
+        scrollbar.set(first, last)
         needs_scroll = float(first) > 0.0 or float(last) < 1.0
-        if needs_scroll and not self.hsb.winfo_ismapped():
-            self.hsb.pack(side="bottom", fill="x")
-        elif not needs_scroll and self.hsb.winfo_ismapped():
-            self.hsb.pack_forget()
+        if needs_scroll and not scrollbar.winfo_ismapped():
+            scrollbar.pack(side=side, fill=fill)
+        elif not needs_scroll and scrollbar.winfo_ismapped():
+            scrollbar.pack_forget()
 
     def _update_tree_scrollbars(self):
         x_first, x_last = self.tree.xview()
@@ -764,28 +769,50 @@ class App(ctk.CTk):
         self._on_tree_x_scroll(x_first, x_last)
         self._on_tree_y_scroll(y_first, y_last)
 
-    def on_cell_double_click(self, event):
+    def _get_next_tree_edit_target(self, row_id, col_index, direction):
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+        if col_index not in editable_cols:
+            return None
+
+        rows = list(self.tree.get_children())
+        try:
+            row_pos = rows.index(row_id)
+            col_pos = editable_cols.index(col_index)
+        except ValueError:
+            return None
+
+        if direction == "tab":
+            if col_pos < len(editable_cols) - 1:
+                return rows[row_pos], editable_cols[col_pos + 1]
+            if row_pos < len(rows) - 1:
+                return rows[row_pos + 1], editable_cols[0]
+        elif direction == "shift_tab":
+            if col_pos > 0:
+                return rows[row_pos], editable_cols[col_pos - 1]
+            if row_pos > 0:
+                return rows[row_pos - 1], editable_cols[-1]
+        elif direction == "enter":
+            if row_pos < len(rows) - 1:
+                return rows[row_pos + 1], col_index
+        elif direction == "shift_enter":
+            if row_pos > 0:
+                return rows[row_pos - 1], col_index
+
+        return None
+
+    def _start_tree_cell_edit(self, row_id, col_index):
+        if col_index < 0 or col_index >= len(self.columns):
+            return
+
+        col_name = self.columns[col_index]
+        if col_name == "Cover":
+            return
+
         if self.cell_entry:
             self.cell_entry.destroy()
             self.cell_entry = None
 
-        region = self.tree.identify_region(event.x, event.y)
-        if region != "cell":
-            return
-
-        column_id = self.tree.identify_column(event.x)
-        col_index = int(column_id.replace("#", "")) - 1
-        if col_index < 0 or col_index >= len(self.columns):
-            return
-        col_name = self.columns[col_index]
-
-        if col_name == "Cover":
-            return
-
-        row_id = self.tree.identify_row(event.y)
-        if not row_id:
-            return
-
+        column_id = f"#{col_index + 1}"
         bbox = self.tree.bbox(row_id, column_id)
         if not bbox:
             return
@@ -801,6 +828,7 @@ class App(ctk.CTk):
             entry = ttk.Combobox(self.tree, state="readonly", values=self.catalog_values.get(col_name, []))
         else:
             entry = ttk.Entry(self.tree)
+
         current_value_str = str(current_value)
         if col_name == "Filename":
             current_stem, _ = os.path.splitext(current_value_str)
@@ -815,6 +843,7 @@ class App(ctk.CTk):
                 entry.set(current_value_str)
             else:
                 entry.insert(0, current_value_str)
+
         entry.select_range(0, "end")
         entry.focus_set()
         entry.place(x=x, y=y, width=w, height=h)
@@ -831,32 +860,32 @@ class App(ctk.CTk):
                 if not new_value:
                     logger.warning("Nombre de archivo vacío: se cancela el renombrado.")
                     self.show_themed_dialog("Nombre no válido", "El nombre del archivo no puede estar vacío.", level="warning")
-                    return
+                    return False
 
                 safe_name = new_value.replace("/", "_").replace("\\", "_").rstrip(".").strip()
                 if not safe_name:
                     logger.warning("Nombre de archivo inválido: se cancela el renombrado.")
                     self.show_themed_dialog("Nombre no válido", "El nombre del archivo no es válido.", level="warning")
-                    return
+                    return False
 
                 original_filename = current_value_str.strip()
                 _, original_ext = os.path.splitext(original_filename)
                 final_filename = f"{safe_name}{original_ext}"
 
                 if final_filename == original_filename:
-                    return
+                    return True
 
                 file_path = self.file_paths_map.get(row_id)
                 if not file_path or not os.path.exists(file_path):
                     logger.error("No se puede renombrar: archivo no encontrado.")
                     self.show_themed_dialog("Archivo no encontrado", "No se puede renombrar porque el archivo ya no existe en disco.", level="error")
-                    return
+                    return False
 
                 target_path = os.path.join(os.path.dirname(file_path), final_filename)
                 if os.path.normcase(target_path) != os.path.normcase(file_path) and os.path.exists(target_path):
                     logger.warning(f"Ya existe un archivo con ese nombre: {final_filename}")
                     self.show_themed_dialog("Nombre en uso", f"Ya existe un archivo con el nombre:\n{final_filename}", level="warning")
-                    return
+                    return False
 
                 try:
                     os.rename(file_path, target_path)
@@ -870,14 +899,16 @@ class App(ctk.CTk):
                 except Exception as e:
                     logger.error(f"No se pudo renombrar el archivo '{original_filename}': {str(e)}")
                     self.show_themed_dialog("Error al renombrar", f"No se pudo renombrar el archivo:\n{str(e)}", level="error")
-                return
+                    return False
+
+                return True
 
             if new_value == current_value_str.strip():
-                return
+                return True
 
             if col_name in managed_grid_fields and new_value not in self.catalog_values.get(col_name, []):
                 self.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.catalog_labels[col_name]}.", level="warning")
-                return
+                return False
 
             values = list(self.tree.item(row_id, "values"))
             values[col_index] = new_value
@@ -889,11 +920,44 @@ class App(ctk.CTk):
             if file_path:
                 self.save_single_tag(file_path, col_name, new_value)
 
-        entry.bind("<Return>", save_edit)
-        entry.bind("<FocusOut>", save_edit)
+            return True
+
+        def navigate(direction):
+            if save_edit():
+                next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
+                if next_target:
+                    next_row_id, next_col_index = next_target
+                    self.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c))
+            return "break"
+
+        entry.bind("<Return>", lambda _e: navigate("enter"))
+        entry.bind("<Shift-Return>", lambda _e: navigate("shift_enter"))
+        entry.bind("<Tab>", lambda _e: navigate("tab"))
+        entry.bind("<Shift-Tab>", lambda _e: navigate("shift_tab"))
+        entry.bind("<ISO_Left_Tab>", lambda _e: navigate("shift_tab"))
         if col_name in managed_grid_fields:
             entry.bind("<<ComboboxSelected>>", save_edit)
+        entry.bind("<FocusOut>", save_edit)
         self.cell_entry = entry
+
+    def on_cell_double_click(self, event):
+        region = self.tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+
+        column_id = self.tree.identify_column(event.x)
+        col_index = int(column_id.replace("#", "")) - 1
+        if col_index < 0 or col_index >= len(self.columns):
+            return
+        col_name = self.columns[col_index]
+
+        if col_name == "Cover":
+            return
+
+        row_id = self.tree.identify_row(event.y)
+        if not row_id:
+            return
+        self._start_tree_cell_edit(row_id, col_index)
 
     def process_discogs_data(self):
         target_rows = self.tree.selection()
@@ -1014,18 +1078,25 @@ class App(ctk.CTk):
         self.on_row_select(None)
         logger.info("Procesamiento finalizado con éxito.")
 
+    @staticmethod
+    def _build_http_request(url, user_agent, timeout):
+        headers = {"User-Agent": user_agent}
+        return urllib.request.Request(url, headers=headers), timeout
+
     def search_discogs_api(self, query):
         try:
             encoded_query = urllib.parse.quote(query)
             url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release"
-            headers = {"User-Agent": "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)"}
+            req, timeout = self._build_http_request(
+                url,
+                "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)",
+                5,
+            )
 
             logger.info("--- [DISCOGS REQUEST (VINYL FILTER)] ---")
             logger.info(f"URL: {url}")
 
-            req = urllib.request.Request(url, headers=headers)
-
-            with urllib.request.urlopen(req, timeout=5) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 status_code = response.status
                 raw_response = response.read().decode("utf-8")
                 data = json.loads(raw_response)
@@ -1059,11 +1130,12 @@ class App(ctk.CTk):
 
     def download_image_bytes(self, image_url):
         try:
-            headers = {
-                "User-Agent": "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)"
-            }
-            req = urllib.request.Request(image_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as response:
+            req, timeout = self._build_http_request(
+                image_url,
+                "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)",
+                10,
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 if response.status == 200:
                     return response.read()
         except Exception as e:
@@ -1275,30 +1347,13 @@ class App(ctk.CTk):
             logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
             return
 
-        val_map = {
-            "entry_artist": values[1],
-            "entry_title": values[2],
-            "entry_mixartist": values[3],
-            "entry_album": values[4],
-            "entry_genre": values[5],
-            "entry_publisher": values[6],
-            "entry_year": values[7]
-        }
-
-        for attr, val in val_map.items():
-            widget = self.tag_entries.get(attr)
-            if not widget:
-                continue
-            val_str = str(val) if val else ""
-
-            if attr in getattr(self, "panel_combo_fields", {}):
-                catalog_key = self.panel_combo_fields[attr]
-                normalized_val = self.normalize_catalog_text(val_str)
-                self.add_catalog_value(catalog_key, normalized_val, persist=False)
-                widget.set(normalized_val)
-            else:
-                widget.delete(0, "end")
-                widget.insert(0, val_str)
+        self._set_panel_widget_value("entry_artist", values[1])
+        self._set_panel_widget_value("entry_title", values[2])
+        self._set_panel_widget_value("entry_mixartist", values[3])
+        self._set_panel_widget_value("entry_album", values[4])
+        self._set_panel_widget_value("entry_genre", values[5])
+        self._set_panel_widget_value("entry_publisher", values[6])
+        self._set_panel_widget_value("entry_year", values[7])
 
         file_path = self.file_paths_map.get(item_id)
         if file_path:
@@ -1388,18 +1443,23 @@ class App(ctk.CTk):
             else:
                 combo.set("")
 
-    def on_panel_catalog_selected(self, attr_name, catalog_key):
-        selected_rows = self.tree.selection()
-        if not selected_rows:
-            logger.info(f"Selección de catálogo ignorada ({self.catalog_labels.get(catalog_key, catalog_key)}): no hay fila seleccionada.")
+    def _set_panel_widget_value(self, attr_name, value):
+        widget = self.tag_entries.get(attr_name)
+        if not widget:
             return
-        row_id = selected_rows[0]
-        combo = self.tag_entries.get(attr_name)
-        if not combo:
-            return
-        new_value = combo.get().strip()
-        new_value = self.normalize_catalog_text(new_value)
 
+        value_str = str(value) if value else ""
+        if attr_name in getattr(self, "panel_combo_fields", {}):
+            catalog_key = self.panel_combo_fields[attr_name]
+            normalized_value = self.normalize_catalog_text(value_str)
+            self.add_catalog_value(catalog_key, normalized_value, persist=False)
+            widget.set(normalized_value)
+            return
+
+        widget.delete(0, "end")
+        widget.insert(0, value_str)
+
+    def _apply_catalog_selection_to_row(self, row_id, attr_name, catalog_key, new_value):
         column_map = {
             "entry_album": self.get_catalog_column_info("Album"),
             "entry_genre": self.get_catalog_column_info("Genre"),
@@ -1429,6 +1489,18 @@ class App(ctk.CTk):
         )
         self.on_row_select(None)
 
+    def on_panel_catalog_selected(self, attr_name, catalog_key):
+        selected_rows = self.tree.selection()
+        if not selected_rows:
+            logger.info(f"Selección de catálogo ignorada ({self.catalog_labels.get(catalog_key, catalog_key)}): no hay fila seleccionada.")
+            return
+        row_id = selected_rows[0]
+        combo = self.tag_entries.get(attr_name)
+        if not combo:
+            return
+        new_value = self.normalize_catalog_text(combo.get().strip())
+        self._apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
+
     def open_catalog_manager(self, catalog_key):
         if catalog_key not in self.catalog_fields:
             return
@@ -1438,7 +1510,7 @@ class App(ctk.CTk):
         win = ctk.CTkToplevel(self)
         win.title(f"Gestionar {self.catalog_labels[catalog_key]}")
         win.geometry("420x380")
-        self.apply_popup_style(win, is_modal=True)
+        self.apply_popup_style(win, is_modal=True, owner=self)
 
         frame = ctk.CTkFrame(win)
         frame.pack(fill="both", expand=True, padx=12, pady=12)
@@ -1715,7 +1787,7 @@ class App(ctk.CTk):
         self.log_window = ctk.CTkToplevel(self)
         self.log_window.title("Historial de Logs")
         self.log_window.geometry("700x400")
-        self.apply_popup_style(self.log_window, is_modal=False)
+        self.apply_popup_style(self.log_window, is_modal=False, owner=self)
         self.log_window.protocol("WM_DELETE_WINDOW", self.close_logs_dialog)
 
         self.log_textbox = ctk.CTkTextbox(self.log_window, wrap="none")
@@ -1763,7 +1835,7 @@ class App(ctk.CTk):
         shortcuts_win = ctk.CTkToplevel(self)
         shortcuts_win.title("Atajos de Teclado")
         shortcuts_win.geometry("500x350")
-        self.apply_popup_style(shortcuts_win, is_modal=True)
+        self.apply_popup_style(shortcuts_win, is_modal=True, owner=self)
 
         # Frame para el contenido
         frame_content = ctk.CTkFrame(shortcuts_win)
