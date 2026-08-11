@@ -4,6 +4,7 @@ import sys
 import ctypes
 import io
 import re
+import time
 import urllib.request
 import json
 from collections import deque
@@ -72,6 +73,7 @@ ctk.set_default_color_theme("blue")
 class App(ctk.CTk):
     CORP_COLOR = "#6B21A8"
     CORP_HOVER = "#581C87"
+    CLEAR_OPTION = "<Limpiar>"
 
     def __init__(self):
         super().__init__()
@@ -302,6 +304,11 @@ class App(ctk.CTk):
         if persist:
             self.save_catalog_values()
         return True
+
+    def get_catalog_combo_values(self, catalog_key):
+        values = [v for v in self.catalog_values.get(catalog_key, []) if v and v != self.CLEAR_OPTION]
+        values = sorted(dict.fromkeys(values), key=lambda x: x.lower())
+        return values + [self.CLEAR_OPTION]
 
     @staticmethod
     def get_catalog_column_info(catalog_key):
@@ -598,18 +605,26 @@ class App(ctk.CTk):
                 catalog_key = self.panel_combo_fields[attr_name]
                 widget = ctk.CTkComboBox(
                     self.frame_sidebar,
-                    values=self.catalog_values.get(catalog_key, []),
+                    values=self.get_catalog_combo_values(catalog_key),
                     state="readonly",
                     height=26,
-                    font=ctk.CTkFont(size=12)
+                    font=ctk.CTkFont(size=12),
+                    command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
                 )
                 widget.set("")
+                widget.bind("<Button-1>", lambda _e, _w=widget: self.on_panel_combo_click(_w))
                 widget.bind(
-                    "<<ComboboxSelected>>",
-                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
+                    "<FocusOut>",
+                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_focus_out(_attr, _cat)
+                )
+                widget.bind(
+                    "<Return>",
+                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_enter(_attr, _cat)
                 )
             else:
                 widget = ctk.CTkEntry(self.frame_sidebar, height=26, font=ctk.CTkFont(size=12))
+                widget.bind("<FocusOut>", lambda _e, _attr=attr_name: self.on_panel_text_field_commit(_attr))
+                widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
 
             widget.pack(fill="x", padx=5, pady=(0, 4))
             self.tag_entries[attr_name] = widget
@@ -658,6 +673,35 @@ class App(ctk.CTk):
 
         style = ttk.Style()
         style.theme_use("clam")
+        self.tree_edit_combo_style = "Sonometa.TreeEdit.TCombobox"
+
+        try:
+            base_layout = style.layout("TCombobox")
+            style.layout(self.tree_edit_combo_style, self._remove_combobox_arrow_from_layout(base_layout))
+        except Exception:
+            pass
+
+        style.configure(
+            self.tree_edit_combo_style,
+            fieldbackground="#181818",
+            background="#181818",
+            foreground="#E0E0E0",
+            selectbackground="#181818",
+            selectforeground="#E0E0E0",
+            arrowcolor="#181818",
+            relief="flat",
+            borderwidth=0,
+            padding=(3, 2)
+        )
+        style.map(
+            self.tree_edit_combo_style,
+            fieldbackground=[("readonly", "#181818"), ("focus", "#181818")],
+            background=[("readonly", "#181818"), ("focus", "#181818")],
+            foreground=[("readonly", "#E0E0E0"), ("focus", "#E0E0E0")],
+            selectbackground=[("readonly", "#181818"), ("focus", "#181818")],
+            selectforeground=[("readonly", "#E0E0E0"), ("focus", "#E0E0E0")],
+            arrowcolor=[("readonly", "#181818"), ("focus", "#181818")]
+        )
 
         # ...existing code...
         style.configure(
@@ -769,6 +813,52 @@ class App(ctk.CTk):
         self._on_tree_x_scroll(x_first, x_last)
         self._on_tree_y_scroll(y_first, y_last)
 
+    @staticmethod
+    def _remove_combobox_arrow_from_layout(layout):
+        cleaned = []
+        for item in layout:
+            if not isinstance(item, tuple) or len(item) < 2:
+                cleaned.append(item)
+                continue
+
+            element, options = item[0], item[1]
+            if isinstance(element, str) and "downarrow" in element.lower():
+                continue
+
+            if isinstance(options, dict):
+                new_options = dict(options)
+                children = new_options.get("children")
+                if children:
+                    new_options["children"] = App._remove_combobox_arrow_from_layout(children)
+                cleaned.append((element, new_options))
+            else:
+                cleaned.append(item)
+
+        return cleaned
+
+    def _open_tree_combo_dropdown(self, widget):
+        try:
+            widget.focus_set()
+            widget.tk.call("ttk::combobox::Post", str(widget))
+        except Exception:
+            try:
+                widget.event_generate("<Down>")
+            except Exception:
+                pass
+
+    def _close_tree_combo_dropdown(self, widget):
+        try:
+            widget.tk.call("ttk::combobox::Unpost", str(widget))
+        except Exception:
+            pass
+
+    def _is_tree_combo_dropdown_open(self, widget):
+        try:
+            popdown = widget.tk.call("ttk::combobox::PopdownWindow", str(widget))
+            return bool(int(widget.tk.call("winfo", "ismapped", popdown)))
+        except Exception:
+            return False
+
     def _get_next_tree_edit_target(self, row_id, col_index, direction):
         editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
         if col_index not in editable_cols:
@@ -800,7 +890,7 @@ class App(ctk.CTk):
 
         return None
 
-    def _start_tree_cell_edit(self, row_id, col_index):
+    def _start_tree_cell_edit(self, row_id, col_index, open_dropdown=True):
         if col_index < 0 or col_index >= len(self.columns):
             return
 
@@ -825,7 +915,13 @@ class App(ctk.CTk):
 
         managed_grid_fields = {"Album", "Genre", "Publisher"}
         if col_name in managed_grid_fields:
-            entry = ttk.Combobox(self.tree, state="readonly", values=self.catalog_values.get(col_name, []))
+            entry = ttk.Combobox(
+                self.tree,
+                state="readonly",
+                values=self.get_catalog_combo_values(col_name),
+                style=self.tree_edit_combo_style,
+                exportselection=False
+            )
         else:
             entry = ttk.Entry(self.tree)
 
@@ -839,21 +935,34 @@ class App(ctk.CTk):
                 if current_value_str and current_value_str not in current_options:
                     current_options.append(current_value_str)
                     current_options.sort(key=lambda x: x.lower())
-                    entry.configure(values=current_options)
+                entry.configure(values=current_options + [self.CLEAR_OPTION])
                 entry.set(current_value_str)
             else:
                 entry.insert(0, current_value_str)
 
-        entry.select_range(0, "end")
+        if col_name not in managed_grid_fields:
+            entry.select_range(0, "end")
         entry.focus_set()
         entry.place(x=x, y=y, width=w, height=h)
+        if col_name in managed_grid_fields:
+            if open_dropdown:
+                entry.after(50, lambda w=entry: self._open_tree_combo_dropdown(w) if w.winfo_exists() else None)
+
+        finalized = False
 
         def save_edit(evt=None):
+            nonlocal finalized
+            if finalized:
+                return True
+            finalized = True
+            self._close_tree_combo_dropdown(entry)
             new_value = entry.get().strip()
             entry.destroy()
             self.cell_entry = None
 
             if col_name in managed_grid_fields:
+                if new_value == self.CLEAR_OPTION:
+                    new_value = ""
                 new_value = self.normalize_catalog_text(new_value)
 
             if col_name == "Filename":
@@ -906,7 +1015,7 @@ class App(ctk.CTk):
             if new_value == current_value_str.strip():
                 return True
 
-            if col_name in managed_grid_fields and new_value not in self.catalog_values.get(col_name, []):
+            if col_name in managed_grid_fields and new_value and new_value not in self.catalog_values.get(col_name, []):
                 self.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.catalog_labels[col_name]}.", level="warning")
                 return False
 
@@ -927,8 +1036,89 @@ class App(ctk.CTk):
                 next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
                 if next_target:
                     next_row_id, next_col_index = next_target
-                    self.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c))
+                    self.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
             return "break"
+
+        def commit_combo_selection(evt=None):
+            entry.after_idle(save_edit)
+            return "break"
+
+        combo_type_state = {"buffer": "", "last_ts": 0.0, "matches": [], "match_idx": 0}
+
+        def on_combo_type_search(evt=None):
+            if col_name not in managed_grid_fields:
+                return
+
+            if evt is None:
+                return "break"
+
+            # No interferir con teclas de navegación/confirmación.
+            if evt.keysym in {"Return", "KP_Enter", "Tab", "ISO_Left_Tab", "Up", "Down", "Left", "Right", "Escape"}:
+                return
+
+            values = [str(v) for v in entry.cget("values") if str(v) != self.CLEAR_OPTION]
+            if not values:
+                return "break"
+
+            now = time.monotonic()
+            if now - combo_type_state["last_ts"] > 1.0:
+                combo_type_state["buffer"] = ""
+            combo_type_state["last_ts"] = now
+
+            if evt.keysym == "BackSpace":
+                combo_type_state["buffer"] = combo_type_state["buffer"][:-1]
+            else:
+                char = evt.char or ""
+                if not char.isprintable() or char.isspace():
+                    return "break"
+                combo_type_state["buffer"] += char.lower()
+
+            if not combo_type_state["buffer"]:
+                return "break"
+
+            buffer = combo_type_state["buffer"]
+            matches = [v for v in values if v.lower().startswith(buffer)]
+            if not matches:
+                matches = [v for v in values if buffer in v.lower()]
+            combo_type_state["matches"] = matches
+            combo_type_state["match_idx"] = 0
+            if matches:
+                match = matches[0]
+                try:
+                    idx = list(entry.cget("values")).index(match)
+                    entry.current(idx)
+                except Exception:
+                    entry.set(match)
+
+            return "break"
+
+        def on_combo_cycle(forward=True):
+            matches = combo_type_state.get("matches", [])
+            if not matches:
+                if forward:
+                    self._open_tree_combo_dropdown(entry)
+                return "break"
+
+            idx = combo_type_state["match_idx"]
+            idx = (idx + 1) % len(matches) if forward else (idx - 1) % len(matches)
+            combo_type_state["match_idx"] = idx
+            match = matches[idx]
+            try:
+                all_values = list(entry.cget("values"))
+                entry.current(all_values.index(match))
+            except Exception:
+                entry.set(match)
+            return "break"
+
+        def on_focus_out(evt=None):
+            def commit_if_closed():
+                # Si el desplegable sigue abierto, no cerrar todavía (permite seleccionar).
+                if col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry):
+                    return
+                save_edit()
+
+            # Esperar un poco para que Tk procese selección/cierre del popdown.
+            entry.after(120, commit_if_closed)
 
         entry.bind("<Return>", lambda _e: navigate("enter"))
         entry.bind("<Shift-Return>", lambda _e: navigate("shift_enter"))
@@ -936,8 +1126,13 @@ class App(ctk.CTk):
         entry.bind("<Shift-Tab>", lambda _e: navigate("shift_tab"))
         entry.bind("<ISO_Left_Tab>", lambda _e: navigate("shift_tab"))
         if col_name in managed_grid_fields:
-            entry.bind("<<ComboboxSelected>>", save_edit)
-        entry.bind("<FocusOut>", save_edit)
+            entry.bind("<<ComboboxSelected>>", commit_combo_selection)
+            entry.bind("<KeyPress>", on_combo_type_search)
+            entry.bind("<Down>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
+            entry.bind("<space>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
+            entry.bind("<Down>", lambda _e: on_combo_cycle(forward=True))
+            entry.bind("<Up>", lambda _e: on_combo_cycle(forward=False))
+        entry.bind("<FocusOut>", on_focus_out)
         self.cell_entry = entry
 
     def on_cell_double_click(self, event):
@@ -1437,8 +1632,9 @@ class App(ctk.CTk):
             if not combo:
                 continue
             current_value = combo.get().strip()
-            combo.configure(values=self.catalog_values.get(catalog_key, []))
-            if current_value in self.catalog_values.get(catalog_key, []):
+            allowed_values = self.get_catalog_combo_values(catalog_key)
+            combo.configure(values=allowed_values)
+            if current_value in allowed_values:
                 combo.set(current_value)
             else:
                 combo.set("")
@@ -1498,8 +1694,69 @@ class App(ctk.CTk):
         combo = self.tag_entries.get(attr_name)
         if not combo:
             return
-        new_value = self.normalize_catalog_text(combo.get().strip())
+        raw_value = combo.get().strip()
+        if raw_value == self.CLEAR_OPTION:
+            new_value = ""
+        else:
+            new_value = self.normalize_catalog_text(raw_value)
         self._apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
+
+    def on_panel_combo_click(self, combo_widget):
+        try:
+            combo_widget.focus_set()
+            combo_widget._open_dropdown_menu()
+        except Exception:
+            pass
+        return "break"
+
+    def on_panel_catalog_enter(self, attr_name, catalog_key):
+        self.on_panel_catalog_selected(attr_name, catalog_key)
+        return "break"
+
+    def on_panel_catalog_focus_out(self, attr_name, catalog_key):
+        # Delay corto para que CTk actualice internamente el valor antes de guardar.
+        self.after(50, lambda a=attr_name, c=catalog_key: self.on_panel_catalog_selected(a, c))
+
+    def on_panel_text_field_enter(self, attr_name):
+        self.on_panel_text_field_commit(attr_name)
+        return "break"
+
+    def on_panel_text_field_commit(self, attr_name):
+        text_column_map = {
+            "entry_artist": ("Artist", 1),
+            "entry_title": ("Title", 2),
+            "entry_mixartist": ("MixArtist", 3),
+            "entry_year": ("Year", 7),
+        }
+        if attr_name not in text_column_map:
+            return
+
+        selected_rows = self.tree.selection()
+        if not selected_rows:
+            return
+        row_id = selected_rows[0]
+
+        widget = self.tag_entries.get(attr_name)
+        if not widget:
+            return
+        new_value = widget.get().strip()
+
+        col_name, col_index = text_column_map[attr_name]
+        values = list(self.tree.item(row_id, "values"))
+        if col_index >= len(values):
+            return
+        current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
+        if current_value == new_value:
+            return
+
+        values[col_index] = new_value
+        self.tree.item(row_id, values=values)
+
+        file_path = self.file_paths_map.get(row_id)
+        if file_path:
+            self.save_single_tag(file_path, col_name, new_value)
+
+        logger.info(f"Campo '{col_name}' actualizado desde panel izquierdo: '{current_value}' -> '{new_value}'")
 
     def open_catalog_manager(self, catalog_key):
         if catalog_key not in self.catalog_fields:
