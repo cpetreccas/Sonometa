@@ -92,7 +92,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Sonometa v0.05 - Audio Tag Suite")
+        self.title("Sonometa v0.06 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
 
@@ -112,6 +112,10 @@ class App(ctk.CTk):
         self._multi_entries: dict = {}    # attr_name → CTkComboBox (modo selección múltiple)
         self.log_window = None
         self.log_textbox = None
+        self.search_var = tk.StringVar()
+        self._search_trace_id = None
+        self._search_visible = False
+        self._all_tree_items = []
         self.catalog_fields = ("Genre", "Album", "Publisher")
         self.catalog_labels = {
             "Genre": "Géneros",
@@ -192,6 +196,7 @@ class App(ctk.CTk):
         # El panel de etiquetas se crea primero para reservar el ancho lateral.
         self.setup_tag_panel()
         self.setup_treeview()
+        self.setup_search_bar()
 
         self.frame_bottom = ctk.CTkFrame(self)
         self.frame_bottom.pack(fill="x", padx=15, pady=(5, 10))
@@ -213,6 +218,9 @@ class App(ctk.CTk):
         self.bind("<F5>", lambda e: self.refresh_folder())
         self.bind("<Control-q>", lambda e: self.on_close())
         self.bind("<Control-a>", lambda e: self.select_all_rows())
+        self.bind("<Control-f>", self.toggle_search_bar)
+        self.bind("<Control-F>", self.toggle_search_bar)
+        self.bind("<Escape>", self.on_escape_pressed)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         logger.info("Aplicación Sonometa iniciada correctamente.")
@@ -468,6 +476,7 @@ class App(ctk.CTk):
         self.menu_acciones = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1)
         self.menu_acciones.add_command(label="Procesar con Discogs", command=self.process_discogs_data)
         self.menu_acciones.add_command(label="Seleccionar todo  (Ctrl+A)", command=self.select_all_rows)
+        self.menu_acciones.add_command(label="Buscar en la lista  (Ctrl+F)", command=self.toggle_search_bar)
         self.menu_acciones.add_separator()
         self.menu_acciones.add_command(label="Limpiar todo", command=self.clear_all_loaded_metadata)
 
@@ -955,6 +964,117 @@ class App(ctk.CTk):
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Configure>", lambda _e: self._update_tree_scrollbars(), add="+")
         self.after_idle(self._update_tree_scrollbars)
+
+    def setup_search_bar(self):
+        self.frame_search = ctk.CTkFrame(self)
+
+        self.entry_search = ctk.CTkEntry(
+            self.frame_search,
+            textvariable=self.search_var,
+            placeholder_text="Buscar por archivo, artista, titulo, album, genero...",
+            height=30
+        )
+        self.entry_search.pack(side="left", fill="x", expand=True, padx=(10, 6), pady=6)
+
+        self.btn_close_search = ctk.CTkButton(
+            self.frame_search,
+            text="X",
+            width=32,
+            height=30,
+            fg_color="#374151",
+            hover_color="#1F2937",
+            command=self.hide_search_bar
+        )
+        self.btn_close_search.pack(side="right", padx=(0, 10), pady=6)
+
+        self.entry_search.bind("<Escape>", lambda _e: self.hide_search_bar() or "break")
+        self._search_trace_id = self.search_var.trace_add("write", self._on_search_text_changed)
+
+    def toggle_search_bar(self, event=None):
+        if self._search_visible:
+            self.hide_search_bar()
+        else:
+            self.show_search_bar()
+        return "break"
+
+    def show_search_bar(self):
+        if self._search_visible:
+            self.entry_search.focus_set()
+            return
+        self.frame_search.pack(fill="x", padx=15, pady=(0, 2), before=self.frame_bottom)
+        self._search_visible = True
+        self.entry_search.focus_set()
+        self.apply_search_filter()
+
+    def hide_search_bar(self):
+        if self._search_visible:
+            self.frame_search.pack_forget()
+            self._search_visible = False
+        if self.search_var.get():
+            self.search_var.set("")
+        self.apply_search_filter()
+        self.focus_set()
+
+    def on_escape_pressed(self, event=None):
+        if self._search_visible:
+            self.hide_search_bar()
+            return "break"
+        return None
+
+    def _on_search_text_changed(self, *_args):
+        if self._search_visible:
+            self.apply_search_filter()
+
+    @staticmethod
+    def _build_row_search_text(values):
+        searchable_indexes = (0, 1, 2, 3, 4, 5, 6, 7)
+        parts = []
+        for idx in searchable_indexes:
+            if idx < len(values) and values[idx] is not None:
+                parts.append(str(values[idx]))
+        return " ".join(parts).lower()
+
+    def _sync_all_tree_items(self):
+        existing_ids = [row_id for row_id in self._all_tree_items if self.tree.exists(row_id)]
+        for row_id in self.tree.get_children(""):
+            if row_id not in existing_ids:
+                existing_ids.append(row_id)
+        self._all_tree_items = existing_ids
+
+    def _retag_visible_rows(self):
+        for index, row_id in enumerate(self.tree.get_children("")):
+            tag = "even" if index % 2 == 0 else "odd"
+            self.tree.item(row_id, tags=(tag,))
+
+    def apply_search_filter(self):
+        self._sync_all_tree_items()
+        query = self.search_var.get().strip().lower()
+
+        matching_rows = []
+        for row_id in self._all_tree_items:
+            if not self.tree.exists(row_id):
+                continue
+            values = self.tree.item(row_id, "values")
+            if not query or query in self._build_row_search_text(values):
+                matching_rows.append(row_id)
+
+        current_rows = self.tree.get_children("")
+        if current_rows:
+            self.tree.detach(*current_rows)
+
+        for row_id in matching_rows:
+            if self.tree.exists(row_id):
+                self.tree.reattach(row_id, "", "end")
+
+        self._retag_visible_rows()
+
+        visible_set = set(self.tree.get_children(""))
+        selected_visible = [row_id for row_id in self.tree.selection() if row_id in visible_set]
+        self.tree.selection_set(selected_visible)
+
+        self._refresh_process_button_text(len(selected_visible))
+        self.on_row_select(None)
+        self._update_tree_scrollbars()
 
     def _on_tree_y_scroll(self, first, last):
         self._update_scrollbar(self.vsb, first, last, side="right", fill="y")
@@ -1446,18 +1566,9 @@ class App(ctk.CTk):
                     )
 
             self.tree.item(row_id, values=values)
-
-            # Si ya tiene carátula, se omite la búsqueda en Discogs
-            if self.row_has_cover(row_id):
-                logger.info(f"Se omite la búsqueda de Discogs para '{new_filename}' porque ya tiene carátula.")
-                if metadata_changes:
-                    logger.info(f"Metadatos desde nombre -> {' | '.join(metadata_changes)}")
-                else:
-                    logger.info("Metadatos desde nombre -> sin cambios")
-                processed += 1
-                self.progress_bar.set(processed / total_files)
-                self.update_idletasks()
-                continue
+            already_has_cover = self.row_has_cover(row_id)
+            if already_has_cover:
+                logger.info(f"Se omite solo la descarga de carátula para '{new_filename}' porque ya tiene una incrustada.")
 
             # --- PASO 3: Búsqueda de metadatos adicionales en Discogs (Año y Carátula) ---
             query_term = self.build_discogs_query(
@@ -1478,7 +1589,10 @@ class App(ctk.CTk):
                 values[7] = str(year)
                 self.save_single_tag(file_path, "Year", str(year))
 
-            if cover_url:
+            if already_has_cover:
+                values[8] = "Sí"
+                self.update_row_cover_status(row_id, "Sí")
+            elif cover_url:
                 logger.info(f"Descargando carátula del vinilo desde: {cover_url}")
                 image_data = self.download_image_bytes(cover_url)
                 if image_data:
@@ -1899,7 +2013,7 @@ class App(ctk.CTk):
             multi_widget.pack(fill="x")
 
         self._multi_select_mode = True
-        self.display_multi_cover_placeholder()
+        self.display_multi_cover_placeholder(selected_rows=selected_rows)
 
     def _exit_multi_mode(self):
         """Restaura el panel al modo de selección única."""
@@ -1963,9 +2077,12 @@ class App(ctk.CTk):
                 f"Campo '{field_name}' aplicado a {updated} archivo(s) seleccionado(s): '{new_value}'"
             )
 
-    def display_multi_cover_placeholder(self):
+    def display_multi_cover_placeholder(self, selected_rows=None):
         """Muestra el placeholder de carátula para modo selección múltiple."""
-        self.label_cover.configure(image="", text="Mantener carátulas", text_color="gray")
+        selected_rows = list(selected_rows or self.tree.selection())
+        has_any_cover = any(self.row_has_cover(row_id) for row_id in selected_rows)
+        text = "Mantener carátulas" if has_any_cover else "Sin carátula"
+        self.label_cover.configure(image="", text=text, text_color="gray")
         self.label_cover.image = None
 
     def _refresh_process_button_text(self, selected_count=None):
@@ -2098,6 +2215,7 @@ class App(ctk.CTk):
         if ok_count and not self._multi_select_mode:
             self.display_cover_art(image_bytes)
         elif ok_count and self._multi_select_mode:
+            self.display_multi_cover_placeholder(selected_rows=self.tree.selection())
             logger.info(f"Carátula pegada a {ok_count} archivo(s) seleccionado(s).")
 
         if ok_count == 0:
@@ -2156,7 +2274,7 @@ class App(ctk.CTk):
         # Actualizar panel de carátula
         if ok_count:
             if self._multi_select_mode:
-                self.display_multi_cover_placeholder()
+                self.display_multi_cover_placeholder(selected_rows=self.tree.selection())
                 logger.info(f"Carátula eliminada de {ok_count} archivo(s) seleccionado(s).")
             else:
                 self.label_cover.configure(image="", text="Sin carátula")
@@ -2382,6 +2500,7 @@ class App(ctk.CTk):
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
+        self._all_tree_items = []
 
         for widget in self.tag_entries.values():
             if isinstance(widget, ctk.CTkComboBox):
@@ -2702,6 +2821,7 @@ class App(ctk.CTk):
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
+        self._all_tree_items = []
 
         logger.info(f"Escaneando carpeta: {folder}")
         count = 0
@@ -2738,6 +2858,9 @@ class App(ctk.CTk):
                     count += 1
 
         self.refresh_catalog_comboboxes()
+        self._all_tree_items = list(self.tree.get_children(""))
+        if self._search_visible:
+            self.apply_search_filter()
         logger.info(f"Se encontraron {count} archivo(s) de audio compatibles.")
 
     def extract_cover_bytes(self, file_path):
@@ -2858,7 +2981,7 @@ class App(ctk.CTk):
     def show_about_dialog(self):
         self.show_themed_dialog(
             "Acerca de Sonometa",
-            "Sonometa v0.05 - Audio Tag Suite\n\n"
+            "Sonometa v0.06 - Audio Tag Suite\n\n"
             "Herramienta avanzada para la automatización y gestión de metadatos de audio.\n"
             "Integración con API Discogs para vinilos y soporte nativo de ID3, FLAC y MP4.",
             level="info"
@@ -2898,10 +3021,11 @@ class App(ctk.CTk):
             ("Ctrl+O", "Seleccionar carpeta"),
             ("F5", "Actualizar lista de archivos"),
             ("Ctrl+A", "Seleccionar todo"),
+            ("Ctrl+F", "Mostrar/Ocultar barra de búsqueda"),
             ("Ctrl+Q", "Cerrar aplicación"),
             ("Doble-clic", "Editar celda en tabla"),
             ("Enter", "Guardar edición de celda"),
-            ("Esc", "Cancelar edición de celda"),
+            ("Esc", "Cerrar búsqueda activa"),
         ]
 
         for shortcut, description in shortcuts:
