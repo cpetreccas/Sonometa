@@ -15,6 +15,8 @@ import customtkinter as ctk
 from customtkinter import filedialog
 from PIL import Image, ImageTk
 
+from audio_manager import AudioManager
+
 AUDIO_EXTENSIONS = ('.mp3', '.flac', '.m4a', '.aac', '.wav', '.ogg', '.wma', '.aiff')
 
 
@@ -91,6 +93,9 @@ class App(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+
+        # Lógica de negocio de audio delegada a AudioManager (SRP)
+        self.audio_manager = AudioManager()
 
         self.title("Sonometa v0.06 - Audio Tag Suite")
         self.geometry("1180x780")
@@ -1597,7 +1602,7 @@ class App(ctk.CTk):
                 image_data = self.download_image_bytes(cover_url)
                 if image_data:
                     image_data = self.normalize_cover_image_bytes(image_data)
-                    if self.embed_cover_art_verified(file_path, image_data):
+                    if self.audio_manager.embed_cover_art_verified(file_path, image_data):
                         values[8] = "Sí"
                         logger.info(f"Carátula incrustada con éxito en: {new_filename}")
                         self.display_cover_art(image_data)
@@ -1673,39 +1678,8 @@ class App(ctk.CTk):
 
     @staticmethod
     def normalize_cover_image_bytes(image_bytes):
-        try:
-            image = Image.open(io.BytesIO(image_bytes))
-            if image.mode not in ("RGB", "RGBA"):
-                image = image.convert("RGB")
-            elif image.mode == "RGBA":
-                image = image.convert("RGB")
+        return AudioManager.normalize_cover_image_bytes(image_bytes)
 
-            output = io.BytesIO()
-            image.save(output, format="JPEG", quality=95, optimize=True)
-            return output.getvalue()
-        except Exception:
-            return image_bytes
-
-    def embed_cover_art_verified(self, file_path, image_bytes):
-        """Incrusta la carátula y confirma que quedó escrita en el archivo."""
-        if not self.embed_cover_art(file_path, image_bytes):
-            logger.error(f"Falló la incrustación de la carátula en: {os.path.basename(file_path)}")
-            return False
-
-        try:
-            persisted = self.extract_cover_bytes(file_path)
-            if persisted:
-                logger.info(
-                    f"Verificación post-guardado OK en {os.path.basename(file_path)} "
-                    f"({len(persisted)} bytes leídos desde disco)"
-                )
-                return True
-
-            logger.error(f"Verificación post-guardado FALLIDA: no se detectó carátula en {os.path.basename(file_path)}")
-        except Exception as e:
-            logger.error(f"Error verificando la carátula guardada en {os.path.basename(file_path)}: {str(e)}")
-
-        return False
 
     def search_discogs_api(self, query):
         try:
@@ -1768,162 +1742,8 @@ class App(ctk.CTk):
         return None
 
 
-    def embed_cover_art(self, file_path, image_bytes):
-        from mutagen.id3 import ID3, APIC, ID3NoHeaderError
-        from mutagen.wave import WAVE
-        from mutagen.flac import FLAC, Picture
-        from mutagen.mp4 import MP4, MP4Cover
-        from mutagen import File as MutagenFile
-
-        ext = os.path.splitext(file_path)[1].lower()
-        try:
-            if ext in (".mp3", ".wav"):
-                audio_wav = None
-                is_new_id3 = False
-                if ext == ".wav":
-                    audio_wav = WAVE(file_path)
-                    if audio_wav.tags is None:
-                        audio_wav.add_tags()
-                    audio_tags = audio_wav.tags
-                else:
-                    try:
-                        audio_tags = ID3(file_path)
-                    except ID3NoHeaderError:
-                        audio_tags = ID3()
-                        is_new_id3 = True
-
-                audio_tags.delall("APIC")
-                audio_tags.add(APIC(
-                    encoding=3,
-                    mime="image/jpeg",
-                    type=3,
-                    desc="Cover",
-                    data=image_bytes
-                ))
-
-                if ext == ".wav" and audio_wav is not None:
-                    audio_wav.save()
-                else:
-                    # Especificar v2_version=4 es crítico para asegurar que se escriben correctamente los tags
-                    if is_new_id3:
-                        audio_tags.save(file_path, v2_version=4)
-                    else:
-                        audio_tags.save(file_path)
-
-            elif ext == ".flac":
-                audio = FLAC(file_path)
-                image = Picture()
-                image.type = 3
-                image.mime = "image/jpeg"
-                image.desc = "Cover"
-                image.data = image_bytes
-                audio.clear_pictures()
-                audio.add_picture(image)
-                audio.save()
-
-            elif ext in (".m4a", ".aac", ".mp4"):
-                audio = MP4(file_path)
-                audio["covr"] = [MP4Cover(image_bytes, imageformat=MP4Cover.FORMAT_JPEG)]
-                audio.save()
-
-            else:
-                logger.warning(
-                    f"Formato no soportado para incrustar carátula de forma fiable: {os.path.basename(file_path)}"
-                )
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error incrustando la carátula en {os.path.basename(file_path)}: {str(e)}")
-            return False
-
-
     def save_single_tag(self, file_path, field_name, new_value):
-        from mutagen.id3 import ID3, TIT2, TPE1, TPE4, TALB, TCON, TPUB, TDRC, ID3NoHeaderError
-        from mutagen.wave import WAVE
-        from mutagen import File as MutagenFile
-
-        ext = os.path.splitext(file_path)[1].lower()
-
-        try:
-            if ext in (".mp3", ".wav"):
-                audio_wav = None
-                is_new_id3 = False
-                if ext == ".wav":
-                    audio_wav = WAVE(file_path)
-                    if audio_wav.tags is None:
-                        audio_wav.add_tags()
-                    audio_tags = audio_wav.tags
-                else:
-                    try:
-                        audio_tags = ID3(file_path)
-                    except ID3NoHeaderError:
-                        audio_tags = ID3()
-                        is_new_id3 = True
-
-                frame_map = {
-                    "Title": TIT2,
-                    "Artist": TPE1,
-                    "MixArtist": TPE4,
-                    "Album": TALB,
-                    "Genre": TCON,
-                    "Publisher": TPUB,
-                    "Year": TDRC
-                }
-
-                frame_cls = frame_map.get(field_name)
-                if not frame_cls:
-                    return
-
-                if new_value:
-                    audio_tags.add(frame_cls(encoding=3, text=str(new_value)))
-                else:
-                    frame_id = frame_cls.__name__
-                    audio_tags.delall(frame_id)
-
-                if ext == ".wav" and audio_wav is not None:
-                    audio_wav.save()
-                else:
-                    # Especificar v2_version=4 es crítico para asegurar que se escriben correctamente los tags
-                    if is_new_id3:
-                        audio_tags.save(file_path, v2_version=4)
-                    else:
-                        audio_tags.save(file_path)
-
-            else:
-                tag_map = {
-                    "Title": "title",
-                    "Artist": "artist",
-                    "MixArtist": "mixartist",
-                    "Album": "album",
-                    "Genre": "genre",
-                    "Publisher": "organization",
-                    "Year": "date"
-                }
-
-                mutagen_key = tag_map.get(field_name)
-                if not mutagen_key:
-                    return
-
-                audio = MutagenFile(file_path, easy=True)
-                if audio is None:
-                    return
-
-                if audio.tags is None:
-                    audio.add_tags()
-
-                if new_value:
-                    audio[mutagen_key] = [str(new_value)]
-                else:
-                    audio.pop(mutagen_key, None)
-
-                audio.save()
-
-            logger.info(f"Guardado '{field_name}' en: {os.path.basename(file_path)}")
-
-        except Exception as e:
-            logger.error(f"Error al guardar etiqueta '{field_name}': {str(e)}")
+        self.audio_manager.save_single_tag(file_path, field_name, new_value)
 
     def on_row_select(self, event):
         selected = self.tree.selection()
@@ -2099,7 +1919,7 @@ class App(ctk.CTk):
         if isinstance(file_path_or_bytes, (bytes, bytearray)):
             cover_data = file_path_or_bytes
         elif isinstance(file_path_or_bytes, str) and os.path.exists(file_path_or_bytes):
-            cover_data = self.extract_cover_bytes(file_path_or_bytes)
+            cover_data = self.audio_manager.extract_cover_bytes(file_path_or_bytes)
 
         if cover_data:
             try:
@@ -2205,7 +2025,7 @@ class App(ctk.CTk):
             file_path = self.file_paths_map.get(row_id)
             if not file_path or not os.path.exists(file_path):
                 continue
-            if self.embed_cover_art(file_path, image_bytes):
+            if self.audio_manager.embed_cover_art(file_path, image_bytes):
                 self.update_row_cover_status(row_id, "Sí")
                 logger.info(f"Carátula pegada desde portapapeles e incrustada en: {os.path.basename(file_path)}")
                 ok_count += 1
@@ -2281,110 +2101,13 @@ class App(ctk.CTk):
                 self.label_cover.image = None
 
     def _strip_cover_tags(self, file_path):
-        """Borra todos los tags de portada del archivo de audio."""
-        from mutagen.id3 import ID3, ID3NoHeaderError
-        from mutagen.wave import WAVE
-        from mutagen.flac import FLAC
-        from mutagen.mp4 import MP4
-        from mutagen import File as MutagenFile
-
-        ext = os.path.splitext(file_path)[1].lower()
-
-        if ext == ".mp3":
-            try:
-                tags = ID3(file_path)
-            except ID3NoHeaderError:
-                return
-            tags.delall("APIC")
-            tags.save(file_path)
-
-        elif ext == ".wav":
-            audio = WAVE(file_path)
-            if audio.tags:
-                audio.tags.delall("APIC")
-                audio.save()
-
-        elif ext == ".flac":
-            audio = FLAC(file_path)
-            audio.clear_pictures()
-            audio.save()
-
-        elif ext in (".m4a", ".aac", ".mp4"):
-            audio = MP4(file_path)
-            audio.pop("covr", None)
-            audio.save()
-
-        else:
-            audio = MutagenFile(file_path)
-            if audio and hasattr(audio, "tags") and audio.tags is not None:
-                for key in list(audio.tags.keys()):
-                    if "APIC" in key or "covr" in key or "PIC" in key:
-                        del audio.tags[key]
-                audio.save()
+        self.audio_manager.strip_cover_tags(file_path)
 
     def clear_audio_file_metadata(self, file_path):
-        """Elimina todos los metadatos del archivo de audio, conservando solo el nombre del fichero."""
-        from mutagen.id3 import ID3, ID3NoHeaderError
-        from mutagen.wave import WAVE
-        from mutagen.flac import FLAC
-        from mutagen.mp4 import MP4
-        from mutagen.aiff import AIFF
-        from mutagen import File as MutagenFile
-
-        ext = os.path.splitext(file_path)[1].lower()
-
-        try:
-            if ext == ".mp3":
-                try:
-                    ID3(file_path).delete(file_path)
-                except ID3NoHeaderError:
-                    pass
-
-            elif ext == ".wav":
-                audio = WAVE(file_path)
-                if audio.tags is not None:
-                    audio.delete()
-
-            elif ext == ".flac":
-                audio = FLAC(file_path)
-                if getattr(audio, "pictures", None):
-                    audio.clear_pictures()
-                    audio.save()
-                if audio.tags is not None:
-                    audio.delete()
-
-            elif ext in (".m4a", ".aac", ".mp4"):
-                audio = MP4(file_path)
-                if audio.tags is not None:
-                    audio.delete()
-
-            elif ext == ".aiff":
-                audio = AIFF(file_path)
-                if audio.tags is not None:
-                    audio.delete()
-
-            else:
-                audio = MutagenFile(file_path)
-                if audio is None:
-                    logger.warning(
-                        f"No se pudieron identificar los metadatos para limpiar: {os.path.basename(file_path)}"
-                    )
-                    return False
-
-                if hasattr(audio, "delete"):
-                    audio.delete()
-                elif hasattr(audio, "tags") and audio.tags is not None:
-                    audio.tags.clear()
-                    audio.save()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error al limpiar metadatos de {os.path.basename(file_path)}: {str(e)}")
-            return False
+        return self.audio_manager.clear_audio_file_metadata(file_path)
 
     def _update_row_from_file_metadata(self, row_id, file_path):
-        metadata = self.extract_metadata(file_path, os.path.basename(file_path))
+        metadata = self.audio_manager.extract_metadata(file_path, os.path.basename(file_path))
         metadata["Album"] = self.normalize_catalog_text(metadata.get("Album", ""))
         metadata["Genre"] = self.normalize_catalog_text(metadata.get("Genre", ""))
         metadata["Publisher"] = self.normalize_catalog_text(metadata.get("Publisher", ""))
@@ -2830,7 +2553,7 @@ class App(ctk.CTk):
             for file in files:
                 if file.lower().endswith(AUDIO_EXTENSIONS):
                     file_path = os.path.join(root, file)
-                    metadata = self.extract_metadata(file_path, file)
+                    metadata = self.audio_manager.extract_metadata(file_path, file)
 
                     metadata["Album"] = self.normalize_catalog_text(metadata.get("Album", ""))
                     metadata["Genre"] = self.normalize_catalog_text(metadata.get("Genre", ""))
@@ -2863,82 +2586,6 @@ class App(ctk.CTk):
             self.apply_search_filter()
         logger.info(f"Se encontraron {count} archivo(s) de audio compatibles.")
 
-    def extract_cover_bytes(self, file_path):
-        from mutagen import File as MutagenFile
-        try:
-            audio = MutagenFile(file_path)
-            if audio is None:
-                return None
-
-            if hasattr(audio, 'tags') and audio.tags:
-                for tag_key in audio.tags.keys():
-                    if tag_key.startswith("APIC") or tag_key.startswith("PIC"):
-                        return audio.tags[tag_key].data
-
-            if hasattr(audio, 'pictures') and audio.pictures:
-                return audio.pictures[0].data
-
-            if "covr" in audio:
-                covers = audio["covr"]
-                if covers:
-                    return bytes(covers[0])
-
-        except Exception:
-            pass
-
-        return None
-
-    def extract_metadata(self, file_path, filename):
-        from mutagen.wave import WAVE
-        from mutagen import File as MutagenFile
-
-        data = {
-            "Filename": filename,
-            "Title": "",
-            "Artist": "",
-            "MixArtist": "",
-            "Album": "",
-            "Genre": "",
-            "Publisher": "",
-            "Year": "",
-            "Cover": "No"
-        }
-
-        try:
-            ext = os.path.splitext(file_path)[1].lower()
-
-            if ext == ".wav":
-                audio = WAVE(file_path)
-                if audio.tags:
-                    data["Title"] = str(audio.tags.get("TIT2", ""))
-                    data["Artist"] = str(audio.tags.get("TPE1", ""))
-                    data["MixArtist"] = str(audio.tags.get("TPE4", ""))
-                    data["Album"] = str(audio.tags.get("TALB", ""))
-                    data["Genre"] = str(audio.tags.get("TCON", ""))
-                    data["Publisher"] = str(audio.tags.get("TPUB", ""))
-                    data["Year"] = str(audio.tags.get("TDRC", ""))
-            else:
-                audio = MutagenFile(file_path, easy=True)
-                if audio is not None:
-                    def get_tag(tag_name):
-                        val = audio.get(tag_name, [""])
-                        return val[0] if val else ""
-
-                    data["Title"] = get_tag("title")
-                    data["Artist"] = get_tag("artist")
-                    data["MixArtist"] = get_tag("mixartist")
-                    data["Album"] = get_tag("album")
-                    data["Genre"] = get_tag("genre")
-                    data["Publisher"] = get_tag("organization") or get_tag("publisher")
-                    data["Year"] = get_tag("date") or get_tag("year")
-
-            if self.extract_cover_bytes(file_path):
-                data["Cover"] = "Sí"
-
-        except Exception as e:
-            logger.error(f"Error extrayendo metadatos de {filename}: {str(e)}")
-
-        return data
 
     def show_logs_dialog(self):
         if self.log_window is not None and self.log_window.winfo_exists():
