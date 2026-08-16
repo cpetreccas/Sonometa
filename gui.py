@@ -221,11 +221,26 @@ class App(ctk.CTk):
         LOWER_WORDS_PAR = {'remix', 'mix', 'rework', 'edit', 'side'}
         LOWER_WORDS_PREFIX = {'feat.', 'feat', 'ft.', 'ft', 'pres.', 'pres', 'presents'}
 
+        dotted_initials_pattern = re.compile(r"^([A-Za-z](?:\.[A-Za-z])+\.?)([\.,;:!?])?$")
+
+        def format_word(word, lower_words=None, force_lower=False):
+            # Mantener siglas con iniciales separadas por puntos (T.N.T., A.B.C)
+            dotted_match = dotted_initials_pattern.match(word)
+            if dotted_match:
+                suffix = dotted_match.group(2) or ""
+                return f"{dotted_match.group(1).upper()}{suffix}"
+
+            if lower_words and word.lower() in lower_words:
+                return word.lower()
+            if force_lower:
+                return word.lower()
+            return word.capitalize()
+
         def format_parentheses(match):
             content = match.group(1).strip()
             words = content.split()
             formatted_words = [
-                w.lower() if w.lower() in LOWER_WORDS_PAR else w.capitalize()
+                format_word(w, lower_words=LOWER_WORDS_PAR)
                 for w in words
             ]
             return f"({' '.join(formatted_words)})"
@@ -241,13 +256,13 @@ class App(ctk.CTk):
             words = name.strip().split()
             if not words:
                 return filename
-            formatted = words[0].capitalize() + (" " + " ".join(w.lower() for w in words[1:]) if len(words) > 1 else "")
+            formatted = format_word(words[0]) + (" " + " ".join(format_word(w, force_lower=True) for w in words[1:]) if len(words) > 1 else "")
             return f"{formatted}{ext}"
 
         # 2. Formatear el Prefijo (Intérprete): ignorar mayúsculas en 'feat.', 'pres.', etc.
         prefix_words = prefix.strip().split()
         formatted_prefix_words = [
-            w.lower() if w.lower() in LOWER_WORDS_PREFIX else w.capitalize()
+            format_word(w, lower_words=LOWER_WORDS_PREFIX)
             for w in prefix_words
         ]
         formatted_prefix = " ".join(formatted_prefix_words)
@@ -255,8 +270,11 @@ class App(ctk.CTk):
         # 3. Formatear el Sufijo (Título)
         suffix_words = suffix.strip().split()
         if suffix_words:
-            first_word = suffix_words[0].capitalize()
-            rest_words = [w if w.startswith("(") or w.endswith(")") else w.lower() for w in suffix_words[1:]]
+            first_word = format_word(suffix_words[0])
+            rest_words = [
+                w if w.startswith("(") or w.endswith(")") else format_word(w, force_lower=True)
+                for w in suffix_words[1:]
+            ]
             formatted_suffix = " ".join([first_word] + rest_words)
         else:
             formatted_suffix = ""
@@ -686,6 +704,26 @@ class App(ctk.CTk):
             border_width=1
         )
         self.label_cover.pack(padx=5, pady=5)
+
+        # Menú contextual sobre la carátula (clic derecho)
+        self._cover_context_menu = tk.Menu(
+            self, tearoff=0,
+            bg="#252526", fg="#FFFFFF",
+            activebackground=self.CORP_COLOR, activeforeground="#FFFFFF",
+            bd=1
+        )
+        self._cover_context_menu.add_command(
+            label="📋  Pegar imagen desde el portapapeles",
+            command=self.paste_cover_from_clipboard
+        )
+        self._cover_context_menu.add_separator()
+        self._cover_context_menu.add_command(
+            label="🗑  Eliminar carátula",
+            command=self.remove_cover_art
+        )
+
+        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
+        self.label_cover.bind(btn_right, self._show_cover_context_menu)
 
         logo3_path = get_resource_path("logo_blanco.png")
         btn_icon = None
@@ -1151,6 +1189,16 @@ class App(ctk.CTk):
                 entry.set(match)
             return "break"
 
+        def clear_combo_value(evt=None):
+            if col_name not in managed_grid_fields:
+                return
+            combo_type_state["buffer"] = ""
+            combo_type_state["matches"] = []
+            combo_type_state["match_idx"] = 0
+            entry.set("")
+            save_edit()
+            return "break"
+
         def on_focus_out(evt=None):
             def commit_if_closed():
                 # Si el desplegable sigue abierto, no cerrar todavía (permite seleccionar).
@@ -1173,6 +1221,9 @@ class App(ctk.CTk):
             entry.bind("<space>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
             entry.bind("<Down>", lambda _e: on_combo_cycle(forward=True))
             entry.bind("<Up>", lambda _e: on_combo_cycle(forward=False))
+            entry.bind("<Delete>", clear_combo_value)
+            entry.bind("<KP_Delete>", clear_combo_value)
+            entry.bind("<BackSpace>", clear_combo_value)
         entry.bind("<FocusOut>", on_focus_out)
         self.cell_entry = entry
 
@@ -1223,6 +1274,34 @@ class App(ctk.CTk):
 
             values = list(self.tree.item(row_id, "values"))
 
+            # Validar campos de catálogo en cada fila antes de procesar.
+            catalog_fields = (("Album", 4), ("Genre", 5), ("Publisher", 6))
+            invalid_catalog_fields = []
+            for field_name, col_index in catalog_fields:
+                if col_index >= len(values):
+                    continue
+                current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
+                if not current_value:
+                    continue
+
+                normalized_value = self.normalize_catalog_text(current_value)
+                allowed_values = {
+                    self.normalize_catalog_text(v)
+                    for v in self.catalog_values.get(field_name, [])
+                    if str(v).strip()
+                }
+                if normalized_value not in allowed_values:
+                    values[col_index] = ""
+                    self.save_single_tag(file_path, field_name, "")
+                    invalid_catalog_fields.append(field_name)
+
+            if invalid_catalog_fields:
+                self.tree.item(row_id, values=values)
+                logger.info(
+                    f"Se limpiaron campos fuera de catálogo en '{os.path.basename(file_path)}': "
+                    f"{', '.join(invalid_catalog_fields)}"
+                )
+
             # --- PASO 1: Formatear y Renombrar archivo ---
             old_filename = os.path.basename(file_path)
             new_filename = self.format_filename_pattern(old_filename)
@@ -1240,14 +1319,6 @@ class App(ctk.CTk):
                     logger.info(f"Renombrado archivo: '{old_filename}' -> '{new_filename}'")
                 except Exception as e:
                     logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
-
-            # Si ya tiene carátula, se omite la búsqueda en Discogs
-            if self.row_has_cover(row_id):
-                logger.info(f"Se omite la búsqueda de Discogs para '{new_filename}' porque ya tiene carátula.")
-                processed += 1
-                self.progress_bar.set(processed / total_files)
-                self.update_idletasks()
-                continue
 
             # --- PASO 2: Extraer Intérprete, Título y MIXARTIST desde el nombre ---
             clean_name = os.path.splitext(new_filename)[0]
@@ -1272,17 +1343,37 @@ class App(ctk.CTk):
                 artist_parsed = parts[0].strip()
                 title_parsed = parts[1].strip()
 
-            if artist_parsed:
-                values[1] = artist_parsed
-                self.save_single_tag(file_path, "Artist", artist_parsed)
+            metadata_changes = []
+            metadata_mappings = (
+                (1, "Artist", "Autor", artist_parsed),
+                (2, "Title", "Título", title_parsed),
+                (3, "MixArtist", "Remix", mixartist_parsed),
+            )
+            for col_index, tag_name, label, new_value in metadata_mappings:
+                previous_value = str(values[col_index]).strip() if col_index < len(values) and values[col_index] is not None else ""
+                if col_index < len(values):
+                    values[col_index] = new_value
+                self.save_single_tag(file_path, tag_name, new_value)
 
-            if title_parsed:
-                values[2] = title_parsed
-                self.save_single_tag(file_path, "Title", title_parsed)
+                if previous_value != new_value:
+                    action = "vaciado" if not new_value else "actualizado"
+                    metadata_changes.append(
+                        f"{label} {action}: '{previous_value}' -> '{new_value}'"
+                    )
 
-            if mixartist_parsed:
-                values[3] = mixartist_parsed
-                self.save_single_tag(file_path, "MixArtist", mixartist_parsed)
+            self.tree.item(row_id, values=values)
+
+            # Si ya tiene carátula, se omite la búsqueda en Discogs
+            if self.row_has_cover(row_id):
+                logger.info(f"Se omite la búsqueda de Discogs para '{new_filename}' porque ya tiene carátula.")
+                if metadata_changes:
+                    logger.info(f"Metadatos desde nombre -> {' | '.join(metadata_changes)}")
+                else:
+                    logger.info("Metadatos desde nombre -> sin cambios")
+                processed += 1
+                self.progress_bar.set(processed / total_files)
+                self.update_idletasks()
+                continue
 
             # --- PASO 3: Búsqueda de metadatos adicionales en Discogs (Año y Carátula) ---
             query_term = self.build_discogs_query(
@@ -1325,7 +1416,11 @@ class App(ctk.CTk):
                 self.update_row_cover_status(row_id, "No")
 
             self.tree.item(row_id, values=values)
-            logger.info(f"Actualizado -> Autor: '{artist_parsed}', Título: '{title_parsed}', Remix: '{mixartist_parsed}', Año: '{year}'")
+            if metadata_changes:
+                logger.info(f"Metadatos desde nombre -> {' | '.join(metadata_changes)}")
+            else:
+                logger.info("Metadatos desde nombre -> sin cambios")
+            logger.info(f"Actualizado Discogs -> Año: '{year}'")
 
             processed += 1
             self.progress_bar.set(processed / total_files)
@@ -1486,6 +1581,7 @@ class App(ctk.CTk):
         try:
             if ext in (".mp3", ".wav"):
                 audio_wav = None
+                is_new_id3 = False
                 if ext == ".wav":
                     audio_wav = WAVE(file_path)
                     if audio_wav.tags is None:
@@ -1496,6 +1592,7 @@ class App(ctk.CTk):
                         audio_tags = ID3(file_path)
                     except ID3NoHeaderError:
                         audio_tags = ID3()
+                        is_new_id3 = True
 
                 audio_tags.delall("APIC")
                 audio_tags.add(APIC(
@@ -1509,7 +1606,11 @@ class App(ctk.CTk):
                 if ext == ".wav" and audio_wav is not None:
                     audio_wav.save()
                 else:
-                    audio_tags.save(file_path)
+                    # Especificar v2_version=4 es crítico para asegurar que se escriben correctamente los tags
+                    if is_new_id3:
+                        audio_tags.save(file_path, v2_version=4)
+                    else:
+                        audio_tags.save(file_path)
 
             elif ext == ".flac":
                 audio = FLAC(file_path)
@@ -1550,6 +1651,7 @@ class App(ctk.CTk):
         try:
             if ext in (".mp3", ".wav"):
                 audio_wav = None
+                is_new_id3 = False
                 if ext == ".wav":
                     audio_wav = WAVE(file_path)
                     if audio_wav.tags is None:
@@ -1560,6 +1662,7 @@ class App(ctk.CTk):
                         audio_tags = ID3(file_path)
                     except ID3NoHeaderError:
                         audio_tags = ID3()
+                        is_new_id3 = True
 
                 frame_map = {
                     "Title": TIT2,
@@ -1584,7 +1687,11 @@ class App(ctk.CTk):
                 if ext == ".wav" and audio_wav is not None:
                     audio_wav.save()
                 else:
-                    audio_tags.save(file_path)
+                    # Especificar v2_version=4 es crítico para asegurar que se escriben correctamente los tags
+                    if is_new_id3:
+                        audio_tags.save(file_path, v2_version=4)
+                    else:
+                        audio_tags.save(file_path)
 
             else:
                 tag_map = {
@@ -1622,6 +1729,7 @@ class App(ctk.CTk):
 
     def on_row_select(self, event):
         selected = self.tree.selection()
+        self._refresh_process_button_text(len(selected))
         if not selected:
             return
 
@@ -1643,6 +1751,14 @@ class App(ctk.CTk):
         file_path = self.file_paths_map.get(item_id)
         if file_path:
             self.display_cover_art(file_path)
+
+    def _refresh_process_button_text(self, selected_count=None):
+        if not hasattr(self, "btn_process"):
+            return
+        if selected_count is None:
+            selected_count = len(self.tree.selection())
+        button_text = "Procesar selección" if selected_count > 1 else "Procesar"
+        self.btn_process.configure(text=button_text)
 
     def display_cover_art(self, file_path_or_bytes):
         cover_data = None
@@ -1671,6 +1787,180 @@ class App(ctk.CTk):
 
         self.label_cover.configure(image="", text="Sin carátula")
         self.label_cover.image = None
+
+    # ------------------------------------------------------------------ #
+    #  Menú contextual de carátula                                         #
+    # ------------------------------------------------------------------ #
+
+    def _show_cover_context_menu(self, event):
+        """Despliega el menú contextual sobre la carátula."""
+        try:
+            self._cover_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._cover_context_menu.grab_release()
+
+    def paste_cover_from_clipboard(self):
+        """Obtiene imagen del portapapeles y la incrusta en el archivo seleccionado."""
+        try:
+            from PIL import ImageGrab
+            img = ImageGrab.grabclipboard()
+        except Exception as e:
+            logger.error(f"Error accediendo al portapapeles: {str(e)}")
+            self.show_themed_dialog(
+                "Error de portapapeles",
+                f"No se pudo leer el portapapeles:\n{str(e)}",
+                level="error"
+            )
+            return
+
+        if img is None:
+            self.show_themed_dialog(
+                "Portapapeles vacío",
+                "No hay ninguna imagen en el portapapeles.\n"
+                "Copia primero una imagen (Ctrl+C sobre ella).",
+                level="warning"
+            )
+            return
+
+        if not isinstance(img, Image.Image):
+            self.show_themed_dialog(
+                "Contenido no válido",
+                "El portapapeles no contiene una imagen válida.",
+                level="warning"
+            )
+            return
+
+        # Convertir a JPEG en memoria
+        image_bytes = self._pil_to_bytes(img)
+        if not image_bytes:
+            return
+
+        # Obtener archivo seleccionado
+        selected = self.tree.selection()
+        if not selected:
+            self.show_themed_dialog(
+                "Sin selección",
+                "Selecciona primero un archivo en la tabla.",
+                level="warning"
+            )
+            return
+
+        row_id = selected[0]
+        file_path = self.file_paths_map.get(row_id)
+        if not file_path or not os.path.exists(file_path):
+            self.show_themed_dialog(
+                "Archivo no encontrado",
+                "El archivo seleccionado ya no existe en disco.",
+                level="error"
+            )
+            return
+
+        # Incrustar en el archivo
+        if self.embed_cover_art(file_path, image_bytes):
+            self.display_cover_art(image_bytes)
+            self.update_row_cover_status(row_id, "Sí")
+            logger.info(
+                f"Carátula pegada desde portapapeles e incrustada en: "
+                f"{os.path.basename(file_path)}"
+            )
+        else:
+            self.show_themed_dialog(
+                "Error al guardar",
+                "No se pudo incrustar la carátula en el archivo.",
+                level="error"
+            )
+
+    @staticmethod
+    def _pil_to_bytes(img):
+        """Convierte un objeto PIL.Image a bytes JPEG."""
+        out = io.BytesIO()
+        rgb = img.convert("RGB") if img.mode not in ("RGB", "L") else img
+        rgb.save(out, format="JPEG", quality=95, optimize=True)
+        return out.getvalue()
+
+    def remove_cover_art(self):
+        """Elimina la carátula del archivo de audio seleccionado y actualiza la UI."""
+        selected = self.tree.selection()
+        if not selected:
+            self.show_themed_dialog(
+                "Sin selección",
+                "Selecciona primero un archivo en la tabla.",
+                level="warning"
+            )
+            return
+
+        row_id = selected[0]
+        file_path = self.file_paths_map.get(row_id)
+        if not file_path or not os.path.exists(file_path):
+            self.show_themed_dialog(
+                "Archivo no encontrado",
+                "El archivo seleccionado ya no existe en disco.",
+                level="error"
+            )
+            return
+
+        if not self.show_themed_dialog(
+            "Confirmar",
+            f"¿Eliminar la carátula de:\n{os.path.basename(file_path)}?",
+            level="warning",
+            is_confirm=True
+        ):
+            return
+
+        try:
+            self._strip_cover_tags(file_path)
+        except Exception as e:
+            logger.error(f"Error eliminando carátula de {os.path.basename(file_path)}: {str(e)}")
+            self.show_themed_dialog("Error", f"No se pudo eliminar la carátula:\n{str(e)}", level="error")
+            return
+
+        # Actualizar UI
+        self.label_cover.configure(image="", text="Sin carátula")
+        self.label_cover.image = None
+        self.update_row_cover_status(row_id, "No")
+        logger.info(f"Carátula eliminada de: {os.path.basename(file_path)}")
+
+    def _strip_cover_tags(self, file_path):
+        """Borra todos los tags de portada del archivo de audio."""
+        from mutagen.id3 import ID3, ID3NoHeaderError
+        from mutagen.wave import WAVE
+        from mutagen.flac import FLAC
+        from mutagen.mp4 import MP4
+        from mutagen import File as MutagenFile
+
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == ".mp3":
+            try:
+                tags = ID3(file_path)
+            except ID3NoHeaderError:
+                return
+            tags.delall("APIC")
+            tags.save(file_path)
+
+        elif ext == ".wav":
+            audio = WAVE(file_path)
+            if audio.tags:
+                audio.tags.delall("APIC")
+                audio.save()
+
+        elif ext == ".flac":
+            audio = FLAC(file_path)
+            audio.clear_pictures()
+            audio.save()
+
+        elif ext in (".m4a", ".aac", ".mp4"):
+            audio = MP4(file_path)
+            audio.pop("covr", None)
+            audio.save()
+
+        else:
+            audio = MutagenFile(file_path)
+            if audio and hasattr(audio, "tags") and audio.tags is not None:
+                for key in list(audio.tags.keys()):
+                    if "APIC" in key or "covr" in key or "PIC" in key:
+                        del audio.tags[key]
+                audio.save()
 
     def sort_by_column(self, col):
         data = [(self.tree.set(child, col), child) for child in self.tree.get_children('')]
@@ -1714,6 +2004,7 @@ class App(ctk.CTk):
         self.folder_path = ""
         self.label_folder.configure(text="Ninguna carpeta seleccionada", text_color="gray")
         self.progress_bar.set(0)
+        self._refresh_process_button_text(0)
         logger.info("Lista y estado limpiados.")
 
     def refresh_catalog_comboboxes(self):
@@ -2175,6 +2466,7 @@ class App(ctk.CTk):
         """Selecciona todas las filas del árbol de archivos."""
         all_items = self.tree.get_children()
         self.tree.selection_set(all_items)
+        self._refresh_process_button_text(len(all_items))
         logger.info(f"Seleccionados todos los {len(all_items)} archivo(s).")
 
     def show_keyboard_shortcuts_dialog(self):

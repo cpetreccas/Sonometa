@@ -1,208 +1,158 @@
-# Sonometa - Audio Tag Suite
+# Sonometa - Audio Tag Suite v0.04
 
-Sonometa es una aplicacion de escritorio en Python para organizar metadatos de archivos de audio, renombrar pistas y enriquecer tags con datos de Discogs (ano + caratula).
+Sonometa es una aplicación de escritorio en Python para organizar metadatos de audio, renombrar pistas y enriquecer tags con Discogs (año y carátula).
 
-Este documento describe el proyecto de forma funcional y tecnica, con foco en uso real y mantenimiento.
+Este README refleja el comportamiento actual implementado en `gui.py`.
 
-## 1. Que hace la aplicacion
+## 1) Funcionalidades principales
 
-- Escanea una carpeta de audio de forma recursiva.
-- Muestra archivos y metadatos en una tabla editable.
-- Permite editar tags por celda (doble clic).
-- Procesa en lote con Discogs:
-  - normaliza nombre de archivo,
-  - extrae artista/titulo/remix del nombre,
-  - consulta Discogs,
-  - guarda ano,
-  - descarga e incrusta caratula.
-- Muestra vista previa de caratula en la barra lateral.
-- Guarda historial de logs en memoria (max 5000 lineas).
+- Escaneo recursivo de carpetas con detección de formatos de audio compatibles.
+- Tabla principal editable con columnas: `Filename`, `Artist`, `Title`, `MixArtist`, `Album`, `Genre`, `Publisher`, `Year`, `Cover`.
+- Edición inline por celda con guardado directo en el archivo (mutagen).
+- Procesamiento por lotes con Discogs desde botón **Procesar**.
+- Vista previa de carátula (180x180) y menú contextual sobre la imagen.
+- Catálogos persistentes para `Album`, `Genre` y `Publisher`.
+- Configuración persistente del token de Discogs.
+- Logs en tiempo real (consola + ventana de historial).
 
-## 2. Modulos del proyecto
+## 2) Interfaz de usuario
 
-- `gui.py`  
-  Aplicacion principal (interfaz, lectura/escritura de tags, consulta Discogs, flujo de procesamiento).
+### Barra superior
+- **Seleccionar Carpeta** (`Ctrl+O`)
+- **Actualizar** (`F5`)
+- Ruta de la carpeta activa
 
-- `processor.py`  
-  Procesador alternativo/legacy con flujo similar por funcion (`procesar_carpeta`). Actualmente no se usa desde `gui.py`.
+### Panel lateral izquierdo
+- Campos editables: Intérprete, Título, Remix, Álbum, Año, Género, Etiqueta.
+- Carátula con vista previa.
+- Botón **Procesar**.
 
-- `icon_generator.py`  
-  Script de utilidad para generar variante del logo.
+### Tabla principal (derecha)
+- Ordenación asc/desc al hacer clic en cabeceras.
+- Doble clic para editar celdas.
+- `Cover` no se edita por celda (se gestiona desde Discogs o menú contextual de carátula).
 
-- `Sonometa.spec` y `gui.spec`  
-  Configuracion de PyInstaller para crear ejecutable Windows.
+### Barra inferior
+- Barra de progreso de procesamiento.
+- Estado de la última operación.
 
-## 3. Interfaz y experiencia de usuario
+### Menú superior
+- **Archivo**: seleccionar carpeta, actualizar, configuración token, cerrar.
+- **Acciones**: procesar, seleccionar todo, limpiar todo.
+- **Gestionar**: géneros, álbumes, etiquetas.
+- **Ayuda**: atajos, logs, acerca de.
 
-### 3.1 Barra superior
+## 3) Edición de celdas en el grid
 
-- **Seleccionar Carpeta**: abre dialogo para elegir carpeta.
-- **Actualizar**: vuelve a escanear la carpeta actual.
-- Etiqueta de ruta activa.
+- En `Album`, `Genre` y `Publisher` se usa `ttk.Combobox` con valores de catálogo.
+- En el resto de campos editables se usa `Entry`.
+- Navegación durante edición:
+  - `Enter`: guarda y baja a la siguiente fila (misma columna).
+  - `Shift+Enter`: guarda y sube a la fila anterior.
+  - `Tab`: guarda y avanza a la siguiente celda editable.
+  - `Shift+Tab`: guarda y vuelve a la celda editable anterior.
+- En combos de catálogo:
+  - búsqueda incremental al teclear,
+  - ciclo de coincidencias con `Up/Down`,
+  - `Delete`, `KP_Delete` o `BackSpace`: limpia toda la celda y guarda.
 
-### 3.2 Tabla principal (Treeview)
+## 4) Flujo del botón Procesar (Discogs)
 
-Columnas:
+Método principal: `App.process_discogs_data()`.
 
-1. Filename
-2. Artist
-3. Title
-4. MixArtist
-5. Album
-6. Genre
-7. Publisher
-8. Year
-9. Cover
+1. Determina el alcance:
+   - si hay selección, procesa solo filas seleccionadas,
+   - si no, procesa todas.
+2. Normaliza nombre (`format_filename_pattern`) y renombra archivo en disco si aplica.
+3. Extrae `Artist`, `Title` y `MixArtist` desde el nombre y los guarda en tags.
+4. Si la fila ya tiene carátula (`Cover = Sí`), omite búsqueda Discogs.
+5. Construye query y busca en `https://api.discogs.com/database/search` con filtro `format=Vinyl&type=release`.
+6. Si hay año, lo guarda (`Year`).
+7. Si hay URL de carátula:
+   - descarga bytes,
+   - normaliza imagen a JPEG,
+   - incrusta portada,
+   - verifica post-guardado leyendo de nuevo el archivo,
+   - marca `Cover = Sí` y refresca preview.
+8. Si no hay portada o falla, marca `Cover = No` y deja log explícito.
 
-Comportamiento:
+## 5) Menú contextual de carátula
 
-- Click en cabecera: orden asc/desc por columna.
-- Doble clic en celda: edicion inline (excepto `Filename` y `Cover`).
-- Al guardar edicion: se actualiza GUI y tambien el tag en archivo.
+Sobre la preview de carátula (panel izquierdo):
 
-### 3.3 Panel inferior de tags
+- Clic derecho (`<Button-3>`, en macOS `<Button-2>`) abre menú contextual.
+- **Pegar imagen desde el portapapeles**:
+  - usa `PIL.ImageGrab.grabclipboard()`,
+  - convierte a JPEG,
+  - incrusta en archivo seleccionado,
+  - actualiza preview y columna `Cover`.
+- **Eliminar carátula**:
+  - pide confirmación,
+  - borra tags de portada del archivo,
+  - limpia preview,
+  - actualiza `Cover = No`.
 
-Panel ubicado debajo del grid de archivos con diseño horizontal:
+## 6) Gestión de catálogos (Género/Álbum/Etiqueta)
 
-**Lado izquierdo:**
-- Preview de carátula (180x180 px)
+- Catálogos persistidos en `%APPDATA%\Sonometa\catalogos.json`.
+- Operaciones desde menú **Gestionar**:
+  - añadir valor,
+  - modificar valor (con soporte de fusión si ya existe),
+  - eliminar valor (vacía el campo en archivos afectados).
+- Normalización automática de texto: primera letra en mayúscula y resto en minúscula.
 
-**Lado derecho - Campos en 3 filas:**
-- **Fila 1**: Año
-- **Fila 2**: Intérprete, Título, Remix (3 campos lado a lado)
-- **Fila 3**: Album, Genero, Publisher (3 campos lado a lado)
-- **Botón Procesar** en la parte superior del panel derecho
+## 7) Configuración del token Discogs
 
-### 3.4 Barra inferior
+- Ruta de settings: `%APPDATA%\Sonometa\settings.json`.
+- Clave guardada: `discogs_token`.
+- Carga con `utf-8-sig` para tolerar BOM.
+- Fallback: variable de entorno `DISCOGS_TOKEN`.
+- Menú: **Archivo -> Configuración (Token Discogs)**.
 
-- Barra de progreso.
-- Estado actual (texto corto).
+## 8) Formatos soportados
 
-### 3.5 Menus
+### Archivos detectados al escanear
+- `.mp3`, `.flac`, `.m4a`, `.aac`, `.wav`, `.ogg`, `.wma`, `.aiff`
 
-- **Archivo**: seleccionar carpeta, actualizar, cerrar.
-- **Acciones**: procesar con Discogs, seleccionar todo, limpiar todo.
-- **Ayuda**: atajos de teclado, ver logs, acerca de.
+### Escritura de carátula (soporte fiable)
+- `mp3` / `wav`: ID3 `APIC`
+- `flac`: `Picture`
+- `m4a` / `aac` / `mp4`: `covr` (`MP4Cover`)
 
-### 3.6 Atajos de teclado
+## 9) Mapeo de tags
 
-- `Ctrl+O`: seleccionar carpeta
-- `F5`: actualizar
-- `Ctrl+A`: seleccionar todo
-- `Ctrl+Q`: cerrar app
+### MP3/WAV (ID3)
+- `Title -> TIT2`
+- `Artist -> TPE1`
+- `MixArtist -> TPE4`
+- `Album -> TALB`
+- `Genre -> TCON`
+- `Publisher -> TPUB`
+- `Year -> TDRC`
 
-## 4. Flujo detallado del boton "Procesar"
+### Otros formatos (easy tags)
+- `Title -> title`
+- `Artist -> artist`
+- `MixArtist -> mixartist`
+- `Album -> album`
+- `Genre -> genre`
+- `Publisher -> organization`
+- `Year -> date`
 
-Metodo principal: `App.process_discogs_data()` en `gui.py`.
+## 10) Logging
 
-### Paso 0: seleccionar alcance
+- Logger: `Sonometa`.
+- Salida dual: consola y GUI.
+- Historial en memoria: `deque(maxlen=5000)`.
+- Ventana de logs: **Ayuda -> Ver logs**.
 
-- Si hay filas seleccionadas, procesa solo esas.
-- Si no hay seleccion, procesa todas las filas cargadas.
-- Si no hay filas, muestra advertencia y termina.
+## 11) Instalación y ejecución
 
-### Paso 1: normalizar nombre y renombrar archivo
+### Requisitos
+- Python 3.10+
+- Windows (plataforma objetivo)
 
-Para cada archivo:
-
-1. Lee nombre actual.
-2. Aplica `format_filename_pattern()`:
-   - respeta palabras reservadas en minuscula para contextos de remix (`remix`, `mix`, `edit`, etc.),
-   - separa por `" - "` (o `"-"`),
-   - ajusta capitalizacion de artista y titulo.
-3. Si cambia el nombre, renombra fisicamente en disco.
-4. Actualiza mapa interno (`row_id -> file_path`) y columna `Filename`.
-
-### Paso 2: extraer tags desde el nombre
-
-- Quita extension.
-- Detecta contenido entre parentesis y lo guarda como `MixArtist`.
-- Separa artista/titulo por guion.
-- Guarda Artist, Title y MixArtist en tags del archivo con `save_single_tag()`.
-- Actualiza tabla en memoria.
-
-### Paso 3: preparar query y buscar en Discogs
-
-- Limpia ruido del nombre para mejorar matching:
-  - quita prefijos numericos,
-  - elimina `feat`, `ft`, `pres`, etc.,
-  - normaliza espacios y separadores.
-- Llama a `search_discogs_api(query)`.
-- API usada: `https://api.discogs.com/database/search` con filtro `format=Vinyl&type=release`.
-
-### Paso 4: aplicar resultado Discogs
-
-- Si hay `year`, lo guarda en tag (`Year`) y en tabla.
-- Si hay `cover_url`:
-  - descarga bytes de imagen,
-  - incrusta caratula segun formato de audio,
-  - marca `Cover = Si`,
-  - muestra preview en panel lateral.
-
-### Paso 5: progreso y cierre
-
-- Actualiza barra de progreso por archivo.
-- Al final, refresca panel de detalle y deja log de cierre.
-
-## 5. Formatos de audio soportados
-
-Constante en `gui.py`:
-
-- `.mp3`
-- `.flac`
-- `.m4a`
-- `.aac`
-- `.wav`
-- `.ogg`
-- `.wma`
-- `.aiff`
-
-## 6. Mapeo de metadatos
-
-### 6.1 Lectura
-
-- WAV: via `mutagen.wave.WAVE` + frames ID3 (`TIT2`, `TPE1`, `TPE4`, `TALB`, `TCON`, `TPUB`, `TDRC`).
-- Resto: via `mutagen.File(..., easy=True)` (`title`, `artist`, `mixartist`, `album`, `genre`, `organization/publisher`, `date/year`).
-
-### 6.2 Escritura
-
-**MP3/WAV (ID3):**
-
-- Title -> `TIT2`
-- Artist -> `TPE1`
-- MixArtist -> `TPE4`
-- Album -> `TALB`
-- Genre -> `TCON`
-- Publisher -> `TPUB`
-- Year -> `TDRC`
-
-**Otros formatos (easy tags):**
-
-- Title -> `title`
-- Artist -> `artist`
-- MixArtist -> `mixartist`
-- Album -> `album`
-- Genre -> `genre`
-- Publisher -> `organization`
-- Year -> `date`
-
-### 6.3 Caratulas
-
-`embed_cover_art()` segun extension:
-
-- MP3/WAV: frame `APIC` (ID3)
-- FLAC: `Picture`
-- M4A/AAC/MP4: `MP4Cover`
-- Otros: fallback generico (`covr` si existe)
-
-## 7. Instalacion y ejecucion
-
-## 7.1 Requisitos
-
-- Python 3.10+ recomendado
-- Windows (objetivo principal del proyecto)
-
-## 7.2 Instalar dependencias
+### Instalar dependencias
 
 ```powershell
 python -m venv .venv
@@ -211,66 +161,45 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## 7.3 Ejecutar en desarrollo
+### Ejecutar
 
 ```powershell
 python gui.py
 ```
 
-## 8. Build de ejecutable (.exe)
-
-### Opcion recomendada
+## 12) Build de ejecutable
 
 ```powershell
 pyinstaller Sonometa.spec
 ```
 
-Salida esperada: `dist/Sonometa/Sonometa.exe`.
-
-### Opcion alternativa
+Alternativa:
 
 ```powershell
 pyinstaller gui.spec
 ```
 
-Salida esperada: `dist/gui/gui.exe`.
+Distribuye siempre la carpeta completa generada en `dist/`.
 
-Nota: distribuye la carpeta completa generada por PyInstaller, no solo el `.exe`.
+## 13) Estructura del proyecto
 
-## 9. Logging y estado
+- `gui.py`: aplicación principal.
+- `icon_generator.py`: utilidad para iconos.
+- `Sonometa.spec`, `gui.spec`: build con PyInstaller.
+- `docs/FUNCIONALIDADES_DETALLADAS.md`: documentación funcional extendida.
 
-- Logger principal: `Sonometa`.
-- Salida a consola y a GUI.
-- Historial en memoria: `deque(maxlen=5000)`.
-- Ventana de logs desde menu Ayuda.
+## 14) Limitaciones actuales
 
-## 10. Limitaciones actuales (codigo actual)
+- El procesamiento se ejecuta en el hilo de UI.
+- Discogs usa el primer resultado sin selector manual.
+- Búsqueda Discogs filtrada a vinilo (`format=Vinyl`).
+- No hay suite de tests automatizados en el repositorio.
 
-- Procesamiento principal en hilo UI (en lotes grandes puede notarse bloqueo visual).
-- Busqueda Discogs forzada a formato vinyl.
-- Se usa primer resultado de Discogs sin selector manual.
-- No hay suite de tests automatizados en el repo.
-- `processor.py` no esta integrado en flujo GUI (modulo legacy).
-
-## 11. Ideas de mejora recomendadas
-
-1. Mover `process_discogs_data()` a worker thread + cola de eventos UI.
-2. Añadir cache simple de queries Discogs para acelerar lotes.
-3. Crear tests unitarios para `format_filename_pattern()` y parseo de nombre.
-4. Unificar o retirar `processor.py` para evitar duplicidad de logica.
-5. Añadir validaciones de negocio (ano, tags vacios, conflictos de nombre).
-
-## 12. Desarrollo rapido
-
-Comprobacion de sintaxis:
+## 15) Verificación rápida de sintaxis
 
 ```powershell
 python -m py_compile gui.py
-python -m py_compile processor.py
 python -m py_compile icon_generator.py
 ```
 
-## 13. Licencia
-
-No se ha definido archivo de licencia en este repositorio.
 
