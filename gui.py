@@ -14,9 +14,9 @@ from tkinter import ttk
 import customtkinter as ctk
 from customtkinter import filedialog
 from PIL import Image, ImageTk
-from ui_utils import ToolTip
-
 from audio_manager import AudioManager
+from detail_panel import DetailPanel
+from format_filename import FilenameFormatter
 
 AUDIO_EXTENSIONS = ('.mp3', '.flac', '.m4a', '.aac', '.wav', '.ogg', '.wma', '.aiff')
 
@@ -97,6 +97,7 @@ class App(ctk.CTk):
 
         # Lógica de negocio de audio delegada a AudioManager (SRP)
         self.audio_manager = AudioManager()
+        self.filename_formatter = FilenameFormatter()
 
         self.title("Sonometa v0.06 - Audio Tag Suite")
         self.geometry("1180x780")
@@ -115,7 +116,7 @@ class App(ctk.CTk):
         self.cell_entry = None
         self.log_history = deque(maxlen=5000)
         self._multi_select_mode = False
-        self._multi_entries: dict = {}    # attr_name → CTkComboBox (modo selección múltiple)
+        self._multi_entries: dict = {}    # alias al panel lateral (se asigna tras crear DetailPanel)
         self.log_window = None
         self.log_textbox = None
         self.search_var = tk.StringVar()
@@ -207,7 +208,20 @@ class App(ctk.CTk):
         self.frame_main.pack(fill="both", expand=True, padx=15, pady=5)
 
         # El panel de etiquetas se crea primero para reservar el ancho lateral.
-        self.setup_tag_panel()
+        self.detail_panel = DetailPanel(
+            app=self,
+            parent=self.frame_main,
+            logger=logger,
+            get_resource_path=get_resource_path,
+            fallback_process_icon=icono_procesar
+        )
+        # Compatibilidad con referencias existentes en la app.
+        self.frame_sidebar = self.detail_panel.frame_sidebar
+        self.panel_combo_fields = self.detail_panel.panel_combo_fields
+        self.tag_entries = self.detail_panel.tag_entries
+        self._multi_entries = self.detail_panel.multi_entries
+        self.label_cover = self.detail_panel.label_cover
+        self.btn_process = self.detail_panel.btn_process
         self.setup_treeview()
         self.setup_search_bar()
 
@@ -249,74 +263,6 @@ class App(ctk.CTk):
             # Fallback multiplataforma si zoomed no está disponible.
             self.state("normal")
             self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
-
-    @staticmethod
-    def format_filename_pattern(filename):
-        name, ext = os.path.splitext(filename)
-
-        # Palabras reservadas que deben permanecer en minúsculas
-        LOWER_WORDS_PAR = {'remix', 'mix', 'rework', 'edit', 'side'}
-        LOWER_WORDS_PREFIX = {'feat.', 'feat', 'ft.', 'ft', 'pres.', 'pres', 'presents'}
-
-        dotted_initials_pattern = re.compile(r"^([A-Za-z](?:\.[A-Za-z])+\.?)([\.,;:!?])?$")
-
-        def format_word(word, lower_words=None, force_lower=False):
-            # Mantener siglas con iniciales separadas por puntos (T.N.T., A.B.C)
-            dotted_match = dotted_initials_pattern.match(word)
-            if dotted_match:
-                suffix = dotted_match.group(2) or ""
-                return f"{dotted_match.group(1).upper()}{suffix}"
-
-            if lower_words and word.lower() in lower_words:
-                return word.lower()
-            if force_lower:
-                return word.lower()
-            return word.capitalize()
-
-        def format_parentheses(match):
-            content = match.group(1).strip()
-            words = content.split()
-            formatted_words = [
-                format_word(w, lower_words=LOWER_WORDS_PAR)
-                for w in words
-            ]
-            return f"({' '.join(formatted_words)})"
-
-        # 1. Formatear los paréntesis
-        name = re.sub(r'\((.*?)\)', format_parentheses, name)
-
-        if " - " in name:
-            prefix, suffix = name.split(" - ", 1)
-        elif "-" in name:
-            prefix, suffix = name.split("-", 1)
-        else:
-            words = name.strip().split()
-            if not words:
-                return filename
-            formatted = format_word(words[0]) + (" " + " ".join(format_word(w, force_lower=True) for w in words[1:]) if len(words) > 1 else "")
-            return f"{formatted}{ext}"
-
-        # 2. Formatear el Prefijo (Intérprete): ignorar mayúsculas en 'feat.', 'pres.', etc.
-        prefix_words = prefix.strip().split()
-        formatted_prefix_words = [
-            format_word(w, lower_words=LOWER_WORDS_PREFIX)
-            for w in prefix_words
-        ]
-        formatted_prefix = " ".join(formatted_prefix_words)
-
-        # 3. Formatear el Sufijo (Título)
-        suffix_words = suffix.strip().split()
-        if suffix_words:
-            first_word = format_word(suffix_words[0])
-            rest_words = [
-                w if w.startswith("(") or w.endswith(")") else format_word(w, force_lower=True)
-                for w in suffix_words[1:]
-            ]
-            formatted_suffix = " ".join([first_word] + rest_words)
-        else:
-            formatted_suffix = ""
-
-        return f"{formatted_prefix} - {formatted_suffix}{ext}"
 
     def get_catalog_file_path(self):
         base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
@@ -673,191 +619,6 @@ class App(ctk.CTk):
         dialog.wait_window()
         return result["value"]
 
-    def setup_tag_panel(self):
-        self.frame_sidebar = ctk.CTkFrame(self.frame_main, width=260)
-        self.frame_sidebar.pack(side="left", fill="y", padx=(0, 5), pady=0)
-        self.frame_sidebar.pack_propagate(False)
-
-        self.panel_combo_fields = {
-            "entry_album": "Album",
-            "entry_genre": "Genre",
-            "entry_publisher": "Publisher"
-        }
-
-        fields = [
-            ("Intérprete", "entry_artist"),
-            ("Título", "entry_title"),
-            ("Remix", "entry_mixartist"),
-            ("Álbum", "entry_album"),
-            ("Año", "entry_year"),
-            ("Género", "entry_genre"),
-            ("Etiqueta", "entry_publisher")
-        ]
-
-        self.tag_entries = {}
-        self._multi_entries = {}
-
-        for label_text, attr_name in fields:
-            lbl = ctk.CTkLabel(self.frame_sidebar, text=label_text, anchor="w", font=ctk.CTkFont(family="Inter", size=11, weight="bold"))
-            #borrarlbl.pack(fill="x", padx=5, pady=(4, 0))
-            lbl.pack(fill="x", padx=10, pady=(8, 2))
-
-            # Sub-frame por campo: permite togglear los widgets sin romper el layout
-            field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-            #borrarfield_frame.pack(fill="x", padx=5, pady=(0, 4))
-            field_frame.pack(fill="x", padx=10, pady=(0, 4))
-
-            if attr_name in self.panel_combo_fields:
-                catalog_key = self.panel_combo_fields[attr_name]
-                widget = ctk.CTkComboBox(
-                    field_frame,
-                    values=self.get_catalog_combo_values(catalog_key),
-                    state="readonly",
-                    height=26,
-                    font=ctk.CTkFont(family="Inter", size=12),
-                    command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
-                )
-                widget.set("")
-                widget.bind("<Button-1>", lambda _e, _w=widget: self.on_panel_combo_click(_w))
-                widget.bind(
-                    "<FocusOut>",
-                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_focus_out(_attr, _cat)
-                )
-                widget.bind(
-                    "<Return>",
-                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_enter(_attr, _cat)
-                )
-            else:
-                widget = ctk.CTkEntry(field_frame, height=26, font=ctk.CTkFont(family="Inter", size=12))
-                widget.bind("<FocusOut>", lambda _e, _attr=attr_name: self.on_panel_text_field_commit(_attr))
-                widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
-
-            widget.pack(fill="x")
-            self.tag_entries[attr_name] = widget
-
-            # Widget multi-selección (CTkComboBox, oculto inicialmente)
-            is_catalog = attr_name in self.panel_combo_fields
-            multi_state = "readonly" if is_catalog else "normal"
-            multi_widget = ctk.CTkComboBox(
-                field_frame,
-                values=[self.KEEP_VALUE],
-                state=multi_state,
-                height=26,
-                font=ctk.CTkFont(size=12),
-                command=lambda _value, _a=attr_name: self._on_multi_panel_commit(_a)
-            )
-            if not is_catalog:
-                multi_widget.bind(
-                    "<Return>",
-                    lambda _e, _a=attr_name: self._on_multi_panel_commit(_a) or "break"
-                )
-                multi_widget.bind(
-                    "<FocusOut>",
-                    lambda _e, _a=attr_name: self.after(80, lambda: self._on_multi_panel_commit(_a))
-                )
-            # multi_widget NO se empaqueta aquí; se activa en _enter_multi_mode
-            self._multi_entries[attr_name] = multi_widget
-
-
-        lbl_cover_title = ctk.CTkLabel(self.frame_sidebar, text="Carátula", anchor="w", font=ctk.CTkFont(size=11, weight="bold"))
-        lbl_cover_title.pack(fill="x", padx=5, pady=(8, 2))
-
-        self.label_cover = ctk.CTkLabel(
-            self.frame_sidebar,
-            text="Sin carátula",
-            width=180,
-            height=180,
-            fg_color="transparent",
-            text_color="gray",
-            border_color="#6B7280",
-            border_width=1,
-            cursor="hand2"
-        )
-        self.label_cover.pack(padx=5, pady=5)
-        ToolTip(self.label_cover, "Clic derecho para opciones de carátula")
-
-        # Menú contextual sobre la carátula – modo selección única
-        self._cover_context_menu = tk.Menu(
-            self, tearoff=0,
-            bg="#1E1E1E", fg="#E0E0E0",          # Fondos más suaves que #252526
-            activebackground=self.CORP_COLOR,
-            activeforeground="#FFFFFF",
-            bd=0,                                # Sin borde general
-            activeborderwidth=0,                 # Sin borde al pasar el ratón
-            relief="flat",
-            font=('Segoe UI', 10)                # Forzar una tipografía moderna
-        )
-
-        self._cover_context_menu.add_command(
-            label="📋  Pegar imagen desde el portapapeles",
-            command=self.paste_cover_from_clipboard
-        )
-        self._cover_context_menu.add_separator()
-        self._cover_context_menu.add_command(
-            label="🗑  Eliminar carátula",
-            command=self.remove_cover_art
-        )
-
-        # Menú contextual sobre la carátula – modo selección múltiple
-        self._cover_context_menu_multi = tk.Menu(
-            self, tearoff=0,
-            bg="#252526", fg="#FFFFFF",
-            activebackground=self.CORP_COLOR, activeforeground="#FFFFFF",
-            bd=1, relief="flat", font=('Segoe UI', 10)
-        )
-        self._cover_context_menu_multi.add_command(
-            label="📋  Pegar imagen a todos los seleccionados",
-            command=self.paste_cover_from_clipboard
-        )
-        self._cover_context_menu_multi.add_separator()
-        self._cover_context_menu_multi.add_command(
-            label="🗑  Eliminar carátula de todos los seleccionados",
-            command=self.remove_cover_art
-        )
-
-        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
-        self.label_cover.bind(btn_right, self._show_cover_context_menu)
-
-        logo3_path = get_resource_path("logo_blanco.png")
-        btn_icon = None
-        if os.path.exists(logo3_path):
-            try:
-                img_logo3 = Image.open(logo3_path)
-                btn_icon = ctk.CTkImage(light_image=img_logo3, dark_image=img_logo3, size=(22, 22))
-            except Exception as e:
-                logger.error(f"Error al cargar logo_blanco.png para el botón Procesar: {str(e)}")
-
-        self.btn_process = ctk.CTkButton(
-            self.frame_sidebar,
-            text="Procesar",
-            image=btn_icon if btn_icon else icono_procesar,
-            compound="left",
-            fg_color=self.CORP_COLOR,
-            hover_color=self.CORP_HOVER,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=34,
-            command=self.process_discogs_data
-        )
-        self.btn_process.pack(fill="x", padx=5, pady=(6, 10))
-        ToolTip(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
-
-        self.btn_clean = ctk.CTkButton(
-            self.frame_sidebar,
-            text="Limpiar",
-            image=self.broom_icon,
-            compound="left",
-            fg_color="transparent",
-            border_color="#DC2626",            # Borde rojo bien definido
-            border_width=1,
-            text_color="#FFFFFF",              # Texto totalmente blanco
-            hover_color=("#FEE2E2", "#450A0A"), # Fondo rojo suave/oscuro al pasar el ratón
-            corner_radius=8,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=34,
-            command=self.clear_selected_metadata
-        )
-        self.btn_clean.pack(fill="x", padx=5, pady=(0, 10))
-        ToolTip(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
 
     def setup_treeview(self):
         self.frame_grid = ctk.CTkFrame(self.frame_main)
@@ -1542,7 +1303,7 @@ class App(ctk.CTk):
 
                 # --- PASO 1: Formatear y Renombrar archivo ---
                 old_filename = os.path.basename(file_path)
-                new_filename = self.format_filename_pattern(old_filename)
+                new_filename = self.filename_formatter.format_filename_pattern(old_filename)
                 dir_name = os.path.dirname(file_path)
                 new_file_path = os.path.join(dir_name, new_filename)
 
@@ -1782,15 +1543,15 @@ class App(ctk.CTk):
 
     def on_row_select(self, event):
         selected = self.tree.selection()
-        self._refresh_process_button_text(len(selected))
+        self.detail_panel.refresh_process_button_text(len(selected))
 
         if len(selected) > 1:
-            self._enter_multi_mode(selected)
+            self.detail_panel.enter_multi_mode(selected)
             return
 
         # Salir del modo multi si se estaba en él
         if self._multi_select_mode:
-            self._exit_multi_mode()
+            self.detail_panel.exit_multi_mode()
 
         if not selected:
             return
@@ -1802,191 +1563,60 @@ class App(ctk.CTk):
             logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
             return
 
-        self._set_panel_widget_value("entry_artist", values[1])
-        self._set_panel_widget_value("entry_title", values[2])
-        self._set_panel_widget_value("entry_mixartist", values[3])
-        self._set_panel_widget_value("entry_album", values[4])
-        self._set_panel_widget_value("entry_genre", values[5])
-        self._set_panel_widget_value("entry_publisher", values[6])
-        self._set_panel_widget_value("entry_year", values[7])
+        self.detail_panel.set_panel_widget_value("entry_artist", values[1])
+        self.detail_panel.set_panel_widget_value("entry_title", values[2])
+        self.detail_panel.set_panel_widget_value("entry_mixartist", values[3])
+        self.detail_panel.set_panel_widget_value("entry_album", values[4])
+        self.detail_panel.set_panel_widget_value("entry_genre", values[5])
+        self.detail_panel.set_panel_widget_value("entry_publisher", values[6])
+        self.detail_panel.set_panel_widget_value("entry_year", values[7])
 
         file_path = self.file_paths_map.get(item_id)
         if file_path:
-            self.display_cover_art(file_path)
-
-    # ------------------------------------------------------------------ #
-    #  Helpers: modo selección múltiple del panel izquierdo               #
-    # ------------------------------------------------------------------ #
-
-    def _compute_common_panel_values(self, selected_rows):
-        """Devuelve dict attr_name → valor común (o KEEP_VALUE si difieren)."""
-        result = {}
-        for attr_name, (_, col_index) in self.PANEL_FIELD_COL_MAP.items():
-            values_across_rows = []
-            for row_id in selected_rows:
-                vals = self.tree.item(row_id, "values")
-                v = str(vals[col_index]).strip() if col_index < len(vals) and vals[col_index] is not None else ""
-                values_across_rows.append(v)
-            unique = set(values_across_rows)
-            result[attr_name] = values_across_rows[0] if len(unique) == 1 else self.KEEP_VALUE
-        return result
+            self.detail_panel.display_cover_art(file_path)
 
     def _enter_multi_mode(self, selected_rows):
-        """Activa el panel en modo selección múltiple."""
-        if not self._multi_entries:
-            return
-
-        common = self._compute_common_panel_values(selected_rows)
-
-        for attr_name, multi_widget in self._multi_entries.items():
-            # Ocultar widget normal
-            normal_widget = self.tag_entries.get(attr_name)
-            if normal_widget:
-                normal_widget.pack_forget()
-
-            # Construir opciones del multi-widget
-            common_value = common.get(attr_name, self.KEEP_VALUE)
-            is_catalog = attr_name in self.panel_combo_fields
-
-            if is_catalog:
-                catalog_key = self.panel_combo_fields[attr_name]
-                catalog_vals = [v for v in self.catalog_values.get(catalog_key, []) if v and v != self.CLEAR_OPTION]
-                options = [self.KEEP_VALUE] + sorted(catalog_vals, key=lambda x: x.lower())
-            else:
-                # Valores únicos actuales de las filas seleccionadas + KEEP
-                _, col_index = self.PANEL_FIELD_COL_MAP[attr_name]
-                distinct = sorted({
-                    str(self.tree.item(r, "values")[col_index]).strip()
-                    for r in selected_rows
-                    if col_index < len(self.tree.item(r, "values"))
-                    and self.tree.item(r, "values")[col_index]
-                })
-                options = [self.KEEP_VALUE] + [v for v in distinct if v]
-
-            multi_widget.configure(values=options)
-            multi_widget.set(common_value if common_value in options else self.KEEP_VALUE)
-            multi_widget.pack(fill="x")
-
-        self._multi_select_mode = True
-        self.display_multi_cover_placeholder(selected_rows=selected_rows)
+        self.detail_panel.enter_multi_mode(selected_rows)
 
     def _exit_multi_mode(self):
-        """Restaura el panel al modo de selección única."""
-        if not self._multi_entries:
-            return
-
-        for attr_name, multi_widget in self._multi_entries.items():
-            multi_widget.pack_forget()
-            normal_widget = self.tag_entries.get(attr_name)
-            if normal_widget:
-                normal_widget.pack(fill="x")
-
-        self._multi_select_mode = False
+        self.detail_panel.exit_multi_mode()
 
     def _on_multi_panel_commit(self, attr_name):
-        """Aplica el valor elegido en el modo multi a todas las filas seleccionadas."""
-        if not self._multi_select_mode:
-            return
-        multi_widget = self._multi_entries.get(attr_name)
-        if not multi_widget:
-            return
-        raw_value = multi_widget.get().strip()
-
-        if raw_value == self.KEEP_VALUE or raw_value == "":
-            return  # mantener valores originales
-
-        # Determinar valor a guardar
-        if attr_name in self.panel_combo_fields:
-            new_value = self.normalize_catalog_text(raw_value) if raw_value != self.CLEAR_OPTION else ""
-        else:
-            new_value = raw_value
-
-        self._apply_field_to_all_selected(attr_name, new_value)
-
-    def _apply_field_to_all_selected(self, attr_name, new_value):
-        """Guarda `new_value` en el campo `attr_name` de todas las filas seleccionadas."""
-        if attr_name not in self.PANEL_FIELD_COL_MAP:
-            return
-
-        field_name, col_index = self.PANEL_FIELD_COL_MAP[attr_name]
-        selected_rows = self.tree.selection()
-
-        updated = 0
-        for row_id in selected_rows:
-            values = list(self.tree.item(row_id, "values"))
-            if col_index >= len(values):
-                continue
-            if str(values[col_index]).strip() == new_value:
-                continue
-
-            values[col_index] = new_value
-            self.tree.item(row_id, values=values)
-
-            file_path = self.file_paths_map.get(row_id)
-            if file_path and os.path.exists(file_path):
-                self.save_single_tag(file_path, field_name, new_value)
-                updated += 1
-
-        if updated:
-            logger.info(
-                f"Campo '{field_name}' aplicado a {updated} archivo(s) seleccionado(s): '{new_value}'"
-            )
+        self.detail_panel.on_multi_panel_commit(attr_name)
 
     def display_multi_cover_placeholder(self, selected_rows=None):
-        """Muestra el placeholder de carátula para modo selección múltiple."""
-        selected_rows = list(selected_rows or self.tree.selection())
-        has_any_cover = any(self.row_has_cover(row_id) for row_id in selected_rows)
-        text = "Mantener carátulas" if has_any_cover else "Sin carátula"
-        self.label_cover.configure(image="", text=text, text_color="gray")
-        self.label_cover.image = None
+        self.detail_panel.display_multi_cover_placeholder(selected_rows=selected_rows)
 
     def _refresh_process_button_text(self, selected_count=None):
-        if not hasattr(self, "btn_process"):
-            return
-        if selected_count is None:
-            selected_count = len(self.tree.selection())
-        button_text = "Procesar selección" if selected_count > 1 else "Procesar"
-        self.btn_process.configure(text=button_text)
+        self.detail_panel.refresh_process_button_text(selected_count=selected_count)
 
     def display_cover_art(self, file_path_or_bytes):
-        cover_data = None
+        self.detail_panel.display_cover_art(file_path_or_bytes)
 
-        if isinstance(file_path_or_bytes, (bytes, bytearray)):
-            cover_data = file_path_or_bytes
-        elif isinstance(file_path_or_bytes, str) and os.path.exists(file_path_or_bytes):
-            cover_data = self.audio_manager.extract_cover_bytes(file_path_or_bytes)
+    def refresh_catalog_comboboxes(self):
+        if hasattr(self, "detail_panel"):
+            self.detail_panel.refresh_catalog_comboboxes()
 
-        if cover_data:
-            try:
-                image_stream = io.BytesIO(cover_data)
-                img = Image.open(image_stream)
+    def _set_panel_widget_value(self, attr_name, value):
+        self.detail_panel.set_panel_widget_value(attr_name, value)
 
-                if img.mode not in ("RGB", "RGBA"):
-                    img = img.convert("RGB")
+    def on_panel_catalog_selected(self, attr_name, catalog_key):
+        self.detail_panel.on_panel_catalog_selected(attr_name, catalog_key)
 
-                img = img.resize((180, 180), Image.Resampling.LANCZOS)
+    def on_panel_combo_click(self, combo_widget):
+        return self.detail_panel.on_panel_combo_click(combo_widget)
 
-                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(180, 180))
-                self.label_cover.configure(image=ctk_img, text="")
-                self.label_cover.image = ctk_img
-                return
-            except Exception as e:
-                logger.error(f"Error procesando vista previa de la carátula: {str(e)}")
+    def on_panel_catalog_enter(self, attr_name, catalog_key):
+        return self.detail_panel.on_panel_catalog_enter(attr_name, catalog_key)
 
-        self.label_cover.configure(image="", text="Sin carátula")
-        self.label_cover.image = None
+    def on_panel_catalog_focus_out(self, attr_name, catalog_key):
+        self.detail_panel.on_panel_catalog_focus_out(attr_name, catalog_key)
 
-    # ------------------------------------------------------------------ #
-    #  Menú contextual de carátula                                         #
-    # ------------------------------------------------------------------ #
+    def on_panel_text_field_enter(self, attr_name):
+        return self.detail_panel.on_panel_text_field_enter(attr_name)
 
-    def _show_cover_context_menu(self, event):
-        """Despliega el menú contextual sobre la carátula (adapta al modo actual)."""
-        menu = self._cover_context_menu_multi if self._multi_select_mode else self._cover_context_menu
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+    def on_panel_text_field_commit(self, attr_name):
+        self.detail_panel.on_panel_text_field_commit(attr_name)
 
     def _show_tree_context_menu(self, event):
         """Despliega el menú contextual del grid sobre la fila pulsada."""
@@ -2068,9 +1698,9 @@ class App(ctk.CTk):
                 logger.error(f"No se pudo incrustar la carátula en: {os.path.basename(file_path)}")
 
         if ok_count and not self._multi_select_mode:
-            self.display_cover_art(image_bytes)
+            self.detail_panel.display_cover_art(image_bytes)
         elif ok_count and self._multi_select_mode:
-            self.display_multi_cover_placeholder(selected_rows=self.tree.selection())
+            self.detail_panel.display_multi_cover_placeholder(selected_rows=self.tree.selection())
             logger.info(f"Carátula pegada a {ok_count} archivo(s) seleccionado(s).")
 
         if ok_count == 0:
@@ -2129,11 +1759,10 @@ class App(ctk.CTk):
         # Actualizar panel de carátula
         if ok_count:
             if self._multi_select_mode:
-                self.display_multi_cover_placeholder(selected_rows=self.tree.selection())
+                self.detail_panel.display_multi_cover_placeholder(selected_rows=self.tree.selection())
                 logger.info(f"Carátula eliminada de {ok_count} archivo(s) seleccionado(s).")
             else:
-                self.label_cover.configure(image="", text="Sin carátula")
-                self.label_cover.image = None
+                self.detail_panel.display_cover_art(b"")
 
     def _strip_cover_tags(self, file_path):
         self.audio_manager.strip_cover_tags(file_path)
@@ -2254,54 +1883,18 @@ class App(ctk.CTk):
 
     def clear_all(self):
         if self._multi_select_mode:
-            self._exit_multi_mode()
+            self.detail_panel.exit_multi_mode()
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
         self._all_tree_items = []
 
-        for widget in self.tag_entries.values():
-            if isinstance(widget, ctk.CTkComboBox):
-                widget.set("")
-            else:
-                widget.delete(0, "end")
-
-        self.label_cover.configure(image="", text="Sin carátula")
-        self.label_cover.image = None
+        self.detail_panel.clear_fields()
         self.folder_path = ""
         self.label_folder.configure(text="Ninguna carpeta seleccionada", text_color="gray")
         self.progress_bar.set(0)
-        self._refresh_process_button_text(0)
+        self.detail_panel.refresh_process_button_text(0)
         logger.info("Lista y estado limpiados.")
-
-    def refresh_catalog_comboboxes(self):
-        for attr_name, catalog_key in getattr(self, "panel_combo_fields", {}).items():
-            combo = self.tag_entries.get(attr_name)
-            if not combo:
-                continue
-            current_value = combo.get().strip()
-            allowed_values = self.get_catalog_combo_values(catalog_key)
-            combo.configure(values=allowed_values)
-            if current_value in allowed_values:
-                combo.set(current_value)
-            else:
-                combo.set("")
-
-    def _set_panel_widget_value(self, attr_name, value):
-        widget = self.tag_entries.get(attr_name)
-        if not widget:
-            return
-
-        value_str = str(value) if value else ""
-        if attr_name in getattr(self, "panel_combo_fields", {}):
-            catalog_key = self.panel_combo_fields[attr_name]
-            normalized_value = self.normalize_catalog_text(value_str)
-            self.add_catalog_value(catalog_key, normalized_value, persist=False)
-            widget.set(normalized_value)
-            return
-
-        widget.delete(0, "end")
-        widget.insert(0, value_str)
 
     def _apply_catalog_selection_to_row(self, row_id, attr_name, catalog_key, new_value):
         column_map = {
@@ -2333,90 +1926,6 @@ class App(ctk.CTk):
         )
         self.on_row_select(None)
 
-    def on_panel_catalog_selected(self, attr_name, catalog_key):
-        selected_rows = self.tree.selection()
-        if not selected_rows:
-            logger.info(f"Selección de catálogo ignorada ({self.catalog_labels.get(catalog_key, catalog_key)}): no hay fila seleccionada.")
-            return
-
-        # En modo multi, delegar al handler multi
-        if self._multi_select_mode:
-            self._on_multi_panel_commit(attr_name)
-            return
-
-        row_id = selected_rows[0]
-        combo = self.tag_entries.get(attr_name)
-        if not combo:
-            return
-        raw_value = combo.get().strip()
-        if raw_value == self.CLEAR_OPTION:
-            new_value = ""
-        else:
-            new_value = self.normalize_catalog_text(raw_value)
-        self._apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
-
-    def on_panel_combo_click(self, combo_widget):
-        try:
-            combo_widget.focus_set()
-            combo_widget._open_dropdown_menu()
-        except Exception:
-            pass
-        return "break"
-
-    def on_panel_catalog_enter(self, attr_name, catalog_key):
-        self.on_panel_catalog_selected(attr_name, catalog_key)
-        return "break"
-
-    def on_panel_catalog_focus_out(self, attr_name, catalog_key):
-        # Delay corto para que CTk actualice internamente el valor antes de guardar.
-        self.after(50, lambda a=attr_name, c=catalog_key: self.on_panel_catalog_selected(a, c))
-
-    def on_panel_text_field_enter(self, attr_name):
-        self.on_panel_text_field_commit(attr_name)
-        return "break"
-
-    def on_panel_text_field_commit(self, attr_name):
-        text_column_map = {
-            "entry_artist": ("Artist", 1),
-            "entry_title": ("Title", 2),
-            "entry_mixartist": ("MixArtist", 3),
-            "entry_year": ("Year", 7),
-        }
-        if attr_name not in text_column_map:
-            return
-
-        selected_rows = self.tree.selection()
-        if not selected_rows:
-            return
-
-        # En modo multi, delegar al handler multi
-        if self._multi_select_mode:
-            self._on_multi_panel_commit(attr_name)
-            return
-
-        row_id = selected_rows[0]
-
-        widget = self.tag_entries.get(attr_name)
-        if not widget:
-            return
-        new_value = widget.get().strip()
-
-        col_name, col_index = text_column_map[attr_name]
-        values = list(self.tree.item(row_id, "values"))
-        if col_index >= len(values):
-            return
-        current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
-        if current_value == new_value:
-            return
-
-        values[col_index] = new_value
-        self.tree.item(row_id, values=values)
-
-        file_path = self.file_paths_map.get(row_id)
-        if file_path:
-            self.save_single_tag(file_path, col_name, new_value)
-
-        logger.info(f"Campo '{col_name}' actualizado desde panel izquierdo: '{current_value}' -> '{new_value}'")
 
     def open_catalog_manager(self, catalog_key):
         if catalog_key not in self.catalog_fields:
@@ -2673,7 +2182,7 @@ class App(ctk.CTk):
         """Selecciona todas las filas del árbol de archivos."""
         all_items = self.tree.get_children()
         self.tree.selection_set(all_items)
-        self._refresh_process_button_text(len(all_items))
+        self.detail_panel.refresh_process_button_text(len(all_items))
         logger.info(f"Seleccionados todos los {len(all_items)} archivo(s).")
 
     def show_keyboard_shortcuts_dialog(self):
