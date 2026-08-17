@@ -1,36 +1,24 @@
-from PIL import Image, ImageDraw
+import os
+import pymupdf  # Uso del paquete actualizado según el warning
 
-def generar_logo_relleno_directo(input_path="logo_3.png", output_path="logo_2.png"):
-    # 1. Cargar la imagen de origen
-    img = Image.open(input_path).convert("RGBA")
-    w, h = img.size
+# SVG de la goma de borrar en color blanco (#FFFFFF)
+svg_code = """<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+  <path d="M22 21H7" />
+  <path d="m5 11 9 9" />
+</svg>"""
 
-    # 2. Crear una máscara en blanco y negro de los píxeles claros (el borde del icono)
-    mask = Image.new("L", (w, h), 0)
-    for y in range(h):
-        for x in range(w):
-            r, g, b, a = img.getpixel((x, y))
-            # Si el píxel es visible y claro, marcamos la pared
-            if a > 30 and (r + g + b) // 3 > 100:
-                mask.putpixel((x, y), 255)
+# Asegurar que la carpeta assets existe
+output_dir = "assets"
+os.makedirs(output_dir, exist_ok=True)
 
-    # 3. Rellenar de blanco el interior partiendo exactamente del centro del icono
-    centro_x, centro_y = int(w * 0.50), int(h * 0.50)
-    ImageDraw.floodfill(mask, (centro_x, centro_y), 255)
+# Abrir y renderizar el vector SVG
+doc = pymupdf.open(stream=svg_code.encode("utf-8"), filetype="svg")
+page = doc[0]
 
-    # 4. Crear la imagen final con fondo transparente y relleno blanco
-    img_final = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    for y in range(h):
-        for x in range(w):
-            if mask.getpixel((x, y)) == 255:
-                img_final.putpixel((x, y), (255, 255, 255, 255))
+# Renderizar en PNG con transparencia activa
+pix = page.get_pixmap(dpi=300, alpha=True)
+output_path = os.path.join(output_dir, "broom_icon.png")
+pix.save(output_path)
 
-    # 5. Vaciar el punto circular interior
-    dot_x, dot_y = int(w * 0.72), int(h * 0.50)
-    ImageDraw.floodfill(img_final, (dot_x, dot_y), (0, 0, 0, 0))
-
-    img_final.save(output_path, "PNG")
-    print(f"¡Generado correctamente en '{output_path}'!")
-
-if __name__ == "__main__":
-    generar_logo_relleno_directo()
+print(f"Icono generado correctamente en: {output_path}")

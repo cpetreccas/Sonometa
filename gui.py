@@ -14,6 +14,7 @@ from tkinter import ttk
 import customtkinter as ctk
 from customtkinter import filedialog
 from PIL import Image, ImageTk
+from ui_utils import ToolTip
 
 from audio_manager import AudioManager
 
@@ -144,6 +145,13 @@ class App(ctk.CTk):
         png_path = get_resource_path("logo.png")
         self.app_icon_photo = None
 
+        icon_broom_img = Image.open("broom_icon.png")
+        self.broom_icon = ctk.CTkImage(
+            light_image=icon_broom_img,
+            dark_image=icon_broom_img,
+            size=(18, 18)
+        )
+
         if os.path.exists(self.ico_path):
             self.iconbitmap(self.ico_path)
 
@@ -186,7 +194,7 @@ class App(ctk.CTk):
             width=100,
             fg_color=self.CORP_COLOR,
             hover_color=self.CORP_HOVER,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(family="Inter", size=13, weight="bold"),
             height=32,
             command=self.refresh_folder
         )
@@ -214,7 +222,7 @@ class App(ctk.CTk):
             self.frame_bottom,
             text="Listo",
             anchor="w",
-            font=ctk.CTkFont(size=11),
+            font=ctk.CTkFont(family="Inter", size=11),
             text_color="#9CA3AF"
         )
         self.label_status.pack(fill="x", padx=12, pady=(2, 6))
@@ -470,7 +478,7 @@ class App(ctk.CTk):
         self.menu_bar_frame = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color="#181818")
         self.menu_bar_frame.pack(side="top", fill="x")
 
-        self.menu_archivo = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1)
+        self.menu_archivo = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
         self.menu_archivo.add_command(label="Seleccionar carpeta...  (Ctrl+O)", command=self.browse_folder)
         self.menu_archivo.add_command(label="Actualizar  (F5)", command=self.refresh_folder)
         self.menu_archivo.add_separator()
@@ -478,19 +486,19 @@ class App(ctk.CTk):
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(label="Cerrar  (Ctrl+Q)", command=self.destroy)
 
-        self.menu_acciones = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1)
+        self.menu_acciones = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
         self.menu_acciones.add_command(label="Procesar con Discogs", command=self.process_discogs_data)
         self.menu_acciones.add_command(label="Seleccionar todo  (Ctrl+A)", command=self.select_all_rows)
         self.menu_acciones.add_command(label="Buscar en la lista  (Ctrl+F)", command=self.toggle_search_bar)
         self.menu_acciones.add_separator()
         self.menu_acciones.add_command(label="Limpiar todo", command=self.clear_all_loaded_metadata)
 
-        self.menu_gestionar = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1)
+        self.menu_gestionar = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
         self.menu_gestionar.add_command(label="Géneros", command=lambda: self.open_catalog_manager("Genre"))
         self.menu_gestionar.add_command(label="Álbumes", command=lambda: self.open_catalog_manager("Album"))
         self.menu_gestionar.add_command(label="Etiquetas", command=lambda: self.open_catalog_manager("Publisher"))
 
-        self.menu_ayuda = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1)
+        self.menu_ayuda = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
         self.menu_ayuda.add_command(label="Atajos de teclado", command=self.show_keyboard_shortcuts_dialog)
         self.menu_ayuda.add_command(label="Ver logs", command=self.show_logs_dialog)
         self.menu_ayuda.add_separator()
@@ -505,7 +513,7 @@ class App(ctk.CTk):
                 fg_color="transparent",
                 hover_color="#2A2D32",
                 text_color="#E0E0E0",
-                font=ctk.CTkFont(size=12)
+                font=ctk.CTkFont(family="Inter", size=13)
             )
             btn.configure(command=lambda: menu_widget.post(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height()))
             btn.pack(side="left", padx=2, pady=2)
@@ -611,7 +619,7 @@ class App(ctk.CTk):
             corner_radius=13,
             fg_color=self.CORP_COLOR,
             text_color="white",
-            font=ctk.CTkFont(size=13, weight="bold")
+            font=ctk.CTkFont(family="Inter", size=13, weight="bold")
         )
         lbl_icon.pack(anchor="w", pady=(2, 8))
 
@@ -690,12 +698,14 @@ class App(ctk.CTk):
         self._multi_entries = {}
 
         for label_text, attr_name in fields:
-            lbl = ctk.CTkLabel(self.frame_sidebar, text=label_text, anchor="w", font=ctk.CTkFont(size=11, weight="bold"))
-            lbl.pack(fill="x", padx=5, pady=(4, 0))
+            lbl = ctk.CTkLabel(self.frame_sidebar, text=label_text, anchor="w", font=ctk.CTkFont(family="Inter", size=11, weight="bold"))
+            #borrarlbl.pack(fill="x", padx=5, pady=(4, 0))
+            lbl.pack(fill="x", padx=10, pady=(8, 2))
 
             # Sub-frame por campo: permite togglear los widgets sin romper el layout
             field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-            field_frame.pack(fill="x", padx=5, pady=(0, 4))
+            #borrarfield_frame.pack(fill="x", padx=5, pady=(0, 4))
+            field_frame.pack(fill="x", padx=10, pady=(0, 4))
 
             if attr_name in self.panel_combo_fields:
                 catalog_key = self.panel_combo_fields[attr_name]
@@ -704,7 +714,7 @@ class App(ctk.CTk):
                     values=self.get_catalog_combo_values(catalog_key),
                     state="readonly",
                     height=26,
-                    font=ctk.CTkFont(size=12),
+                    font=ctk.CTkFont(family="Inter", size=12),
                     command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
                 )
                 widget.set("")
@@ -718,7 +728,7 @@ class App(ctk.CTk):
                     lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_enter(_attr, _cat)
                 )
             else:
-                widget = ctk.CTkEntry(field_frame, height=26, font=ctk.CTkFont(size=12))
+                widget = ctk.CTkEntry(field_frame, height=26, font=ctk.CTkFont(family="Inter", size=12))
                 widget.bind("<FocusOut>", lambda _e, _attr=attr_name: self.on_panel_text_field_commit(_attr))
                 widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
 
@@ -760,17 +770,24 @@ class App(ctk.CTk):
             fg_color="transparent",
             text_color="gray",
             border_color="#6B7280",
-            border_width=1
+            border_width=1,
+            cursor="hand2"
         )
         self.label_cover.pack(padx=5, pady=5)
+        ToolTip(self.label_cover, "Clic derecho para opciones de carátula")
 
         # Menú contextual sobre la carátula – modo selección única
         self._cover_context_menu = tk.Menu(
             self, tearoff=0,
-            bg="#252526", fg="#FFFFFF",
-            activebackground=self.CORP_COLOR, activeforeground="#FFFFFF",
-            bd=1
+            bg="#1E1E1E", fg="#E0E0E0",          # Fondos más suaves que #252526
+            activebackground=self.CORP_COLOR,
+            activeforeground="#FFFFFF",
+            bd=0,                                # Sin borde general
+            activeborderwidth=0,                 # Sin borde al pasar el ratón
+            relief="flat",
+            font=('Segoe UI', 10)                # Forzar una tipografía moderna
         )
+
         self._cover_context_menu.add_command(
             label="📋  Pegar imagen desde el portapapeles",
             command=self.paste_cover_from_clipboard
@@ -786,7 +803,7 @@ class App(ctk.CTk):
             self, tearoff=0,
             bg="#252526", fg="#FFFFFF",
             activebackground=self.CORP_COLOR, activeforeground="#FFFFFF",
-            bd=1
+            bd=1, relief="flat", font=('Segoe UI', 10)
         )
         self._cover_context_menu_multi.add_command(
             label="📋  Pegar imagen a todos los seleccionados",
@@ -822,17 +839,25 @@ class App(ctk.CTk):
             command=self.process_discogs_data
         )
         self.btn_process.pack(fill="x", padx=5, pady=(6, 10))
+        ToolTip(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
 
         self.btn_clean = ctk.CTkButton(
             self.frame_sidebar,
             text="Limpiar",
-            fg_color=self.DANGER_COLOR,
-            hover_color=self.DANGER_HOVER,
+            image=self.broom_icon,
+            compound="left",
+            fg_color="transparent",
+            border_color="#DC2626",            # Borde rojo bien definido
+            border_width=1,
+            text_color="#FFFFFF",              # Texto totalmente blanco
+            hover_color=("#FEE2E2", "#450A0A"), # Fondo rojo suave/oscuro al pasar el ratón
+            corner_radius=8,
             font=ctk.CTkFont(size=13, weight="bold"),
             height=34,
             command=self.clear_selected_metadata
         )
         self.btn_clean.pack(fill="x", padx=5, pady=(0, 10))
+        ToolTip(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
 
     def setup_treeview(self):
         self.frame_grid = ctk.CTkFrame(self.frame_main)
@@ -875,34 +900,32 @@ class App(ctk.CTk):
             background="#181818",
             foreground="#E0E0E0",
             fieldbackground="#181818",
-            rowheight=22,
-            font=('Segoe UI', 8),
-            borderwidth=1,
-            relief="solid"
+            rowheight=28,           # Aumentado de 22 a 28 para mejor lectura
+            font=('Segoe UI', 9),   # Aumentado a tamaño 9
+            borderwidth=0,          # Eliminado borde nativo
+            relief="flat"           # Estilo flat
         )
 
         style.configure(
             "Treeview.Item",
-            borderwidth=1,
-            relief="solid",
-            lightcolor="#383838",
-            darkcolor="#383838",
-            bordercolor="#383838"
+            borderwidth=0,
+            relief="flat",
+            padding=(4, 0)
         )
 
         style.configure(
             "Treeview.Heading",
             background="#111111",
             foreground="#FFFFFF",
-            font=('Segoe UI', 8, 'bold'),
-            borderwidth=1,
-            relief="solid",
-            lightcolor="#444444",
-            darkcolor="#444444",
-            bordercolor="#444444"
+            font=('Segoe UI', 9, 'bold'),
+            borderwidth=0,
+            relief="flat",
+            padding=(5, 5)          # Más espacio interno en las cabeceras
         )
-
         style.map("Treeview", background=[('selected', self.CORP_COLOR)])
+        # Añade efecto hover sutil a las cabeceras
+        style.map("Treeview.Heading", background=[('active', '#2A2D32')])
+        #style.map("Treeview", background=[('selected', self.CORP_COLOR)])
 
         self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
         self.tree = ttk.Treeview(self.frame_grid, columns=self.columns, show="headings", selectmode="extended")
@@ -945,14 +968,14 @@ class App(ctk.CTk):
                 stretch=cfg["stretch"]
             )
 
-        self.tree.tag_configure("even", background="#1A1A1A")
-        self.tree.tag_configure("odd", background="#242424")
+        self.tree.tag_configure("even", background="#181818")
+        self.tree.tag_configure("odd", background="#1E1E1E")
 
         self._tree_context_menu = tk.Menu(
             self, tearoff=0,
             bg="#252526", fg="#FFFFFF",
             activebackground=self.CORP_COLOR, activeforeground="#FFFFFF",
-            bd=1
+            bd=1, relief="flat", font=('Segoe UI', 10)
         )
         self._tree_context_menu.add_command(label="Procesar", command=self.process_discogs_data)
         self._tree_context_menu.add_command(label="Limpiar", command=self.clear_selected_metadata)
@@ -1464,173 +1487,185 @@ class App(ctk.CTk):
             self.show_themed_dialog("Advertencia", "No hay archivos cargados en la tabla.", level="warning")
             return
 
-        words_to_omit = [
-            r'\bfeat\.\b', r'\bfeat\b',
-            r'\bft\.\b', r'\bft\b',
-            r'\bpres\.\b', r'\bpres\b',
-            r'\bpresents\b'
-        ]
-        omit_pattern = re.compile('|'.join(words_to_omit), flags=re.IGNORECASE)
-
-        total_files = len(target_rows)
-        logger.info(f"Iniciando procesado para {total_files} archivo(s)...")
-
-        processed = 0
-        for row_id in target_rows:
-            file_path = self.file_paths_map.get(row_id)
-            if not file_path or not os.path.exists(file_path):
-                continue
-
-            values = list(self.tree.item(row_id, "values"))
-
-            # Validar campos de catálogo en cada fila antes de procesar.
-            catalog_fields = (("Album", 4), ("Genre", 5), ("Publisher", 6))
-            invalid_catalog_fields = []
-            for field_name, col_index in catalog_fields:
-                if col_index >= len(values):
-                    continue
-                current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
-                if not current_value:
-                    continue
-
-                normalized_value = self.normalize_catalog_text(current_value)
-                allowed_values = {
-                    self.normalize_catalog_text(v)
-                    for v in self.catalog_values.get(field_name, [])
-                    if str(v).strip()
-                }
-                if normalized_value not in allowed_values:
-                    values[col_index] = ""
-                    self.save_single_tag(file_path, field_name, "")
-                    invalid_catalog_fields.append(field_name)
-
-            if invalid_catalog_fields:
-                self.tree.item(row_id, values=values)
-                logger.info(
-                    f"Se limpiaron campos fuera de catálogo en '{os.path.basename(file_path)}': "
-                    f"{', '.join(invalid_catalog_fields)}"
-                )
-
-            # --- PASO 1: Formatear y Renombrar archivo ---
-            old_filename = os.path.basename(file_path)
-            new_filename = self.format_filename_pattern(old_filename)
-            dir_name = os.path.dirname(file_path)
-            new_file_path = os.path.join(dir_name, new_filename)
-
-            if old_filename != new_filename:
-                try:
-                    os.rename(file_path, new_file_path)
-                    self.file_paths_map[row_id] = new_file_path
-                    file_path = new_file_path
-
-                    values[0] = new_filename
-                    self.tree.item(row_id, values=values)
-                    logger.info(f"Renombrado archivo: '{old_filename}' -> '{new_filename}'")
-                except Exception as e:
-                    logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
-
-            # --- PASO 2: Extraer Intérprete, Título y MIXARTIST desde el nombre ---
-            clean_name = os.path.splitext(new_filename)[0]
-
-            artist_parsed = ""
-            title_parsed = clean_name
-            mixartist_parsed = ""
-
-            # Extraer paréntesis para MIXARTIST (sin paréntesis)
-            parentheses = re.findall(r'\((.*?)\)', clean_name)
-            if parentheses:
-                mixartist_parsed = " ".join(parentheses).strip()
-                clean_name = re.sub(r'\(.*?\)', '', clean_name).strip()
-
-            # Separar por el guión medio
-            if " - " in clean_name:
-                parts = clean_name.split(" - ", 1)
-                artist_parsed = parts[0].strip()
-                title_parsed = parts[1].strip()
-            elif "-" in clean_name:
-                parts = clean_name.split("-", 1)
-                artist_parsed = parts[0].strip()
-                title_parsed = parts[1].strip()
-
-            metadata_changes = []
-            metadata_mappings = (
-                (1, "Artist", "Autor", artist_parsed),
-                (2, "Title", "Título", title_parsed),
-                (3, "MixArtist", "Remix", mixartist_parsed),
-            )
-            for col_index, tag_name, label, new_value in metadata_mappings:
-                previous_value = str(values[col_index]).strip() if col_index < len(values) and values[col_index] is not None else ""
-                if col_index < len(values):
-                    values[col_index] = new_value
-                self.save_single_tag(file_path, tag_name, new_value)
-
-                if previous_value != new_value:
-                    action = "vaciado" if not new_value else "actualizado"
-                    metadata_changes.append(
-                        f"{label} {action}: '{previous_value}' -> '{new_value}'"
-                    )
-
-            self.tree.item(row_id, values=values)
-            already_has_cover = self.row_has_cover(row_id)
-            if already_has_cover:
-                logger.info(f"Se omite solo la descarga de carátula para '{new_filename}' porque ya tiene una incrustada.")
-
-            # --- PASO 3: Búsqueda de metadatos adicionales en Discogs (Año y Carátula) ---
-            query_term = self.build_discogs_query(
-                values[1] if len(values) > 1 else "",
-                values[2] if len(values) > 2 else "",
-                fallback_text=re.sub(r'^\d+[\s\-_.]*', '', clean_name)
-            )
-            query_term = omit_pattern.sub('', query_term)
-            query_term = query_term.replace('_', ' ')
-            query_term = re.sub(r'\s+[._-]\s+', ' ', query_term)
-            query_term = re.sub(r'\s+', ' ', query_term).strip()
-
-            logger.info(f"Procesando archivo: '{new_filename}' (Búsqueda Discogs: '{query_term}')")
-
-            _, _, year, cover_url = self.search_discogs_api(query_term)
-
-            if year:
-                values[7] = str(year)
-                self.save_single_tag(file_path, "Year", str(year))
-
-            if already_has_cover:
-                values[8] = "Sí"
-                self.update_row_cover_status(row_id, "Sí")
-            elif cover_url:
-                logger.info(f"Descargando carátula del vinilo desde: {cover_url}")
-                image_data = self.download_image_bytes(cover_url)
-                if image_data:
-                    image_data = self.normalize_cover_image_bytes(image_data)
-                    if self.audio_manager.embed_cover_art_verified(file_path, image_data):
-                        values[8] = "Sí"
-                        logger.info(f"Carátula incrustada con éxito en: {new_filename}")
-                        self.display_cover_art(image_data)
-                        self.update_row_cover_status(row_id, "Sí")
-                    else:
-                        values[8] = "No"
-                        logger.error(f"La carátula no quedó persistida en el archivo: {new_filename}")
-                else:
-                    values[8] = "No"
-                    logger.warning(f"No se pudieron descargar los bytes de la carátula ({cover_url})")
-            else:
-                values[8] = "No"
-                logger.warning(f"Discogs no devolvió carátula para: '{query_term}'")
-                self.update_row_cover_status(row_id, "No")
-
-            self.tree.item(row_id, values=values)
-            if metadata_changes:
-                logger.info(f"Metadatos desde nombre -> {' | '.join(metadata_changes)}")
-            else:
-                logger.info("Metadatos desde nombre -> sin cambios")
-            logger.info(f"Actualizado Discogs -> Año: '{year}'")
-
-            processed += 1
-            self.progress_bar.set(processed / total_files)
+        # Bloquear el botón y dar feedback visual al usuario
+        if hasattr(self, 'btn_process'):
+            self.btn_process.configure(state="disabled", text="Procesando...")
             self.update_idletasks()
 
-        self.on_row_select(None)
-        logger.info("Procesamiento finalizado con éxito.")
+        try:
+            words_to_omit = [
+                r'\bfeat\.\b', r'\bfeat\b',
+                r'\bft\.\b', r'\bft\b',
+                r'\bpres\.\b', r'\bpres\b',
+                r'\bpresents\b'
+            ]
+            omit_pattern = re.compile('|'.join(words_to_omit), flags=re.IGNORECASE)
+
+            total_files = len(target_rows)
+            logger.info(f"Iniciando procesado para {total_files} archivo(s)...")
+
+            processed = 0
+            for row_id in target_rows:
+                file_path = self.file_paths_map.get(row_id)
+                if not file_path or not os.path.exists(file_path):
+                    continue
+
+                values = list(self.tree.item(row_id, "values"))
+
+                # Validar campos de catálogo en cada fila antes de procesar.
+                catalog_fields = (("Album", 4), ("Genre", 5), ("Publisher", 6))
+                invalid_catalog_fields = []
+                for field_name, col_index in catalog_fields:
+                    if col_index >= len(values):
+                        continue
+                    current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
+                    if not current_value:
+                        continue
+
+                    normalized_value = self.normalize_catalog_text(current_value)
+                    allowed_values = {
+                        self.normalize_catalog_text(v)
+                        for v in self.catalog_values.get(field_name, [])
+                        if str(v).strip()
+                    }
+                    if normalized_value not in allowed_values:
+                        values[col_index] = ""
+                        self.save_single_tag(file_path, field_name, "")
+                        invalid_catalog_fields.append(field_name)
+
+                if invalid_catalog_fields:
+                    self.tree.item(row_id, values=values)
+                    logger.info(
+                        f"Se limpiaron campos fuera de catálogo en '{os.path.basename(file_path)}': "
+                        f"{', '.join(invalid_catalog_fields)}"
+                    )
+
+                # --- PASO 1: Formatear y Renombrar archivo ---
+                old_filename = os.path.basename(file_path)
+                new_filename = self.format_filename_pattern(old_filename)
+                dir_name = os.path.dirname(file_path)
+                new_file_path = os.path.join(dir_name, new_filename)
+
+                if old_filename != new_filename:
+                    try:
+                        os.rename(file_path, new_file_path)
+                        self.file_paths_map[row_id] = new_file_path
+                        file_path = new_file_path
+
+                        values[0] = new_filename
+                        self.tree.item(row_id, values=values)
+                        logger.info(f"Renombrado archivo: '{old_filename}' -> '{new_filename}'")
+                    except Exception as e:
+                        logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
+
+                # --- PASO 2: Extraer Intérprete, Título y MIXARTIST desde el nombre ---
+                clean_name = os.path.splitext(new_filename)[0]
+
+                artist_parsed = ""
+                title_parsed = clean_name
+                mixartist_parsed = ""
+
+                # Extraer paréntesis para MIXARTIST (sin paréntesis)
+                parentheses = re.findall(r'\((.*?)\)', clean_name)
+                if parentheses:
+                    mixartist_parsed = " ".join(parentheses).strip()
+                    clean_name = re.sub(r'\(.*?\)', '', clean_name).strip()
+
+                # Separar por el guión medio
+                if " - " in clean_name:
+                    parts = clean_name.split(" - ", 1)
+                    artist_parsed = parts[0].strip()
+                    title_parsed = parts[1].strip()
+                elif "-" in clean_name:
+                    parts = clean_name.split("-", 1)
+                    artist_parsed = parts[0].strip()
+                    title_parsed = parts[1].strip()
+
+                metadata_changes = []
+                metadata_mappings = (
+                    (1, "Artist", "Autor", artist_parsed),
+                    (2, "Title", "Título", title_parsed),
+                    (3, "MixArtist", "Remix", mixartist_parsed),
+                )
+                for col_index, tag_name, label, new_value in metadata_mappings:
+                    previous_value = str(values[col_index]).strip() if col_index < len(values) and values[col_index] is not None else ""
+                    if col_index < len(values):
+                        values[col_index] = new_value
+                    self.save_single_tag(file_path, tag_name, new_value)
+
+                    if previous_value != new_value:
+                        action = "vaciado" if not new_value else "actualizado"
+                        metadata_changes.append(
+                            f"{label} {action}: '{previous_value}' -> '{new_value}'"
+                        )
+
+                self.tree.item(row_id, values=values)
+                already_has_cover = self.row_has_cover(row_id)
+                if already_has_cover:
+                    logger.info(f"Se omite solo la descarga de carátula para '{new_filename}' porque ya tiene una incrustada.")
+
+                # --- PASO 3: Búsqueda de metadatos adicionales en Discogs (Año y Carátula) ---
+                query_term = self.build_discogs_query(
+                    values[1] if len(values) > 1 else "",
+                    values[2] if len(values) > 2 else "",
+                    fallback_text=re.sub(r'^\d+[\s\-_.]*', '', clean_name)
+                )
+                query_term = omit_pattern.sub('', query_term)
+                query_term = query_term.replace('_', ' ')
+                query_term = re.sub(r'\s+[._-]\s+', ' ', query_term)
+                query_term = re.sub(r'\s+', ' ', query_term).strip()
+
+                logger.info(f"Procesando archivo: '{new_filename}' (Búsqueda Discogs: '{query_term}')")
+
+                _, _, year, cover_url = self.search_discogs_api(query_term)
+
+                if year:
+                    values[7] = str(year)
+                    self.save_single_tag(file_path, "Year", str(year))
+
+                if already_has_cover:
+                    values[8] = "Sí"
+                    self.update_row_cover_status(row_id, "Sí")
+                elif cover_url:
+                    logger.info(f"Descargando carátula del vinilo desde: {cover_url}")
+                    image_data = self.download_image_bytes(cover_url)
+                    if image_data:
+                        image_data = self.normalize_cover_image_bytes(image_data)
+                        if self.audio_manager.embed_cover_art_verified(file_path, image_data):
+                            values[8] = "Sí"
+                            logger.info(f"Carátula incrustada con éxito en: {new_filename}")
+                            self.display_cover_art(image_data)
+                            self.update_row_cover_status(row_id, "Sí")
+                        else:
+                            values[8] = "No"
+                            logger.error(f"La carátula no quedó persistida en el archivo: {new_filename}")
+                    else:
+                        values[8] = "No"
+                        logger.warning(f"No se pudieron descargar los bytes de la carátula ({cover_url})")
+                else:
+                    values[8] = "No"
+                    logger.warning(f"Discogs no devolvió carátula para: '{query_term}'")
+                    self.update_row_cover_status(row_id, "No")
+
+                self.tree.item(row_id, values=values)
+                if metadata_changes:
+                    logger.info(f"Metadatos desde nombre -> {' | '.join(metadata_changes)}")
+                else:
+                    logger.info("Metadatos desde nombre -> sin cambios")
+                logger.info(f"Actualizado Discogs -> Año: '{year}'")
+
+                processed += 1
+                self.progress_bar.set(processed / total_files)
+                self.update_idletasks()
+
+            self.on_row_select(None)
+            logger.info("Procesamiento finalizado con éxito.")
+
+        finally:
+            # Restaurar el botón al estado normal siempre (incluso si hay excepciones)
+            if hasattr(self, 'btn_process'):
+                self.btn_process.configure(state="normal", text="Procesar")
+                self.update_idletasks()
 
     @staticmethod
     def _build_http_request(url, user_agent, timeout):
