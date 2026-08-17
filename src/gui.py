@@ -27,7 +27,7 @@ def get_resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 
-ruta_logo = get_resource_path("logo_blanco.png")
+ruta_logo = get_resource_path("assets/logo_blanco.png")
 if os.path.exists(ruta_logo):
     try:
         img_pil = Image.open(ruta_logo)
@@ -142,11 +142,11 @@ class App(ctk.CTk):
         self.gui_log_handler.setFormatter(formatter)
         logger.addHandler(self.gui_log_handler)
 
-        self.ico_path = get_resource_path("logo.ico")
-        png_path = get_resource_path("logo.png")
+        self.ico_path = get_resource_path("assets/logo.ico")
+        png_path = get_resource_path("assets/logo.png")
         self.app_icon_photo = None
 
-        icon_broom_img = Image.open("broom_icon.png")
+        icon_broom_img = Image.open("assets/broom_icon.png")
         self.broom_icon = ctk.CTkImage(
             light_image=icon_broom_img,
             dark_image=icon_broom_img,
