@@ -1,502 +1,528 @@
-import io
 import os
 import sys
+import time
 import tkinter as tk
-
+from tkinter import ttk
 import customtkinter as ctk
 from PIL import Image
 
-from ui_utils import ToolTip
 
-
-class DetailPanel:
-    """Panel lateral de metadatos y caratula desacoplado de la ventana principal."""
-
-    def __init__(self, app, parent, logger, get_resource_path, fallback_process_icon=None):
+class GridPanel:
+    def __init__(self, app, parent, logger):
         self.app = app
         self.parent = parent
         self.logger = logger
-        self.get_resource_path = get_resource_path
-        self.fallback_process_icon = fallback_process_icon
 
-        self.panel_combo_fields = {
-            "entry_album": "Album",
-            "entry_genre": "Genre",
-            "entry_publisher": "Publisher"
-        }
-        self.tag_entries = {}
-        self.multi_entries = {}
+        # Contenedor principal del grid
+        self.frame_grid = ctk.CTkFrame(self.parent)
+        self.frame_grid.pack(side="right", fill="both", expand=True, padx=(0, 0), pady=0)
 
-        self.frame_sidebar = None
-        self.label_cover = None
-        self._cover_context_menu = None
-        self._cover_context_menu_multi = None
-        self.btn_process = None
-        self.btn_clean = None
+        self._setup_styles()
+        self._build_treeview()
+        self._setup_context_menu()
 
-        self._setup_tag_panel()
+    def _setup_styles(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+        self.tree_edit_combo_style = "Sonometa.TreeEdit.TCombobox"
 
-    def _setup_tag_panel(self):
-        self.frame_sidebar = ctk.CTkFrame(self.parent, width=260)
-        self.frame_sidebar.pack(side="left", fill="y", padx=(0, 5), pady=0)
-        self.frame_sidebar.pack_propagate(False)
-
-        fields = [
-            ("Intérprete", "entry_artist"),
-            ("Título", "entry_title"),
-            ("Remix", "entry_mixartist"),
-            ("Álbum", "entry_album"),
-            ("Año", "entry_year"),
-            ("Género", "entry_genre"),
-            ("Etiqueta", "entry_publisher")
-        ]
-
-        for label_text, attr_name in fields:
-            lbl = ctk.CTkLabel(
-                self.frame_sidebar,
-                text=label_text,
-                anchor="w",
-                font=ctk.CTkFont(family="Inter", size=11, weight="bold")
-            )
-            lbl.pack(fill="x", padx=10, pady=(8, 2))
-
-            field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-            field_frame.pack(fill="x", padx=10, pady=(0, 4))
-
-            if attr_name in self.panel_combo_fields:
-                catalog_key = self.panel_combo_fields[attr_name]
-                widget = ctk.CTkComboBox(
-                    field_frame,
-                    values=self.app.get_catalog_combo_values(catalog_key),
-                    state="readonly",
-                    height=26,
-                    font=ctk.CTkFont(family="Inter", size=12),
-                    command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
-                )
-                widget.set("")
-                widget.bind("<Button-1>", lambda _e, _w=widget: self.on_panel_combo_click(_w))
-                widget.bind(
-                    "<FocusOut>",
-                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_focus_out(_attr, _cat)
-                )
-                widget.bind(
-                    "<Return>",
-                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_enter(_attr, _cat)
-                )
-            else:
-                widget = ctk.CTkEntry(field_frame, height=26, font=ctk.CTkFont(family="Inter", size=12))
-                widget.bind("<FocusOut>", lambda _e, _attr=attr_name: self.on_panel_text_field_commit(_attr))
-                widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
-
-            widget.pack(fill="x")
-            self.tag_entries[attr_name] = widget
-
-            is_catalog = attr_name in self.panel_combo_fields
-            multi_state = "readonly" if is_catalog else "normal"
-            multi_widget = ctk.CTkComboBox(
-                field_frame,
-                values=[self.app.KEEP_VALUE],
-                state=multi_state,
-                height=26,
-                font=ctk.CTkFont(size=12),
-                command=lambda _value, _a=attr_name: self.on_multi_panel_commit(_a)
-            )
-            if not is_catalog:
-                multi_widget.bind(
-                    "<Return>",
-                    lambda _e, _a=attr_name: self.on_multi_panel_commit(_a) or "break"
-                )
-                multi_widget.bind(
-                    "<FocusOut>",
-                    lambda _e, _a=attr_name: self.app.after(80, lambda: self.on_multi_panel_commit(_a))
-                )
-            self.multi_entries[attr_name] = multi_widget
-
-        lbl_cover_title = ctk.CTkLabel(
-            self.frame_sidebar,
-            text="Carátula",
-            anchor="w",
-            font=ctk.CTkFont(size=11, weight="bold")
-        )
-        lbl_cover_title.pack(fill="x", padx=5, pady=(8, 2))
-
-        self.label_cover = ctk.CTkLabel(
-            self.frame_sidebar,
-            text="Sin carátula",
-            width=180,
-            height=180,
-            fg_color="transparent",
-            text_color="gray",
-            border_color="#6B7280",
-            border_width=1,
-            cursor="hand2"
-        )
-        self.label_cover.pack(padx=5, pady=5)
-        ToolTip(self.label_cover, "Clic derecho para opciones de carátula")
-
-        self._cover_context_menu = tk.Menu(
-            self.app,
-            tearoff=0,
-            bg="#1E1E1E",
-            fg="#E0E0E0",
-            activebackground=self.app.CORP_COLOR,
-            activeforeground="#FFFFFF",
-            bd=0,
-            activeborderwidth=0,
-            relief="flat",
-            font=("Segoe UI", 10)
-        )
-        self._cover_context_menu.add_command(
-            label="📋  Pegar imagen desde el portapapeles",
-            command=self.app.paste_cover_from_clipboard
-        )
-        self._cover_context_menu.add_separator()
-        self._cover_context_menu.add_command(
-            label="🗑  Eliminar carátula",
-            command=self.app.remove_cover_art
-        )
-
-        self._cover_context_menu_multi = tk.Menu(
-            self.app,
-            tearoff=0,
-            bg="#252526",
-            fg="#FFFFFF",
-            activebackground=self.app.CORP_COLOR,
-            activeforeground="#FFFFFF",
-            bd=1,
-            relief="flat",
-            font=("Segoe UI", 10)
-        )
-        self._cover_context_menu_multi.add_command(
-            label="📋  Pegar imagen a todos los seleccionados",
-            command=self.app.paste_cover_from_clipboard
-        )
-        self._cover_context_menu_multi.add_separator()
-        self._cover_context_menu_multi.add_command(
-            label="🗑  Eliminar carátula de todos los seleccionados",
-            command=self.app.remove_cover_art
-        )
-
-        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
-        self.label_cover.bind(btn_right, self.show_cover_context_menu)
-
-        logo3_path = self.get_resource_path("logo_blanco.png")
-        btn_icon = None
-        if os.path.exists(logo3_path):
-            try:
-                img_logo3 = Image.open(logo3_path)
-                btn_icon = ctk.CTkImage(light_image=img_logo3, dark_image=img_logo3, size=(22, 22))
-            except Exception as e:
-                self.logger.error(f"Error al cargar logo_blanco.png para el botón Procesar: {str(e)}")
-
-        self.btn_process = ctk.CTkButton(
-            self.frame_sidebar,
-            text="Procesar",
-            image=btn_icon if btn_icon else self.fallback_process_icon,
-            compound="left",
-            fg_color=self.app.CORP_COLOR,
-            hover_color=self.app.CORP_HOVER,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=34,
-            command=self.app.process_discogs_data
-        )
-        self.btn_process.pack(fill="x", padx=5, pady=(6, 10))
-        ToolTip(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
-
-        self.btn_clean = ctk.CTkButton(
-            self.frame_sidebar,
-            text="Limpiar",
-            image=self.app.broom_icon,
-            compound="left",
-            fg_color="transparent",
-            border_color="#DC2626",
-            border_width=1,
-            text_color="#FFFFFF",
-            hover_color=("#FEE2E2", "#450A0A"),
-            corner_radius=8,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=34,
-            command=self.app.clear_selected_metadata
-        )
-        self.btn_clean.pack(fill="x", padx=5, pady=(0, 10))
-        ToolTip(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
-
-    def compute_common_panel_values(self, selected_rows):
-        result = {}
-        for attr_name, (_, col_index) in self.app.PANEL_FIELD_COL_MAP.items():
-            values_across_rows = []
-            for row_id in selected_rows:
-                vals = self.app.tree.item(row_id, "values")
-                v = str(vals[col_index]).strip() if col_index < len(vals) and vals[col_index] is not None else ""
-                values_across_rows.append(v)
-            unique = set(values_across_rows)
-            result[attr_name] = values_across_rows[0] if len(unique) == 1 else self.app.KEEP_VALUE
-        return result
-
-    def enter_multi_mode(self, selected_rows):
-        if not self.multi_entries:
-            return
-
-        common = self.compute_common_panel_values(selected_rows)
-
-        for attr_name, multi_widget in self.multi_entries.items():
-            normal_widget = self.tag_entries.get(attr_name)
-            if normal_widget:
-                normal_widget.pack_forget()
-
-            common_value = common.get(attr_name, self.app.KEEP_VALUE)
-            is_catalog = attr_name in self.panel_combo_fields
-
-            if is_catalog:
-                catalog_key = self.panel_combo_fields[attr_name]
-                catalog_vals = [
-                    v for v in self.app.catalog_values.get(catalog_key, [])
-                    if v and v != self.app.CLEAR_OPTION
-                ]
-                options = [self.app.KEEP_VALUE] + sorted(catalog_vals, key=lambda x: x.lower())
-            else:
-                _, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
-                distinct = sorted({
-                    str(self.app.tree.item(r, "values")[col_index]).strip()
-                    for r in selected_rows
-                    if col_index < len(self.app.tree.item(r, "values"))
-                    and self.app.tree.item(r, "values")[col_index]
-                })
-                options = [self.app.KEEP_VALUE] + [v for v in distinct if v]
-
-            multi_widget.configure(values=options)
-            multi_widget.set(common_value if common_value in options else self.app.KEEP_VALUE)
-            multi_widget.pack(fill="x")
-
-        self.app._multi_select_mode = True
-        self.display_multi_cover_placeholder(selected_rows=selected_rows)
-
-    def exit_multi_mode(self):
-        if not self.multi_entries:
-            return
-
-        for attr_name, multi_widget in self.multi_entries.items():
-            multi_widget.pack_forget()
-            normal_widget = self.tag_entries.get(attr_name)
-            if normal_widget:
-                normal_widget.pack(fill="x")
-
-        self.app._multi_select_mode = False
-
-    def on_multi_panel_commit(self, attr_name):
-        if not self.app._multi_select_mode:
-            return
-
-        multi_widget = self.multi_entries.get(attr_name)
-        if not multi_widget:
-            return
-
-        raw_value = multi_widget.get().strip()
-        if raw_value == self.app.KEEP_VALUE or raw_value == "":
-            return
-
-        if attr_name in self.panel_combo_fields:
-            new_value = self.app.normalize_catalog_text(raw_value) if raw_value != self.app.CLEAR_OPTION else ""
-        else:
-            new_value = raw_value
-
-        self.apply_field_to_all_selected(attr_name, new_value)
-
-    def apply_field_to_all_selected(self, attr_name, new_value):
-        if attr_name not in self.app.PANEL_FIELD_COL_MAP:
-            return
-
-        field_name, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
-        selected_rows = self.app.tree.selection()
-
-        updated = 0
-        for row_id in selected_rows:
-            values = list(self.app.tree.item(row_id, "values"))
-            if col_index >= len(values):
-                continue
-            if str(values[col_index]).strip() == new_value:
-                continue
-
-            values[col_index] = new_value
-            self.app.tree.item(row_id, values=values)
-
-            file_path = self.app.file_paths_map.get(row_id)
-            if file_path and os.path.exists(file_path):
-                self.app.save_single_tag(file_path, field_name, new_value)
-                updated += 1
-
-        if updated:
-            self.logger.info(
-                f"Campo '{field_name}' aplicado a {updated} archivo(s) seleccionado(s): '{new_value}'"
-            )
-
-    def display_multi_cover_placeholder(self, selected_rows=None):
-        selected_rows = list(selected_rows or self.app.tree.selection())
-        has_any_cover = any(self.app.row_has_cover(row_id) for row_id in selected_rows)
-        text = "Mantener carátulas" if has_any_cover else "Sin carátula"
-        self.label_cover.configure(image="", text=text, text_color="gray")
-        self.label_cover.image = None
-
-    def refresh_process_button_text(self, selected_count=None):
-        if selected_count is None:
-            selected_count = len(self.app.tree.selection())
-        button_text = "Procesar selección" if selected_count > 1 else "Procesar"
-        self.btn_process.configure(text=button_text)
-
-    def display_cover_art(self, file_path_or_bytes):
-        cover_data = None
-
-        if isinstance(file_path_or_bytes, (bytes, bytearray)):
-            cover_data = file_path_or_bytes
-        elif isinstance(file_path_or_bytes, str) and os.path.exists(file_path_or_bytes):
-            cover_data = self.app.audio_manager.extract_cover_bytes(file_path_or_bytes)
-
-        if cover_data:
-            try:
-                image_stream = io.BytesIO(cover_data)
-                img = Image.open(image_stream)
-
-                if img.mode not in ("RGB", "RGBA"):
-                    img = img.convert("RGB")
-
-                img = img.resize((180, 180), Image.Resampling.LANCZOS)
-
-                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(180, 180))
-                self.label_cover.configure(image=ctk_img, text="")
-                self.label_cover.image = ctk_img
-                return
-            except Exception as e:
-                self.logger.error(f"Error procesando vista previa de la carátula: {str(e)}")
-
-        self.label_cover.configure(image="", text="Sin carátula")
-        self.label_cover.image = None
-
-    def show_cover_context_menu(self, event):
-        menu = self._cover_context_menu_multi if self.app._multi_select_mode else self._cover_context_menu
         try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-
-    def refresh_catalog_comboboxes(self):
-        for attr_name, catalog_key in self.panel_combo_fields.items():
-            combo = self.tag_entries.get(attr_name)
-            if not combo:
-                continue
-            current_value = combo.get().strip()
-            allowed_values = self.app.get_catalog_combo_values(catalog_key)
-            combo.configure(values=allowed_values)
-            if current_value in allowed_values:
-                combo.set(current_value)
-            else:
-                combo.set("")
-
-    def set_panel_widget_value(self, attr_name, value):
-        widget = self.tag_entries.get(attr_name)
-        if not widget:
-            return
-
-        value_str = str(value) if value else ""
-        if attr_name in self.panel_combo_fields:
-            catalog_key = self.panel_combo_fields[attr_name]
-            normalized_value = self.app.normalize_catalog_text(value_str)
-            self.app.add_catalog_value(catalog_key, normalized_value, persist=False)
-            widget.set(normalized_value)
-            return
-
-        widget.delete(0, "end")
-        widget.insert(0, value_str)
-
-    def on_panel_catalog_selected(self, attr_name, catalog_key):
-        selected_rows = self.app.tree.selection()
-        if not selected_rows:
-            self.logger.info(
-                f"Selección de catálogo ignorada ({self.app.catalog_labels.get(catalog_key, catalog_key)}): no hay fila seleccionada."
-            )
-            return
-
-        if self.app._multi_select_mode:
-            self.on_multi_panel_commit(attr_name)
-            return
-
-        row_id = selected_rows[0]
-        combo = self.tag_entries.get(attr_name)
-        if not combo:
-            return
-
-        raw_value = combo.get().strip()
-        new_value = "" if raw_value == self.app.CLEAR_OPTION else self.app.normalize_catalog_text(raw_value)
-        self.app._apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
-
-    @staticmethod
-    def on_panel_combo_click(combo_widget):
-        try:
-            combo_widget.focus_set()
-            combo_widget._open_dropdown_menu()
+            base_layout = style.layout("TCombobox")
+            style.layout(self.tree_edit_combo_style, self._remove_combobox_arrow_from_layout(base_layout))
         except Exception:
             pass
-        return "break"
 
-    def on_panel_catalog_enter(self, attr_name, catalog_key):
-        self.on_panel_catalog_selected(attr_name, catalog_key)
-        return "break"
+        style.configure(
+            self.tree_edit_combo_style,
+            fieldbackground="#181818",
+            background="#181818",
+            foreground="#E0E0E0",
+            selectbackground="#181818",
+            selectforeground="#E0E0E0",
+            arrowcolor="#181818",
+            relief="flat",
+            borderwidth=0,
+            padding=(3, 2)
+        )
+        style.map(
+            self.tree_edit_combo_style,
+            fieldbackground=[("readonly", "#181818"), ("focus", "#181818")],
+            background=[("readonly", "#181818"), ("focus", "#181818")],
+            foreground=[("readonly", "#E0E0E0"), ("focus", "#E0E0E0")],
+            selectbackground=[("readonly", "#181818"), ("focus", "#181818")],
+            selectforeground=[("readonly", "#E0E0E0"), ("focus", "#E0E0E0")],
+            arrowcolor=[("readonly", "#181818"), ("focus", "#181818")]
+        )
 
-    def on_panel_catalog_focus_out(self, attr_name, catalog_key):
-        self.app.after(50, lambda a=attr_name, c=catalog_key: self.on_panel_catalog_selected(a, c))
+        style.configure(
+            "Treeview",
+            background="#181818",
+            foreground="#E0E0E0",
+            fieldbackground="#181818",
+            rowheight=28,
+            font=('Segoe UI', 9),
+            borderwidth=0,
+            relief="flat"
+        )
 
-    def on_panel_text_field_enter(self, attr_name):
-        self.on_panel_text_field_commit(attr_name)
-        return "break"
+        style.configure("Treeview.Item", borderwidth=0, relief="flat", padding=(4, 0))
 
-    def on_panel_text_field_commit(self, attr_name):
-        text_column_map = {
-            "entry_artist": ("Artist", 1),
-            "entry_title": ("Title", 2),
-            "entry_mixartist": ("MixArtist", 3),
-            "entry_year": ("Year", 7),
+        style.configure(
+            "Treeview.Heading",
+            background="#111111",
+            foreground="#FFFFFF",
+            font=('Segoe UI', 9, 'bold'),
+            borderwidth=0,
+            relief="flat",
+            padding=(5, 5)
+        )
+        style.map("Treeview", background=[('selected', self.app.CORP_COLOR)])
+        style.map("Treeview.Heading", background=[('active', '#2A2D32')])
+
+    def _build_treeview(self):
+        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
+        self.tree = ttk.Treeview(self.frame_grid, columns=self.columns, show="headings", selectmode="extended")
+
+        col_titles = {
+            "Filename": "Nombre de archivo",
+            "Artist": "Intérprete",
+            "Title": "Título",
+            "MixArtist": "Remix",
+            "Album": "Álbum",
+            "Genre": "Género",
+            "Publisher": "Etiqueta",
+            "Year": "Año",
+            "Cover": "Carátula"
         }
-        if attr_name not in text_column_map:
+
+        col_config = {
+            "Filename":  {"width": 280, "minwidth": 180, "stretch": True,  "anchor": "w"},
+            "Artist":    {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
+            "Title":     {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
+            "MixArtist": {"width": 160, "minwidth": 100, "stretch": True,  "anchor": "w"},
+            "Album":     {"width": 100, "minwidth": 70,  "stretch": False, "anchor": "w"},
+            "Genre":     {"width": 70,  "minwidth": 50,  "stretch": False, "anchor": "w"},
+            "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
+            "Year":      {"width": 45,  "minwidth": 40,  "stretch": False, "anchor": "center"},
+            "Cover":     {"width": 55,  "minwidth": 45,  "stretch": False, "anchor": "center"}
+        }
+
+        for col in self.columns:
+            self.app.sort_directions[col] = False
+            title = col_titles.get(col, col)
+            cfg = col_config[col]
+
+            self.tree.heading(col, text=title, command=lambda _col=col: self.app.sort_by_column(_col))
+            self.tree.column(
+                col,
+                width=cfg["width"],
+                minwidth=cfg["minwidth"],
+                anchor=cfg["anchor"],
+                stretch=cfg["stretch"]
+            )
+
+        self.tree.tag_configure("even", background="#181818")
+        self.tree.tag_configure("odd", background="#1E1E1E")
+
+        self.tree.bind("<<TreeviewSelect>>", self.app.on_row_select)
+        self.tree.bind("<Double-1>", self.on_cell_double_click)
+        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
+        self.tree.bind(btn_right, self._show_tree_context_menu)
+
+        self.vsb = ttk.Scrollbar(self.frame_grid, orient="vertical", command=self.tree.yview)
+        self.hsb = ttk.Scrollbar(self.frame_grid, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=self._on_tree_y_scroll, xscrollcommand=self._on_tree_x_scroll)
+
+        self.tree.pack(fill="both", expand=True)
+        self.tree.bind("<Configure>", lambda _e: self._update_tree_scrollbars(), add="+")
+        self.app.after_idle(self._update_tree_scrollbars)
+
+    def _setup_context_menu(self):
+        self._tree_context_menu = tk.Menu(
+            self.app, tearoff=0,
+            bg="#252526", fg="#FFFFFF",
+            activebackground=self.app.CORP_COLOR, activeforeground="#FFFFFF",
+            bd=1, relief="flat", font=('Segoe UI', 10)
+        )
+        self._tree_context_menu.add_command(label="Procesar", command=self.app.process_discogs_data)
+        self._tree_context_menu.add_command(label="Limpiar", command=self.app.clear_selected_metadata)
+
+    def _show_tree_context_menu(self, event):
+        row_id = self.tree.identify_row(event.y)
+        if not row_id:
             return
 
-        selected_rows = self.app.tree.selection()
-        if not selected_rows:
-            return
+        selected_rows = self.tree.selection()
+        if row_id not in selected_rows:
+            self.tree.selection_set(row_id)
 
-        if self.app._multi_select_mode:
-            self.on_multi_panel_commit(attr_name)
-            return
+        self.tree.focus(row_id)
+        self.app.on_row_select(None)
 
-        row_id = selected_rows[0]
-        widget = self.tag_entries.get(attr_name)
-        if not widget:
-            return
+        try:
+            self._tree_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._tree_context_menu.grab_release()
 
-        new_value = widget.get().strip()
-        col_name, col_index = text_column_map[attr_name]
-        values = list(self.app.tree.item(row_id, "values"))
-        if col_index >= len(values):
-            return
+    def _on_tree_y_scroll(self, first, last):
+        self._update_scrollbar(self.vsb, first, last, side="right", fill="y")
 
-        current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
-        if current_value == new_value:
-            return
+    def _on_tree_x_scroll(self, first, last):
+        self._update_scrollbar(self.hsb, first, last, side="bottom", fill="x")
 
-        values[col_index] = new_value
-        self.app.tree.item(row_id, values=values)
+    def _update_scrollbar(self, scrollbar, first, last, side, fill):
+        scrollbar.set(first, last)
+        needs_scroll = float(first) > 0.0 or float(last) < 1.0
+        if needs_scroll and not scrollbar.winfo_ismapped():
+            scrollbar.pack(side=side, fill=fill)
+        elif not needs_scroll and scrollbar.winfo_ismapped():
+            scrollbar.pack_forget()
 
-        file_path = self.app.file_paths_map.get(row_id)
-        if file_path:
-            self.app.save_single_tag(file_path, col_name, new_value)
+    def _update_tree_scrollbars(self):
+        x_first, x_last = self.tree.xview()
+        y_first, y_last = self.tree.yview()
+        self._on_tree_x_scroll(x_first, x_last)
+        self._on_tree_y_scroll(y_first, y_last)
 
-        self.logger.info(f"Campo '{col_name}' actualizado desde panel izquierdo: '{current_value}' -> '{new_value}'")
+    @staticmethod
+    def _remove_combobox_arrow_from_layout(layout):
+        cleaned = []
+        for item in layout:
+            if not isinstance(item, tuple) or len(item) < 2:
+                cleaned.append(item)
+                continue
 
-    def clear_fields(self):
-        for widget in self.tag_entries.values():
-            if isinstance(widget, ctk.CTkComboBox):
-                widget.set("")
+            element, options = item[0], item[1]
+            if isinstance(element, str) and "downarrow" in element.lower():
+                continue
+
+            if isinstance(options, dict):
+                new_options = dict(options)
+                children = new_options.get("children")
+                if children:
+                    new_options["children"] = GridPanel._remove_combobox_arrow_from_layout(children)
+                cleaned.append((element, new_options))
             else:
-                widget.delete(0, "end")
+                cleaned.append(item)
 
-        self.label_cover.configure(image="", text="Sin carátula")
-        self.label_cover.image = None
+        return cleaned
 
+    def _open_tree_combo_dropdown(self, widget):
+        try:
+            widget.focus_set()
+            widget.tk.call("ttk::combobox::Post", str(widget))
+        except Exception:
+            try:
+                widget.event_generate("<Down>")
+            except Exception:
+                pass
+
+    def _close_tree_combo_dropdown(self, widget):
+        try:
+            widget.tk.call("ttk::combobox::Unpost", str(widget))
+        except Exception:
+            pass
+
+    def _is_tree_combo_dropdown_open(self, widget):
+        try:
+            popdown = widget.tk.call("ttk::combobox::PopdownWindow", str(widget))
+            return bool(int(widget.tk.call("winfo", "ismapped", popdown)))
+        except Exception:
+            return False
+
+    def _get_next_tree_edit_target(self, row_id, col_index, direction):
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+        if col_index not in editable_cols:
+            return None
+
+        rows = list(self.tree.get_children())
+        try:
+            row_pos = rows.index(row_id)
+            col_pos = editable_cols.index(col_index)
+        except ValueError:
+            return None
+
+        if direction == "tab":
+            if col_pos < len(editable_cols) - 1:
+                return rows[row_pos], editable_cols[col_pos + 1]
+            if row_pos < len(rows) - 1:
+                return rows[row_pos + 1], editable_cols[0]
+        elif direction == "shift_tab":
+            if col_pos > 0:
+                return rows[row_pos], editable_cols[col_pos - 1]
+            if row_pos > 0:
+                return rows[row_pos - 1], editable_cols[-1]
+        elif direction == "enter":
+            if row_pos < len(rows) - 1:
+                return rows[row_pos + 1], col_index
+        elif direction == "shift_enter":
+            if row_pos > 0:
+                return rows[row_pos - 1], col_index
+
+        return None
+
+    def _start_tree_cell_edit(self, row_id, col_index, open_dropdown=True):
+        if col_index < 0 or col_index >= len(self.columns):
+            return
+
+        col_name = self.columns[col_index]
+        if col_name == "Cover":
+            return
+
+        if self.app.cell_entry:
+            self.app.cell_entry.destroy()
+            self.app.cell_entry = None
+
+        column_id = f"#{col_index + 1}"
+        bbox = self.tree.bbox(row_id, column_id)
+        if not bbox:
+            return
+        x, y, w, h = bbox
+
+        row_values = self.tree.item(row_id, "values")
+        if col_index >= len(row_values):
+            return
+        current_value = row_values[col_index]
+
+        managed_grid_fields = {"Album", "Genre", "Publisher"}
+        if col_name in managed_grid_fields:
+            entry = ttk.Combobox(
+                self.tree,
+                state="readonly",
+                values=self.app.get_catalog_combo_values(col_name),
+                style=self.tree_edit_combo_style,
+                exportselection=False
+            )
+        else:
+            entry = ttk.Entry(self.tree)
+
+        current_value_str = str(current_value)
+        if col_name == "Filename":
+            current_stem, _ = os.path.splitext(current_value_str)
+            entry.insert(0, current_stem)
+        else:
+            if col_name in managed_grid_fields:
+                current_options = list(self.app.catalog_values.get(col_name, []))
+                if current_value_str and current_value_str not in current_options:
+                    current_options.append(current_value_str)
+                    current_options.sort(key=lambda x: x.lower())
+                entry.configure(values=current_options + [self.app.CLEAR_OPTION])
+                entry.set(current_value_str)
+            else:
+                entry.insert(0, current_value_str)
+
+        if col_name not in managed_grid_fields:
+            entry.select_range(0, "end")
+        entry.focus_set()
+        entry.place(x=x, y=y, width=w, height=h)
+        if col_name in managed_grid_fields:
+            if open_dropdown:
+                entry.after(50, lambda w=entry: self._open_tree_combo_dropdown(w) if w.winfo_exists() else None)
+
+        finalized = False
+
+        def save_edit(evt=None):
+            nonlocal finalized
+            if finalized:
+                return True
+            finalized = True
+            self._close_tree_combo_dropdown(entry)
+            new_value = entry.get().strip()
+            entry.destroy()
+            self.app.cell_entry = None
+
+            if col_name in managed_grid_fields:
+                if new_value == self.app.CLEAR_OPTION:
+                    new_value = ""
+                new_value = self.app.normalize_catalog_text(new_value)
+
+            if col_name == "Filename":
+                if not new_value:
+                    self.logger.warning("Nombre de archivo vacío: se cancela el renombrado.")
+                    self.app.show_themed_dialog("Nombre no válido", "El nombre del archivo no puede estar vacío.", level="warning")
+                    return False
+
+                safe_name = new_value.replace("/", "_").replace("\\", "_").rstrip(".").strip()
+                if not safe_name:
+                    self.logger.warning("Nombre de archivo inválido: se cancela el renombrado.")
+                    self.app.show_themed_dialog("Nombre no válido", "El nombre del archivo no es válido.", level="warning")
+                    return False
+
+                original_filename = current_value_str.strip()
+                _, original_ext = os.path.splitext(original_filename)
+                final_filename = f"{safe_name}{original_ext}"
+
+                if final_filename == original_filename:
+                    return True
+
+                file_path = self.app.file_paths_map.get(row_id)
+                if not file_path or not os.path.exists(file_path):
+                    self.logger.error("No se puede renombrar: archivo no encontrado.")
+                    self.app.show_themed_dialog("Archivo no encontrado", "No se puede renombrar porque el archivo ya no existe en disco.", level="error")
+                    return False
+
+                target_path = os.path.join(os.path.dirname(file_path), final_filename)
+                if os.path.normcase(target_path) != os.path.normcase(file_path) and os.path.exists(target_path):
+                    self.logger.warning(f"Ya existe un archivo con ese nombre: {final_filename}")
+                    self.app.show_themed_dialog("Nombre en uso", f"Ya existe un archivo con el nombre:\n{final_filename}", level="warning")
+                    return False
+
+                try:
+                    os.rename(file_path, target_path)
+                    self.app.file_paths_map[row_id] = target_path
+
+                    values = list(self.tree.item(row_id, "values"))
+                    values[col_index] = final_filename
+                    self.tree.item(row_id, values=values)
+                    self.app.on_row_select(None)
+                    self.logger.info(f"Renombrado manual: '{original_filename}' -> '{final_filename}'")
+                except Exception as e:
+                    self.logger.error(f"No se pudo renombrar el archivo '{original_filename}': {str(e)}")
+                    self.app.show_themed_dialog("Error al renombrar", f"No se pudo renombrar el archivo:\n{str(e)}", level="error")
+                    return False
+
+                return True
+
+            if new_value == current_value_str.strip():
+                return True
+
+            if col_name in managed_grid_fields and new_value and new_value not in self.app.catalog_values.get(col_name, []):
+                self.app.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.app.catalog_labels[col_name]}.", level="warning")
+                return False
+
+            values = list(self.tree.item(row_id, "values"))
+            values[col_index] = new_value
+            self.tree.item(row_id, values=values)
+
+            self.app.on_row_select(None)
+
+            file_path = self.app.file_paths_map.get(row_id)
+            file_path and self.app.save_single_tag(file_path, col_name, new_value)
+
+            return True
+
+        def navigate(direction):
+            if save_edit():
+                next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
+                if next_target:
+                    next_row_id, next_col_index = next_target
+                    self.app.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
+            return "break"
+
+        def commit_combo_selection(evt=None):
+            entry.after_idle(save_edit)
+            return "break"
+
+        combo_type_state = {"buffer": "", "last_ts": 0.0, "matches": [], "match_idx": 0}
+
+        def on_combo_type_search(evt=None):
+            if col_name not in managed_grid_fields or evt is None:
+                return
+
+            if evt.keysym in {"Return", "KP_Enter", "Tab", "ISO_Left_Tab", "Up", "Down", "Left", "Right", "Escape"}:
+                return
+
+            values = [str(v) for v in entry.cget("values") if str(v) != self.app.CLEAR_OPTION]
+            if not values:
+                return "break"
+
+            now = time.monotonic()
+            if now - combo_type_state["last_ts"] > 1.0:
+                combo_type_state["buffer"] = ""
+            combo_type_state["last_ts"] = now
+
+            if evt.keysym == "BackSpace":
+                combo_type_state["buffer"] = combo_type_state["buffer"][:-1]
+            else:
+                char = evt.char or ""
+                if not char.isprintable() or char.isspace():
+                    return "break"
+                combo_type_state["buffer"] += char.lower()
+
+            if not combo_type_state["buffer"]:
+                return "break"
+
+            buffer = combo_type_state["buffer"]
+            matches = [v for v in values if v.lower().startswith(buffer)] or [v for v in values if buffer in v.lower()]
+            combo_type_state["matches"] = matches
+            combo_type_state["match_idx"] = 0
+            if matches:
+                match = matches[0]
+                try:
+                    idx = list(entry.cget("values")).index(match)
+                    entry.current(idx)
+                except Exception:
+                    entry.set(match)
+
+            return "break"
+
+        def on_combo_cycle(forward=True):
+            matches = combo_type_state.get("matches", [])
+            if not matches:
+                if forward:
+                    self._open_tree_combo_dropdown(entry)
+                return "break"
+
+            idx = combo_type_state["match_idx"]
+            idx = (idx + 1) % len(matches) if forward else (idx - 1) % len(matches)
+            combo_type_state["match_idx"] = idx
+            match = matches[idx]
+            try:
+                all_values = list(entry.cget("values"))
+                entry.current(all_values.index(match))
+            except Exception:
+                entry.set(match)
+            return "break"
+
+        def clear_combo_value(evt=None):
+            if col_name not in managed_grid_fields:
+                return
+            combo_type_state["buffer"] = ""
+            combo_type_state["matches"] = []
+            combo_type_state["match_idx"] = 0
+            entry.set("")
+            save_edit()
+            return "break"
+
+        def on_focus_out(evt=None):
+            def commit_if_closed():
+                if col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry):
+                    return
+                save_edit()
+
+            entry.after(120, commit_if_closed)
+
+        entry.bind("<Return>", lambda _e: navigate("enter"))
+        entry.bind("<Shift-Return>", lambda _e: navigate("shift_enter"))
+        entry.bind("<Tab>", lambda _e: navigate("tab"))
+        entry.bind("<Shift-Tab>", lambda _e: navigate("shift_tab"))
+        entry.bind("<ISO_Left_Tab>", lambda _e: navigate("shift_tab"))
+        if col_name in managed_grid_fields:
+            entry.bind("<<ComboboxSelected>>", commit_combo_selection)
+            entry.bind("<KeyPress>", on_combo_type_search)
+            entry.bind("<Down>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
+            entry.bind("<space>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
+            entry.bind("<Down>", lambda _e: on_combo_cycle(forward=True))
+            entry.bind("<Up>", lambda _e: on_combo_cycle(forward=False))
+            entry.bind("<Delete>", clear_combo_value)
+            entry.bind("<KP_Delete>", clear_combo_value)
+            entry.bind("<BackSpace>", clear_combo_value)
+        entry.bind("<FocusOut>", on_focus_out)
+        self.app.cell_entry = entry
+
+    def on_cell_double_click(self, event):
+        region = self.tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+
+        column_id = self.tree.identify_column(event.x)
+        col_index = int(column_id.replace("#", "")) - 1
+        if col_index < 0 or col_index >= len(self.columns):
+            return
+
+        if self.columns[col_index] == "Cover":
+            return
+
+        row_id = self.tree.identify_row(event.y)
+        if row_id:
+            self._start_tree_cell_edit(row_id, col_index)
