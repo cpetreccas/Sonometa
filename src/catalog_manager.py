@@ -151,7 +151,7 @@ class CatalogManager:
 
             file_path = self.app.file_paths_map.get(row_id)
             if file_path:
-                self.app.save_single_tag(file_path, col_name, new_value)
+                self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
             updated_count += 1
 
         return updated_count

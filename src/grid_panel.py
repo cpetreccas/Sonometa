@@ -289,7 +289,7 @@ class GridPanel:
             entry = ttk.Combobox(
                 self.tree,
                 state="readonly",
-                values=self.app.get_catalog_combo_values(col_name),
+                values=self.app.catalog_manager.get_catalog_combo_values(col_name),
                 style=self.tree_edit_combo_style,
                 exportselection=False
             )
@@ -334,7 +334,7 @@ class GridPanel:
             if col_name in managed_grid_fields:
                 if new_value == self.app.CLEAR_OPTION:
                     new_value = ""
-                new_value = self.app.normalize_catalog_text(new_value)
+                new_value = self.app.catalog_manager.normalize_catalog_text(new_value)
 
             if col_name == "Filename":
                 if not new_value:
@@ -397,7 +397,7 @@ class GridPanel:
             self.app.detail_panel.on_row_select(None)
 
             file_path = self.app.file_paths_map.get(row_id)
-            file_path and self.app.save_single_tag(file_path, col_name, new_value)
+            file_path and self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
 
             return True
 

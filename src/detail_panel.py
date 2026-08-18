@@ -72,7 +72,7 @@ class DetailPanel:
                 catalog_key = self.panel_combo_fields[attr_name]
                 widget = ctk.CTkComboBox(
                     field_frame,
-                    values=self.app.get_catalog_combo_values(catalog_key),
+                    values=self.app.catalog_manager.get_catalog_combo_values(catalog_key),
                     state="readonly",
                     height=26,
                     font=ctk.CTkFont(family="Inter", size=12),
@@ -301,7 +301,7 @@ class DetailPanel:
             return
 
         if attr_name in self.panel_combo_fields:
-            new_value = self.app.normalize_catalog_text(raw_value) if raw_value != self.app.CLEAR_OPTION else ""
+            new_value = self.app.catalog_manager.normalize_catalog_text(raw_value) if raw_value != self.app.CLEAR_OPTION else ""
         else:
             new_value = raw_value
 
@@ -327,7 +327,7 @@ class DetailPanel:
 
             file_path = self.app.file_paths_map.get(row_id)
             if file_path and os.path.exists(file_path):
-                self.app.save_single_tag(file_path, field_name, new_value)
+                self.app.audio_manager.save_single_tag(file_path, field_name, new_value)
                 updated += 1
 
         if updated:
@@ -389,7 +389,7 @@ class DetailPanel:
             if not combo:
                 continue
             current_value = combo.get().strip()
-            allowed_values = self.app.get_catalog_combo_values(catalog_key)
+            allowed_values = self.app.catalog_manager.get_catalog_combo_values(catalog_key)
             combo.configure(values=allowed_values)
             if current_value in allowed_values:
                 combo.set(current_value)
@@ -404,8 +404,8 @@ class DetailPanel:
         value_str = str(value) if value else ""
         if attr_name in self.panel_combo_fields:
             catalog_key = self.panel_combo_fields[attr_name]
-            normalized_value = self.app.normalize_catalog_text(value_str)
-            self.app.add_catalog_value(catalog_key, normalized_value, persist=False)
+            normalized_value = self.app.catalog_manager.normalize_catalog_text(value_str)
+            self.app.catalog_manager.add_catalog_value(catalog_key, normalized_value, persist=False)
             widget.set(normalized_value)
             return
 
@@ -430,7 +430,7 @@ class DetailPanel:
             return
 
         raw_value = combo.get().strip()
-        new_value = "" if raw_value == self.app.CLEAR_OPTION else self.app.normalize_catalog_text(raw_value)
+        new_value = "" if raw_value == self.app.CLEAR_OPTION else self.app.catalog_manager.normalize_catalog_text(raw_value)
         self.app._apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
 
     @staticmethod
@@ -491,7 +491,7 @@ class DetailPanel:
 
         file_path = self.app.file_paths_map.get(row_id)
         if file_path:
-            self.app.save_single_tag(file_path, col_name, new_value)
+            self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
 
         self.logger.info(f"Campo '{col_name}' actualizado desde panel izquierdo: '{current_value}' -> '{new_value}'")
 
@@ -580,7 +580,7 @@ class DetailPanel:
 
             if file_path and os.path.exists(file_path):
                 # 1. Eliminar la carátula físicamente del archivo de audio
-                self.app._strip_cover_tags(file_path)
+                self.app.audio_manager.strip_cover_tags(file_path)
 
                 # 2. Actualizar el estado de la fila en la tabla a "No"
                 self.app.update_row_cover_status(row_id, "No")
