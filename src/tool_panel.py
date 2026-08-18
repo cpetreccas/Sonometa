@@ -33,14 +33,23 @@ class ToolPanel(ctk.CTkFrame):
             activebackground=app.CORP_COLOR, activeforeground="#FFFFFF",
             bd=1, relief="flat", font=('Segoe UI', 10)
         )
-        self.menu_acciones.add_command(label="Procesar con Discogs", command=app.process_discogs_data)
-        self.menu_acciones.add_command(label="Seleccionar todo  (Ctrl+A)", command=app.select_all_rows)
+        self.menu_acciones.add_command(
+            label="Procesar con Discogs",
+            command=lambda: app.process_manager.process_discogs_data()
+        )
+        self.menu_acciones.add_command(
+            label="Seleccionar todo  (Ctrl+A)",
+            command=lambda: app.grid_panel.select_all_rows()
+        )
         self.menu_acciones.add_command(
             label="Buscar en la lista  (Ctrl+F)",
             command=lambda: app.search_manager.toggle_search_bar()
         )
         self.menu_acciones.add_separator()
-        self.menu_acciones.add_command(label="Limpiar todo", command=app.clear_all_loaded_metadata)
+        self.menu_acciones.add_command(
+    label="Limpiar todo",
+    command=lambda: app.process_manager.clear_all_loaded_metadata()
+)
 
         self.menu_gestionar = tk.Menu(
             app, tearoff=0, bg="#252526", fg="#FFFFFF",

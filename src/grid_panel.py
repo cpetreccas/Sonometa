@@ -4,7 +4,6 @@ import time
 import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
-from detail_panel import DetailPanel
 
 
 class GridPanel:
@@ -20,6 +19,7 @@ class GridPanel:
         self._setup_styles()
         self._build_treeview()
         self._setup_context_menu()
+        self.cell_entry = None
 
     def _setup_styles(self):
         style = ttk.Style()
@@ -112,7 +112,7 @@ class GridPanel:
             title = col_titles.get(col, col)
             cfg = col_config[col]
 
-            self.tree.heading(col, text=title, command=lambda _col=col: self.app.sort_by_column(_col))
+            self.tree.heading(col, text=title, command=lambda _col=col: self.sort_by_column(_col))
             self.tree.column(
                 col,
                 width=cfg["width"],
@@ -144,8 +144,14 @@ class GridPanel:
             activebackground=self.app.CORP_COLOR, activeforeground="#FFFFFF",
             bd=1, relief="flat", font=('Segoe UI', 10)
         )
-        self._tree_context_menu.add_command(label="Procesar", command=self.app.process_discogs_data)
-        self._tree_context_menu.add_command(label="Limpiar", command=self.app.clear_selected_metadata)
+        self._tree_context_menu.add_command(
+            label="Procesar",
+            command=lambda: self.app.process_manager.process_discogs_data()
+        )
+        self._tree_context_menu.add_command(
+            label="Limpiar",
+            command=lambda: self.app.process_manager.clear_selected_metadata()
+        )
 
     def _show_tree_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
@@ -269,9 +275,9 @@ class GridPanel:
         if col_name == "Cover":
             return
 
-        if self.app.cell_entry:
-            self.app.cell_entry.destroy()
-            self.app.cell_entry = None
+        if self.cell_entry:
+            self.cell_entry.destroy()
+            self.cell_entry = None
 
         column_id = f"#{col_index + 1}"
         bbox = self.tree.bbox(row_id, column_id)
@@ -302,7 +308,7 @@ class GridPanel:
             entry.insert(0, current_stem)
         else:
             if col_name in managed_grid_fields:
-                current_options = list(self.app.catalog_values.get(col_name, []))
+                current_options = list(self.app.catalog_manager.catalog_values.get(col_name, []))
                 if current_value_str and current_value_str not in current_options:
                     current_options.append(current_value_str)
                     current_options.sort(key=lambda x: x.lower())
@@ -329,7 +335,7 @@ class GridPanel:
             self._close_tree_combo_dropdown(entry)
             new_value = entry.get().strip()
             entry.destroy()
-            self.app.cell_entry = None
+            self.cell_entry = None
 
             if col_name in managed_grid_fields:
                 if new_value == self.app.CLEAR_OPTION:
@@ -386,8 +392,8 @@ class GridPanel:
             if new_value == current_value_str.strip():
                 return True
 
-            if col_name in managed_grid_fields and new_value and new_value not in self.app.catalog_values.get(col_name, []):
-                self.app.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.app.catalog_labels[col_name]}.", level="warning")
+            if col_name in managed_grid_fields and new_value and new_value not in self.app.catalog_manager.catalog_values.get(col_name, []):
+                self.app.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.app.catalog_manager.catalog_labels[col_name]}.", level="warning")
                 return False
 
             values = list(self.tree.item(row_id, "values"))
@@ -508,7 +514,7 @@ class GridPanel:
             entry.bind("<KP_Delete>", clear_combo_value)
             entry.bind("<BackSpace>", clear_combo_value)
         entry.bind("<FocusOut>", on_focus_out)
-        self.app.cell_entry = entry
+        self.cell_entry = entry
 
     def on_cell_double_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
@@ -526,3 +532,61 @@ class GridPanel:
         row_id = self.tree.identify_row(event.y)
         if row_id:
             self._start_tree_cell_edit(row_id, col_index)
+
+    def sort_by_column(self, col):
+        """Ordena el Treeview al hacer clic en el encabezado de una columna."""
+        data = [(self.tree.set(child, col), child) for child in self.tree.get_children('')]
+        reverse = self.app.sort_directions.get(col, False)
+        data.sort(key=lambda x: str(x[0]).lower(), reverse=reverse)
+
+        for index, item in enumerate(data):
+            self.tree.move(item[1], '', index)
+            tag = "even" if index % 2 == 0 else "odd"
+            self.tree.item(item[1], tags=(tag,))
+
+        self.app.sort_directions[col] = not reverse
+
+    def select_all_rows(self):
+        """Selecciona todos los elementos cargados en la tabla."""
+        all_items = self.tree.get_children()
+        self.tree.selection_set(all_items)
+        self.app.detail_panel.refresh_process_button_text(len(all_items))
+        self.logger.info(f"Seleccionados todos los {len(all_items)} archivo(s).")
+
+    def row_has_cover(self, row_id) -> bool:
+        """Verifica si la fila tiene carátula incrustada (columna 8)."""
+        try:
+            values = list(self.tree.item(row_id, "values"))
+            return len(values) > 8 and str(values[8]).strip().lower() in ("sí", "si", "yes", "true", "1")
+        except Exception:
+            return False
+
+    def update_row_cover_status(self, row_id, status="Sí"):
+        """Actualiza la columna de carátula en la fila especificada."""
+        values = list(self.tree.item(row_id, "values"))
+        if len(values) > 8:
+            values[8] = status
+            self.tree.item(row_id, values=values)
+
+    def get_row_artist_title(self, row_id):
+        """Devuelve una tupla (artista, título) de la fila."""
+        values = list(self.tree.item(row_id, "values"))
+        artist = values[1] if len(values) > 1 else ""
+        title = values[2] if len(values) > 2 else ""
+        return artist, title
+
+    def insert_audio_row(self, metadata, count):
+        """Inserta un registro formateado dentro del Treeview aplicando etiquetas alternadas."""
+        tag = "even" if count % 2 == 0 else "odd"
+        row_id = self.tree.insert("", "end", values=(
+            metadata["Filename"],
+            metadata["Artist"],
+            metadata["Title"],
+            metadata["MixArtist"],
+            metadata["Album"],
+            metadata["Genre"],
+            metadata["Publisher"],
+            metadata["Year"],
+            metadata["Cover"]
+        ), tags=(tag,))
+        return row_id

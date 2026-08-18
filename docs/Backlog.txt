@@ -1,6 +1,8 @@
 FUNCIONALIDADES:
 En el modo multiedición falta '<Limpiar>'
 
+Agente AI que genere el filename acorde al estilo de Sonometa.
+
 Format_filename.py debe sustituir guiones bajos por espacios.
 
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)

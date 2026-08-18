@@ -13,9 +13,10 @@ class DialogManager:
     @staticmethod
     def apply_popup_style(app, win, is_modal=True, owner=None):
         try:
-            if os.path.exists(app.ico_path):
-                win.iconbitmap(app.ico_path)
-            if app.app_icon_photo is not None:
+            ico_path = getattr(app, "ico_path", "")
+            if os.path.exists(ico_path):
+                win.iconbitmap(ico_path)
+            if getattr(app, "app_icon_photo", None) is not None:
                 win.wm_iconphoto(True, app.app_icon_photo)
         except Exception:
             pass
@@ -208,7 +209,7 @@ class DialogManager:
         btn_close.pack(fill="x", pady=(12, 0))
 
     @staticmethod
-    def show_settings_dialog(app, logger):
+    def show_settings_dialog(app, logger_inst):
         win = ctk.CTkToplevel(app)
         win.title("Configuración - Token Discogs")
         win.geometry("500x260")
@@ -238,7 +239,7 @@ class DialogManager:
             height=34, font=ctk.CTkFont(size=12), show="*"
         )
         entry_token.pack(fill="x", pady=(0, 4))
-        if app.discogs_token:
+        if getattr(app, "discogs_token", None):
             entry_token.insert(0, app.discogs_token)
 
         show_var = tk.BooleanVar(value=False)
@@ -254,9 +255,9 @@ class DialogManager:
             app.discogs_token = token
             app.catalog_manager.save_settings(app.discogs_token)
             if token:
-                logger.info("Token de Discogs guardado correctamente.")
+                logger_inst.info("Token de Discogs guardado correctamente.")
             else:
-                logger.info("Token de Discogs eliminado.")
+                logger_inst.info("Token de Discogs eliminado.")
             win.destroy()
 
         btns = ctk.CTkFrame(frame, fg_color="transparent")
@@ -269,7 +270,6 @@ class DialogManager:
             btns, text="Guardar", fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER,
             command=save_token
         ).pack(side="right")
-
 
     @staticmethod
     def show_logs_dialog(app):
@@ -300,13 +300,14 @@ class DialogManager:
 
     @staticmethod
     def open_catalog_manager(app, catalog_key):
-        if catalog_key not in app.catalog_fields:
+        if catalog_key not in app.catalog_manager.catalog_fields:
             return
 
-        logger.info(f"Abriendo gestión de {app.catalog_labels[catalog_key]}.")
+        label_name = app.catalog_manager.catalog_labels.get(catalog_key, catalog_key)
+        app.logger.info(f"Abriendo gestión de {label_name}.")
 
         win = ctk.CTkToplevel(app)
-        win.title(f"Gestionar {app.catalog_labels[catalog_key]}")
+        win.title(f"Gestionar {label_name}")
         win.geometry("420x380")
         DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
 
@@ -321,88 +322,103 @@ class DialogManager:
 
         def refresh_listbox():
             listbox.delete(0, "end")
-            for item in app.catalog_values.get(catalog_key, []):
+            for item in app.catalog_manager.catalog_values.get(catalog_key, []):
                 listbox.insert("end", item)
 
         def add_value():
-            value = app.normalize_catalog_text(entry.get())
+            value = CatalogManager.normalize_catalog_text(entry.get())
             if not value:
-                logger.warning(f"Alta en {app.catalog_labels[catalog_key]} cancelada: valor vacío.")
-                app.show_themed_dialog("Valor no válido", "Debes introducir un valor.", level="warning", parent=win)
+                app.logger.warning(f"Alta en {label_name} cancelada: valor vacío.")
+                DialogManager.show_themed_dialog(app, "Valor no válido", "Debes introducir un valor.", level="warning", parent=win)
                 return
-            if value in app.catalog_values[catalog_key]:
-                logger.warning(f"Alta en {app.catalog_labels[catalog_key]} cancelada: '{value}' ya existe.")
-                app.show_themed_dialog("Duplicado", "Ese valor ya existe.", level="warning", parent=win)
+            if value in app.catalog_manager.catalog_values[catalog_key]:
+                app.logger.warning(f"Alta en {label_name} cancelada: '{value}' ya existe.")
+                DialogManager.show_themed_dialog(app, "Duplicado", "Ese valor ya existe.", level="warning", parent=win)
                 return
-            app.catalog_values[catalog_key].append(value)
-            app.catalog_values[catalog_key].sort(key=lambda x: x.lower())
-            app.refresh_catalog_comboboxes()
-            catalog_manager()
+
+            app.catalog_manager.catalog_values[catalog_key].append(value)
+            app.catalog_manager.catalog_values[catalog_key].sort(key=lambda x: x.lower())
+            app.catalog_manager.save_catalog_values()
+
+            if hasattr(app, "detail_panel"):
+                app.detail_panel.refresh_catalog_comboboxes()
+
             refresh_listbox()
             entry.delete(0, "end")
-            logger.info(f"Añadido '{value}' a {app.catalog_labels[catalog_key]}.")
+            app.logger.info(f"Añadido '{value}' a {label_name}.")
 
         def update_value():
             selected = listbox.curselection()
             if not selected:
-                logger.warning(f"Modificación en {app.catalog_labels[catalog_key]} cancelada: sin selección.")
-                app.show_themed_dialog("Selección requerida", "Selecciona un valor para modificar.", level="warning", parent=win)
-                return
-            new_value = app.normalize_catalog_text(entry.get())
-            if not new_value:
-                logger.warning(f"Modificación en {app.catalog_labels[catalog_key]} cancelada: valor vacío.")
-                app.show_themed_dialog("Valor no válido", "Debes introducir el nuevo valor.", level="warning", parent=win)
-                return
-            idx = selected[0]
-            old_value = app.normalize_catalog_text(app.catalog_values[catalog_key][idx])
-            if new_value == old_value:
-                logger.info(f"Modificación en {app.catalog_labels[catalog_key]} omitida: '{old_value}' no cambia.")
+                app.logger.warning(f"Modificación en {label_name} cancelada: sin selección.")
+                DialogManager.show_themed_dialog(app, "Selección requerida", "Selecciona un valor para modificar.", level="warning", parent=win)
                 return
 
-            updated_count, merged = app.rename_catalog_value(catalog_key, old_value, new_value)
+            new_value = CatalogManager.normalize_catalog_text(entry.get())
+            if not new_value:
+                app.logger.warning(f"Modificación en {label_name} cancelada: valor vacío.")
+                DialogManager.show_themed_dialog(app, "Valor no válido", "Debes introducir el nuevo valor.", level="warning", parent=win)
+                return
+
+            idx = selected[0]
+            old_value = CatalogManager.normalize_catalog_text(app.catalog_manager.catalog_values[catalog_key][idx])
+            if new_value == old_value:
+                app.logger.info(f"Modificación en {label_name} omitida: '{old_value}' no cambia.")
+                return
+
+            updated_count, merged = app.catalog_manager.rename_catalog_value(catalog_key, old_value, new_value)
+            app.catalog_manager.save_catalog_values()
+
+            if hasattr(app, "detail_panel"):
+                app.detail_panel.refresh_catalog_comboboxes()
+
             refresh_listbox()
             entry.delete(0, "end")
 
-            logger.info(f"Modificada {app.catalog_labels[catalog_key]}: '{old_value}' -> '{new_value}'. Afectados: {updated_count}.")
+            app.logger.info(f"Modificada {label_name}: '{old_value}' -> '{new_value}'. Afectados: {updated_count}.")
 
             if merged:
-                app.show_themed_dialog("Valores fusionados", f"'{old_value}' se fusionó con '{new_value}'.\nSe actualizaron {updated_count} archivo(s).", level="info", parent=win)
+                DialogManager.show_themed_dialog(app, "Valores fusionados", f"'{old_value}' se fusionó con '{new_value}'.\nSe actualizaron {updated_count} archivo(s).", level="info", parent=win)
             else:
-                app.show_themed_dialog("Valor actualizado", f"Se reemplazó '{old_value}' por '{new_value}'.\nSe actualizaron {updated_count} archivo(s).", level="info", parent=win)
+                DialogManager.show_themed_dialog(app, "Valor actualizado", f"Se reemplazó '{old_value}' por '{new_value}'.\nSe actualizaron {updated_count} archivo(s).", level="info", parent=win)
 
         def delete_value():
             selected = listbox.curselection()
             if not selected:
-                logger.warning(f"Eliminación en {app.catalog_labels[catalog_key]} cancelada: sin selección.")
-                app.show_themed_dialog("Selección requerida", "Selecciona un valor para eliminar.", level="warning", parent=win)
+                app.logger.warning(f"Eliminación en {label_name} cancelada: sin selección.")
+                DialogManager.show_themed_dialog(app, "Selección requerida", "Selecciona un valor para eliminar.", level="warning", parent=win)
                 return
+
             idx = selected[0]
-            value = app.catalog_values[catalog_key][idx]
+            value = app.catalog_manager.catalog_values[catalog_key][idx]
 
             affected_count = 0
-            col_info = app.get_catalog_column_info(catalog_key)
+            col_info = getattr(app.catalog_manager, "get_catalog_column_info", lambda k: None)(catalog_key)
             if col_info:
                 _, col_index = col_info
                 for row_id in app.tree.get_children():
                     row_values = app.tree.item(row_id, "values")
-                    if col_index < len(row_values) and app.normalize_catalog_text(row_values[col_index]) == value:
+                    if col_index < len(row_values) and CatalogManager.normalize_catalog_text(row_values[col_index]) == value:
                         affected_count += 1
 
             confirm_msg = f"¿Eliminar '{value}'?\n\nEsto vaciará el campo en {affected_count} archivo(s)."
-            if not app.show_themed_dialog("Confirmar eliminación", confirm_msg, level="warning", is_confirm=True, parent=win):
-                logger.info(f"Eliminación en {app.catalog_labels[catalog_key]} cancelada por usuario ('{value}').")
+            if not DialogManager.show_themed_dialog(app, "Confirmar eliminación", confirm_msg, level="warning", is_confirm=True, parent=win):
+                app.logger.info(f"Eliminación en {label_name} cancelada por usuario ('{value}').")
                 return
 
-            updated_count = app.apply_catalog_value_change(catalog_key, value, "")
-            app.catalog_values[catalog_key].pop(idx)
-            app.refresh_catalog_comboboxes()
-            catalog_manager()
+            updated_count = app.catalog_manager.apply_catalog_value_change(catalog_key, value, "")
+            app.catalog_manager.catalog_values[catalog_key].pop(idx)
+            app.catalog_manager.save_catalog_values()
+
+            if hasattr(app, "detail_panel"):
+                app.detail_panel.refresh_catalog_comboboxes()
+                app.detail_panel.on_row_select(None)
+
             refresh_listbox()
             entry.delete(0, "end")
-            app.on_row_select(None)
 
-            logger.info(f"Eliminado '{value}' de {app.catalog_labels[catalog_key]}. Campos vaciados en {updated_count} archivo(s).")
-            app.show_themed_dialog("Valor eliminado", f"Se eliminó '{value}'.\nSe vació el campo en {updated_count} archivo(s).", level="info", parent=win)
+            app.logger.info(f"Eliminado '{value}' de {label_name}. Campos vaciados en {updated_count} archivo(s).")
+            DialogManager.show_themed_dialog(app, "Valor eliminado", f"Se eliminó '{value}'.\nSe vació el campo en {updated_count} archivo(s).", level="info", parent=win)
 
         btns = ctk.CTkFrame(frame, fg_color="transparent")
         btns.pack(fill="x", pady=(0, 6))

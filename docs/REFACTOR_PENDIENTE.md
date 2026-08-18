@@ -22,8 +22,6 @@ _update_row_from_file_metadata: Reextracción e inserción de metadatos en la fi
 
 build_discogs_query(artist, title, fallback_text): Formateo y limpieza de la cadena de búsqueda.
 
-_pil_to_bytes(img): Conversión de imagen PIL a bytes JPEG.
-
 4. A dialogs.py o log_handler.py
 
 append_log_to_dialog(self, msg): Actualización del texto de logs en la ventana secundaria.

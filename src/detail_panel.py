@@ -185,25 +185,16 @@ class DetailPanel:
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.label_cover.bind(btn_right, self.show_cover_context_menu)
 
-        logo3_path = self.get_resource_path("logo_blanco.png")
-        btn_icon = None
-        if os.path.exists(logo3_path):
-            try:
-                img_logo3 = Image.open(logo3_path)
-                btn_icon = ctk.CTkImage(light_image=img_logo3, dark_image=img_logo3, size=(22, 22))
-            except Exception as e:
-                self.logger.error(f"Error al cargar logo_blanco.png para el botón Procesar: {str(e)}")
-
         self.btn_process = ctk.CTkButton(
             self.frame_sidebar,
             text="Procesar",
-            image=btn_icon if btn_icon else self.fallback_process_icon,
+            image=self.app.process_icon,
             compound="left",
             fg_color=self.app.CORP_COLOR,
             hover_color=self.app.CORP_HOVER,
             font=ctk.CTkFont(size=13, weight="bold"),
             height=34,
-            command=self.app.process_discogs_data
+            command=self.app.process_manager.process_discogs_data
         )
         self.btn_process.pack(fill="x", padx=5, pady=(6, 10))
         UiUtils(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
@@ -221,7 +212,7 @@ class DetailPanel:
             corner_radius=8,
             font=ctk.CTkFont(size=13, weight="bold"),
             height=34,
-            command=self.app.clear_selected_metadata
+            command=lambda: self.app.process_manager.clear_selected_metadata()
         )
         self.btn_clean.pack(fill="x", padx=5, pady=(0, 10))
         UiUtils(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
@@ -255,10 +246,11 @@ class DetailPanel:
             if is_catalog:
                 catalog_key = self.panel_combo_fields[attr_name]
                 catalog_vals = [
-                    v for v in self.app.catalog_values.get(catalog_key, [])
-                    if v and v != self.app.CLEAR_OPTION
+                    v for v in self.app.catalog_manager.catalog_values.get(catalog_key, [])
+                    if v and v != self.app.CLEAR_OPTION and v != self.app.KEEP_VALUE
                 ]
-                options = [self.app.KEEP_VALUE] + sorted(catalog_vals, key=lambda x: x.lower())
+                # ✅ AHORA INCLUYE <Mantener> Y <Limpiar> AL INICIO
+                options = [self.app.KEEP_VALUE, self.app.CLEAR_OPTION] + sorted(catalog_vals, key=lambda x: x.lower())
             else:
                 _, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
                 distinct = sorted({
@@ -267,7 +259,10 @@ class DetailPanel:
                     if col_index < len(self.app.tree.item(r, "values"))
                        and self.app.tree.item(r, "values")[col_index]
                 })
-                options = [self.app.KEEP_VALUE] + [v for v in distinct if v]
+                # ✅ AHORA INCLUYE <Mantener> Y <Limpiar> AL INICIO
+                options = [self.app.KEEP_VALUE, self.app.CLEAR_OPTION] + [
+                    v for v in distinct if v and v not in (self.app.KEEP_VALUE, self.app.CLEAR_OPTION)
+                ]
 
             multi_widget.configure(values=options)
             multi_widget.set(common_value if common_value in options else self.app.KEEP_VALUE)
@@ -297,11 +292,16 @@ class DetailPanel:
             return
 
         raw_value = multi_widget.get().strip()
+
+        # Si la opción es Mantener o está vacía, no realizamos cambios
         if raw_value == self.app.KEEP_VALUE or raw_value == "":
             return
 
-        if attr_name in self.panel_combo_fields:
-            new_value = self.app.catalog_manager.normalize_catalog_text(raw_value) if raw_value != self.app.CLEAR_OPTION else ""
+        # Si se selecciona <Limpiar>, asignamos cadena vacía "" tanto para catálogos como para campos de texto
+        if raw_value == self.app.CLEAR_OPTION:
+            new_value = ""
+        elif attr_name in self.panel_combo_fields:
+            new_value = self.app.catalog_manager.normalize_catalog_text(raw_value)
         else:
             new_value = raw_value
 
@@ -337,7 +337,7 @@ class DetailPanel:
 
     def display_multi_cover_placeholder(self, selected_rows=None):
         selected_rows = list(selected_rows or self.app.tree.selection())
-        has_any_cover = any(self.app.row_has_cover(row_id) for row_id in selected_rows)
+        has_any_cover = any(self.app.grid_panel.row_has_cover(row_id) for row_id in selected_rows)
         text = "Mantener carátulas" if has_any_cover else "Sin carátula"
         self.label_cover.configure(image="", text=text, text_color="gray")
         self.label_cover.image = None
@@ -416,7 +416,7 @@ class DetailPanel:
         selected_rows = self.app.tree.selection()
         if not selected_rows:
             self.logger.info(
-                f"Selección de catálogo ignorada ({self.app.catalog_labels.get(catalog_key, catalog_key)}): no hay fila seleccionada."
+                f"Selección de catálogo ignorada ({self.app.catalog_manager.catalog_labels.get(catalog_key, catalog_key)}): no hay fila seleccionada."
             )
             return
 
@@ -431,7 +431,7 @@ class DetailPanel:
 
         raw_value = combo.get().strip()
         new_value = "" if raw_value == self.app.CLEAR_OPTION else self.app.catalog_manager.normalize_catalog_text(raw_value)
-        self.app._apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
+        self.app.catalog_manager.apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
 
     @staticmethod
     def on_panel_combo_click(combo_widget):
@@ -560,7 +560,7 @@ class DetailPanel:
                     file_path = self.app.file_paths_map.get(item_id)
                     if file_path:
                         self.app.audio_manager.embed_cover_art(file_path, image_bytes)
-                        self.app.update_row_cover_status(item_id, "Sí")
+                        self.app.grid_panel.update_row_cover_status(item_id, "Sí")
 
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo pegar la imagen: {e}")
@@ -583,7 +583,7 @@ class DetailPanel:
                 self.app.audio_manager.strip_cover_tags(file_path)
 
                 # 2. Actualizar el estado de la fila en la tabla a "No"
-                self.app.update_row_cover_status(row_id, "No")
+                self.app.grid_panel.update_row_cover_status(row_id, "No")
 
         # 3. Limpiar la vista previa del panel de detalles
         self.display_cover_art(None)

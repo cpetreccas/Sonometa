@@ -1,7 +1,9 @@
-# ui_utils.py
-import tkinter as tk
-import sys
 import os
+import re
+import sys
+import tkinter as tk
+import customtkinter as ctk
+from PIL import Image, ImageTk
 
 class UiUtils:
     def __init__(self, widget, text):
@@ -59,3 +61,52 @@ class UiUtils:
         if self.tipwindow:
             self.tipwindow.destroy()
             self.tipwindow = None
+
+    @staticmethod
+    def build_discogs_query(artist, title, fallback_text=""):
+        parts = [str(artist).strip(), str(title).strip()]
+        query = " ".join(part for part in parts if part)
+        if not query:
+            query = str(fallback_text).strip()
+        return re.sub(r"\s+", " ", query).strip()
+
+    @staticmethod
+    def load_app_icons(app):
+        """Carga los iconos principales (.ico, .png) y secundarios de la aplicación."""
+        ico_path = UiUtils.get_resource_path("assets/logo.ico")
+        png_path = UiUtils.get_resource_path("assets/logo.png")
+        broom_path = UiUtils.get_resource_path("assets/broom_icon.png")
+        white_logo_path = UiUtils.get_resource_path("assets/logo_blanco.png")
+
+        if os.path.exists(ico_path):
+            try:
+                app.iconbitmap(ico_path)
+            except Exception:
+                pass
+
+        logo_pil = None
+        if os.path.exists(png_path):
+            logo_pil = Image.open(png_path)
+            img_icon = ImageTk.PhotoImage(logo_pil)
+            app.app_icon_photo = img_icon
+            app.wm_iconphoto(True, img_icon)
+
+        broom_icon = None
+        if os.path.exists(broom_path):
+            icon_broom_img = Image.open(broom_path)
+            broom_icon = ctk.CTkImage(
+                light_image=icon_broom_img,
+                dark_image=icon_broom_img,
+                size=(18, 18)
+            )
+
+        process_icon = None
+        if os.path.exists(white_logo_path):
+            icon_white_img = Image.open(white_logo_path)
+            process_icon = ctk.CTkImage(
+                light_image=icon_white_img,
+                dark_image=icon_white_img,
+                size=(22, 22)
+            )
+
+        return logo_pil, broom_icon, process_icon
