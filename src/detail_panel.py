@@ -5,8 +5,8 @@ import logging as logger
 import tkinter as tk
 from tkinter import messagebox
 from io import BytesIO
-
 import customtkinter as ctk
+from ui_utils import UiUtils
 from PIL import Image, ImageGrab
 
 from ui_utils import UiUtils
@@ -16,6 +16,8 @@ class DetailPanel:
     """Panel lateral de metadatos y caratula desacoplado de la ventana principal."""
 
     def __init__(self, app, parent, logger, get_resource_path, fallback_process_icon=None):
+        self.icono_procesar = self.load_process_icon()
+
         self.app = app
         self.parent = parent
         self.logger = logger
@@ -563,35 +565,37 @@ class DetailPanel:
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo pegar la imagen: {e}")
 
-    def remove_cover_art(self, event=None):
-        # 1. Obtener filas seleccionadas en la UI
-        selected_rows = self.get_selected_rows()  # O la variable donde guardas la selección
+    def remove_cover_art(self):
+        selected_rows = self.app.tree.selection()
+
+        if not selected_rows:
+            selected_rows = self.app.tree.get_children()
+
         if not selected_rows:
             return
 
-        success_count = 0
-        fail_count = 0
+        for row_id in selected_rows:
+            # Obtener la ruta del archivo usando el ID de la fila en el diccionario map
+            file_path = self.app.file_paths_map.get(row_id)
 
-        # 2. Iterar sobre las filas seleccionadas y procesar
-        for row in selected_rows:
-            file_path = row.get("path")  # O la clave donde almacenes la ruta
-            if not file_path:
-                continue
+            if file_path and os.path.exists(file_path):
+                # 1. Eliminar la carátula físicamente del archivo de audio
+                self.app._strip_cover_tags(file_path)
 
+                # 2. Actualizar el estado de la fila en la tabla a "No"
+                self.app.update_row_cover_status(row_id, "No")
+
+        # 3. Limpiar la vista previa del panel de detalles
+        self.display_cover_art(None)
+        self.logger.info("Carátula eliminada correctamente.")
+
+    def load_process_icon(self):
+        """Carga el icono para el botón de procesar si el recurso existe."""
+        ruta_logo = UiUtils.get_resource_path("assets/logo_blanco.png")
+        if os.path.exists(ruta_logo):
             try:
-                # Eliminar las etiquetas de carátula del archivo
-                self.audio_manager.strip_cover_tags(file_path)
-
-                # Actualizar el estado visual de la fila en la tabla
-                self.update_row_cover_status(row, has_cover=False)
-                success_count += 1
-            except Exception as e:
-                print(f"Error al eliminar carátula en {file_path}: {e}")
-                fail_count += 1
-
-        # 3. Limpiar la vista previa de la carátula en el panel
-        if success_count > 0:
-            self.clear_cover_art()
-
-        # Opcional: Notificar estado en la consola o barra de estado
-        print(f"Proceso finalizado. Éxitos: {success_count}, Fallos: {fail_count}")
+                img_pil = Image.open(ruta_logo)
+                return ctk.CTkImage(light_image=img_pil, dark_image=img_pil, size=(20, 20))
+            except Exception:
+                return None
+        return None

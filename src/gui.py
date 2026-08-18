@@ -1,4 +1,3 @@
-import logging
 import os
 import ctypes
 import io
@@ -16,54 +15,9 @@ from discogs_client import DiscogsClient
 from catalog_manager import CatalogManager
 from dialogs import DialogManager
 from ui_utils import UiUtils
-
-AUDIO_EXTENSIONS = ('.mp3', '.flac', '.m4a', '.aac', '.wav', '.ogg', '.wma', '.aiff')
-
-ruta_logo = UiUtils.get_resource_path("assets/logo_blanco.png")
-if os.path.exists(ruta_logo):
-    try:
-        img_pil = Image.open(ruta_logo)
-        icono_procesar = ctk.CTkImage(light_image=img_pil, dark_image=img_pil, size=(20, 20))
-    except Exception:
-        icono_procesar = None
-else:
-    icono_procesar = None
-
-
-class TextHandler(logging.Handler):
-    def __init__(self, app_instance):
-        super().__init__()
-        self.app_instance = app_instance
-
-    def emit(self, record):
-        msg = self.format(record)
-        self.app_instance.log_history.append(msg)
-        # Programar el update en el hilo de UI evita errores si llega desde callback externo.
-        try:
-            self.app_instance.after(0, lambda: self.app_instance.label_status.configure(text=record.getMessage()))
-            self.app_instance.after(0, lambda: self.app_instance.append_log_to_dialog(msg))
-        except Exception:
-            pass
-
-
-logger = logging.getLogger("Sonometa")
-logger.setLevel(logging.INFO)
-
-formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-
-console_handler = logging.StreamHandler()
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
-
-
-try:
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('sonometa.audiotagsuite.1.0')
-except Exception:
-    pass
-
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
-
+from log_handler import LogManager
+from tool_panel import ToolPanel
+from search_manager import SearchManager
 
 class App(ctk.CTk):
     CORP_COLOR = "#6B21A8"
@@ -73,7 +27,6 @@ class App(ctk.CTk):
     CLEAR_OPTION = "<Limpiar>"
     KEEP_VALUE = "<Mantener>"
 
-    # Mapping attr_name → (tag_field_name, col_index_in_tree)
     PANEL_FIELD_COL_MAP = {
         "entry_artist":    ("Artist",    1),
         "entry_title":     ("Title",     2),
@@ -87,7 +40,8 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        # Lógica de negocio de audio delegada a AudioManager (SRP)
+        self.logger = LogManager.setup_logger()
+
         self.audio_manager = AudioManager()
         self.filename_formatter = FilenameFormatter()
         self.discogs_client = DiscogsClient(token_getter=lambda: self.discogs_token)
@@ -104,33 +58,23 @@ class App(ctk.CTk):
         self.cell_entry = None
         self.log_history = deque(maxlen=5000)
         self._multi_select_mode = False
-        self._multi_entries: dict = {}    # alias al panel lateral (se asigna tras crear DetailPanel)
+        self._multi_entries: dict = {}
         self.log_window = None
         self.log_textbox = None
-        self.search_var = tk.StringVar()
-        self._search_trace_id = None
-        self._search_visible = False
-        self._all_tree_items = []
         self.catalog_fields = self.catalog_manager.catalog_fields
         self.catalog_labels = self.catalog_manager.catalog_labels
         self.catalog_values = self.catalog_manager.catalog_values
         self.catalog_file_path = self.catalog_manager.get_catalog_file_path()
         self.load_catalog_values()
 
-        # Token Discogs (leído del archivo de config, con fallback a variable de entorno)
         self.discogs_token = os.getenv("DISCOGS_TOKEN", "").strip()
         self.settings_file_path = self.catalog_manager.get_settings_file_path()
         self.catalog_values = self.catalog_manager.catalog_values
         self.catalog_manager.get_catalog_file_path()
         self.catalog_manager.load_settings()
 
-        self.gui_log_handler = TextHandler(self)
-        self.gui_log_handler.setFormatter(formatter)
-        logger.addHandler(self.gui_log_handler)
-
         self.ico_path = UiUtils.get_resource_path("assets/logo.ico")
         png_path = UiUtils.get_resource_path("assets/logo.png")
-        ruta_logo = UiUtils.get_resource_path("assets/logo_blanco.png")
         self.app_icon_photo = None
 
         icon_broom_img = Image.open("assets/broom_icon.png")
@@ -150,9 +94,11 @@ class App(ctk.CTk):
             self.app_icon_photo = img_icon
             self.wm_iconphoto(True, img_icon)
 
-        self.setup_custom_dark_menu()
+        # 0. Toolbar superior (Menú principal)
+        self.tool_panel = ToolPanel(self)
+        self.tool_panel.pack(side="top", fill="x")
 
-        # Barra superior
+        # 1. Barra superior (Logo y selección de carpeta)
         self.frame_top = ctk.CTkFrame(self)
         self.frame_top.pack(fill="x", padx=15, pady=(5, 5))
 
@@ -191,33 +137,41 @@ class App(ctk.CTk):
         self.label_folder = ctk.CTkLabel(self.frame_top, text="Ninguna carpeta seleccionada", text_color="gray")
         self.label_folder.pack(side="left", padx=10, pady=5)
 
+        # 2. Panel principal (Edición de etiquetas y Tabla)
         self.frame_main = ctk.CTkFrame(self)
         self.frame_main.pack(fill="both", expand=True, padx=15, pady=5)
 
-        # El panel de etiquetas se crea primero para reservar el ancho lateral.
         self.detail_panel = DetailPanel(
             app=self,
             parent=self.frame_main,
-            logger=logger,
-            get_resource_path=UiUtils.get_resource_path,
-            fallback_process_icon=icono_procesar
+            logger=self.logger,
+            get_resource_path=UiUtils.get_resource_path
         )
-        # Compatibilidad con referencias existentes en la app.
         self.frame_sidebar = self.detail_panel.frame_sidebar
         self.panel_combo_fields = self.detail_panel.panel_combo_fields
         self.tag_entries = self.detail_panel.tag_entries
         self._multi_entries = self.detail_panel.multi_entries
         self.label_cover = self.detail_panel.label_cover
         self.btn_process = self.detail_panel.btn_process
-        self.grid_panel = GridPanel(app=self, parent=self.frame_main, logger=logger)
+
+        self.grid_panel = GridPanel(app=self, parent=self.frame_main, logger=self.logger)
         self.tree = self.grid_panel.tree
         self.columns = self.grid_panel.columns
         self.vsb = self.grid_panel.vsb
         self.hsb = self.grid_panel.hsb
-        self.setup_search_bar()
 
+        # 3. Pie de página
         self.frame_bottom = ctk.CTkFrame(self)
         self.frame_bottom.pack(fill="x", padx=15, pady=(5, 10))
+
+        # 4. Gestor de búsqueda
+        self.search_manager = SearchManager(
+            app=self,
+            tree=self.tree,
+            frame_bottom_ref=self.frame_bottom,
+            detail_panel=self.detail_panel,
+            grid_panel=self.grid_panel
+        )
 
         self.progress_bar = ctk.CTkProgressBar(self.frame_bottom, progress_color=self.CORP_COLOR)
         self.progress_bar.pack(fill="x", padx=10, pady=2)
@@ -232,21 +186,21 @@ class App(ctk.CTk):
         )
         self.label_status.pack(fill="x", padx=12, pady=(2, 6))
 
+        # Atajos de teclado
         self.bind("<Control-o>", lambda e: self.browse_folder())
         self.bind("<F5>", lambda e: self.refresh_folder())
         self.bind("<Control-q>", lambda e: self.on_close())
         self.bind("<Control-a>", lambda e: self.select_all_rows())
-        self.bind("<Control-f>", self.toggle_search_bar)
-        self.bind("<Control-F>", self.toggle_search_bar)
-        self.bind("<Escape>", self.on_escape_pressed)
+        self.bind("<Control-f>", lambda e: self.search_manager.toggle_search_bar())
+        self.bind("<Control-F>", lambda e: self.search_manager.toggle_search_bar())
+        self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        logger.info("Aplicación Sonometa iniciada correctamente.")
+        self.logger.info("Aplicación Sonometa iniciada correctamente.")
         if self.discogs_token:
-            logger.info("Token de Discogs activo ✓")
+            self.logger.info("Token de Discogs activo ✓")
         else:
-            logger.warning("No hay token de Discogs configurado. Ve a Archivo → ⚙ Configuración.")
-
+            self.logger.warning("No hay token de Discogs configurado. Ve a Archivo → ⚙ Configuración.")
 
     def load_catalog_values(self):
         self.catalog_manager.load_catalog_values()
@@ -278,169 +232,6 @@ class App(ctk.CTk):
             catalog_key, old_value, new_value
         )
 
-    def setup_custom_dark_menu(self):
-        self.menu_bar_frame = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color="#181818")
-        self.menu_bar_frame.pack(side="top", fill="x")
-
-        self.menu_archivo = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
-        self.menu_archivo.add_command(label="Seleccionar carpeta...  (Ctrl+O)", command=self.browse_folder)
-        self.menu_archivo.add_command(label="Actualizar  (F5)", command=self.refresh_folder)
-        self.menu_archivo.add_separator()
-        self.menu_archivo.add_command(label="⚙ Configuración (Token Discogs)", command=lambda: DialogManager.show_settings_dialog(self, logger))
-        self.menu_archivo.add_separator()
-        self.menu_archivo.add_command(label="Cerrar  (Ctrl+Q)", command=self.destroy)
-
-        self.menu_acciones = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
-        self.menu_acciones.add_command(label="Procesar con Discogs", command=self.process_discogs_data)
-        self.menu_acciones.add_command(label="Seleccionar todo  (Ctrl+A)", command=self.select_all_rows)
-        self.menu_acciones.add_command(label="Buscar en la lista  (Ctrl+F)", command=self.toggle_search_bar)
-        self.menu_acciones.add_separator()
-        self.menu_acciones.add_command(label="Limpiar todo", command=self.clear_all_loaded_metadata)
-
-        self.menu_gestionar = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
-        self.menu_gestionar.add_command(label="Géneros", command=lambda: DialogManager.open_catalog_manager(self, "Genre"))
-        self.menu_gestionar.add_command(label="Álbumes", command=lambda: DialogManager.open_catalog_manager(self, "Album"))
-        self.menu_gestionar.add_command(label="Etiquetas", command=lambda: DialogManager.open_catalog_manager(self, "Publisher"))
-
-        self.menu_ayuda = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
-        self.menu_ayuda.add_command(label="Atajos de teclado", command=lambda: DialogManager.show_keyboard_shortcuts_dialog(self))
-        self.menu_ayuda.add_command(label="Ver logs", command=lambda: DialogManager.show_logs_dialog(self))
-        self.menu_ayuda.add_separator()
-        self.menu_ayuda.add_command(label="Acerca de Sonometa", command=lambda: DialogManager.show_about_dialog(self))
-
-        def create_menu_btn(text, menu_widget):
-            btn = ctk.CTkButton(
-                self.menu_bar_frame,
-                text=text,
-                width=65,
-                height=24,
-                fg_color="transparent",
-                hover_color="#2A2D32",
-                text_color="#E0E0E0",
-                font=ctk.CTkFont(family="Inter", size=13)
-            )
-            btn.configure(command=lambda: menu_widget.post(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height()))
-            btn.pack(side="left", padx=2, pady=2)
-
-        create_menu_btn("Archivo", self.menu_archivo)
-        create_menu_btn("Acciones", self.menu_acciones)
-        create_menu_btn("Gestionar", self.menu_gestionar)
-        create_menu_btn("Ayuda", self.menu_ayuda)
-
-
-    def setup_search_bar(self):
-        self.frame_search = ctk.CTkFrame(self)
-
-        self.entry_search = ctk.CTkEntry(
-            self.frame_search,
-            textvariable=self.search_var,
-            placeholder_text="Buscar por archivo, artista, titulo, album, genero...",
-            height=30
-        )
-        self.entry_search.pack(side="left", fill="x", expand=True, padx=(10, 6), pady=6)
-
-        self.btn_close_search = ctk.CTkButton(
-            self.frame_search,
-            text="X",
-            width=32,
-            height=30,
-            fg_color="#374151",
-            hover_color="#1F2937",
-            command=self.hide_search_bar
-        )
-        self.btn_close_search.pack(side="right", padx=(0, 10), pady=6)
-
-        self.entry_search.bind("<Escape>", lambda _e: self.hide_search_bar() or "break")
-        self._search_trace_id = self.search_var.trace_add("write", self._on_search_text_changed)
-
-    def toggle_search_bar(self, event=None):
-        if self._search_visible:
-            self.hide_search_bar()
-        else:
-            self.show_search_bar()
-        return "break"
-
-    def show_search_bar(self):
-        if self._search_visible:
-            self.entry_search.focus_set()
-            return
-        self.frame_search.pack(fill="x", padx=15, pady=(0, 2), before=self.frame_bottom)
-        self._search_visible = True
-        self.entry_search.focus_set()
-        self.apply_search_filter()
-
-    def hide_search_bar(self):
-        if self._search_visible:
-            self.frame_search.pack_forget()
-            self._search_visible = False
-        if self.search_var.get():
-            self.search_var.set("")
-        self.apply_search_filter()
-        self.focus_set()
-
-    def on_escape_pressed(self, event=None):
-        if self._search_visible:
-            self.hide_search_bar()
-            return "break"
-        return None
-
-    def _on_search_text_changed(self, *_args):
-        if self._search_visible:
-            self.apply_search_filter()
-
-    @staticmethod
-    def _build_row_search_text(values):
-        searchable_indexes = (0, 1, 2, 3, 4, 5, 6, 7)
-        parts = []
-        for idx in searchable_indexes:
-            if idx < len(values) and values[idx] is not None:
-                parts.append(str(values[idx]))
-        return " ".join(parts).lower()
-
-    def _sync_all_tree_items(self):
-        existing_ids = [row_id for row_id in self._all_tree_items if self.tree.exists(row_id)]
-        for row_id in self.tree.get_children(""):
-            if row_id not in existing_ids:
-                existing_ids.append(row_id)
-        self._all_tree_items = existing_ids
-
-    def _retag_visible_rows(self):
-        for index, row_id in enumerate(self.tree.get_children("")):
-            tag = "even" if index % 2 == 0 else "odd"
-            self.tree.item(row_id, tags=(tag,))
-
-    def apply_search_filter(self):
-        self._sync_all_tree_items()
-        query = self.search_var.get().strip().lower()
-
-        matching_rows = []
-        for row_id in self._all_tree_items:
-            if not self.tree.exists(row_id):
-                continue
-            values = self.tree.item(row_id, "values")
-            if not query or query in self._build_row_search_text(values):
-                matching_rows.append(row_id)
-
-        current_rows = self.tree.get_children("")
-        if current_rows:
-            self.tree.detach(*current_rows)
-
-        for row_id in matching_rows:
-            if self.tree.exists(row_id):
-                self.tree.reattach(row_id, "", "end")
-
-        self._retag_visible_rows()
-
-        visible_set = set(self.tree.get_children(""))
-        selected_visible = [row_id for row_id in self.tree.selection() if row_id in visible_set]
-        self.tree.selection_set(selected_visible)
-
-        self.detail_panel.refresh_process_button_text(len(selected_visible))
-        self.detail_panel.on_row_select(None)
-        if hasattr(self.grid_panel, "_update_tree_scrollbars"):
-            self.grid_panel._update_tree_scrollbars()
-
-
     def process_discogs_data(self):
         target_rows = self.tree.selection()
         if not target_rows:
@@ -450,7 +241,6 @@ class App(ctk.CTk):
             DialogManager.show_themed_dialog(self, "Advertencia", "No hay archivos cargados en la tabla.", level="warning")
             return
 
-        # Bloquear el botón y dar feedback visual al usuario
         if hasattr(self, 'btn_process'):
             self.btn_process.configure(state="disabled", text="Procesando...")
             self.update_idletasks()
@@ -465,7 +255,7 @@ class App(ctk.CTk):
             omit_pattern = re.compile('|'.join(words_to_omit), flags=re.IGNORECASE)
 
             total_files = len(target_rows)
-            logger.info(f"Iniciando procesado para {total_files} archivo(s)...")
+            self.logger.info(f"Iniciando procesado para {total_files} archivo(s)...")
 
             processed = 0
             for row_id in target_rows:
@@ -475,7 +265,6 @@ class App(ctk.CTk):
 
                 values = list(self.tree.item(row_id, "values"))
 
-                # Validar campos de catálogo en cada fila antes de procesar.
                 catalog_fields = (("Album", 4), ("Genre", 5), ("Publisher", 6))
                 invalid_catalog_fields = []
                 for field_name, col_index in catalog_fields:
@@ -498,12 +287,11 @@ class App(ctk.CTk):
 
                 if invalid_catalog_fields:
                     self.tree.item(row_id, values=values)
-                    logger.info(
+                    self.logger.info(
                         f"Se limpiaron campos fuera de catálogo en '{os.path.basename(file_path)}': "
                         f"{', '.join(invalid_catalog_fields)}"
                     )
 
-                # --- PASO 1: Formatear y Renombrar archivo ---
                 old_filename = os.path.basename(file_path)
                 new_filename = self.filename_formatter.format_filename_pattern(old_filename)
                 dir_name = os.path.dirname(file_path)
@@ -517,24 +305,21 @@ class App(ctk.CTk):
 
                         values[0] = new_filename
                         self.tree.item(row_id, values=values)
-                        logger.info(f"Renombrado archivo: '{old_filename}' -> '{new_filename}'")
+                        self.logger.info(f"Renombrado archivo: '{old_filename}' -> '{new_filename}'")
                     except Exception as e:
-                        logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
+                        self.logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
 
-                # --- PASO 2: Extraer Intérprete, Título y MIXARTIST desde el nombre ---
                 clean_name = os.path.splitext(new_filename)[0]
 
                 artist_parsed = ""
                 title_parsed = clean_name
                 mixartist_parsed = ""
 
-                # Extraer paréntesis para MIXARTIST (sin paréntesis)
                 parentheses = re.findall(r'\((.*?)\)', clean_name)
                 if parentheses:
                     mixartist_parsed = " ".join(parentheses).strip()
                     clean_name = re.sub(r'\(.*?\)', '', clean_name).strip()
 
-                # Separar por el guión medio
                 if " - " in clean_name:
                     parts = clean_name.split(" - ", 1)
                     artist_parsed = parts[0].strip()
@@ -565,9 +350,8 @@ class App(ctk.CTk):
                 self.tree.item(row_id, values=values)
                 already_has_cover = self.row_has_cover(row_id)
                 if already_has_cover:
-                    logger.info(f"Se omite solo la descarga de carátula para '{new_filename}' porque ya tiene una incrustada.")
+                    self.logger.info(f"Se omite solo la descarga de carátula para '{new_filename}' porque ya tiene una incrustada.")
 
-                # --- PASO 3: Búsqueda de metadatos adicionales en Discogs (Año y Carátula) ---
                 query_term = self.build_discogs_query(
                     values[1] if len(values) > 1 else "",
                     values[2] if len(values) > 2 else "",
@@ -578,7 +362,7 @@ class App(ctk.CTk):
                 query_term = re.sub(r'\s+[._-]\s+', ' ', query_term)
                 query_term = re.sub(r'\s+', ' ', query_term).strip()
 
-                logger.info(f"Procesando archivo: '{new_filename}' (Búsqueda Discogs: '{query_term}')")
+                self.logger.info(f"Procesando archivo: '{new_filename}' (Búsqueda Discogs: '{query_term}')")
 
                 _, _, year, cover_url = self.discogs_client.search_release(query_term)
 
@@ -590,46 +374,44 @@ class App(ctk.CTk):
                     values[8] = "Sí"
                     self.update_row_cover_status(row_id, "Sí")
                 elif cover_url:
-                    logger.info(f"Descargando carátula del vinilo desde: {cover_url}")
+                    self.logger.info(f"Descargando carátula del vinilo desde: {cover_url}")
                     image_data = self.discogs_client.download_image_bytes(cover_url)
                     if image_data:
                         image_data = self.normalize_cover_image_bytes(image_data)
                         if self.audio_manager.embed_cover_art_verified(file_path, image_data):
                             values[8] = "Sí"
-                            logger.info(f"Carátula incrustada con éxito en: {new_filename}")
+                            self.logger.info(f"Carátula incrustada con éxito en: {new_filename}")
                             self.display_cover_art(image_data)
                             self.update_row_cover_status(row_id, "Sí")
                         else:
                             values[8] = "No"
-                            logger.error(f"La carátula no quedó persistida en el archivo: {new_filename}")
+                            self.logger.error(f"La carátula no quedó persistida en el archivo: {new_filename}")
                     else:
                         values[8] = "No"
-                        logger.warning(f"No se pudieron descargar los bytes de la carátula ({cover_url})")
+                        self.logger.warning(f"No se pudieron descargar los bytes de la carátula ({cover_url})")
                 else:
                     values[8] = "No"
-                    logger.warning(f"Discogs no devolvió carátula para: '{query_term}'")
+                    self.logger.warning(f"Discogs no devolvió carátula para: '{query_term}'")
                     self.update_row_cover_status(row_id, "No")
 
                 self.tree.item(row_id, values=values)
                 if metadata_changes:
-                    logger.info(f"Metadatos desde nombre -> {' | '.join(metadata_changes)}")
+                    self.logger.info(f"Metadatos desde nombre -> {' | '.join(metadata_changes)}")
                 else:
-                    logger.info("Metadatos desde nombre -> sin cambios")
-                logger.info(f"Actualizado Discogs -> Año: '{year}'")
+                    self.logger.info("Metadatos desde nombre -> sin cambios")
+                self.logger.info(f"Actualizado Discogs -> Año: '{year}'")
 
                 processed += 1
                 self.progress_bar.set(processed / total_files)
                 self.update_idletasks()
 
             self.detail_panel.on_row_select(None)
-            logger.info("Procesamiento finalizado con éxito.")
+            self.logger.info("Procesamiento finalizado con éxito.")
 
         finally:
-            # Restaurar el botón al estado normal siempre (incluso si hay excepciones)
             if hasattr(self, 'btn_process'):
                 self.btn_process.configure(state="normal", text="Procesar")
                 self.update_idletasks()
-
 
     def row_has_cover(self, row_id):
         try:
@@ -662,7 +444,6 @@ class App(ctk.CTk):
     @staticmethod
     def normalize_cover_image_bytes(image_bytes):
         return AudioManager.normalize_cover_image_bytes(image_bytes)
-
 
     def save_single_tag(self, file_path, field_name, new_value):
         self.audio_manager.save_single_tag(file_path, field_name, new_value)
@@ -710,15 +491,12 @@ class App(ctk.CTk):
     def on_panel_text_field_commit(self, attr_name):
         self.detail_panel.on_panel_text_field_commit(attr_name)
 
-
     @staticmethod
     def _pil_to_bytes(img):
-        """Convierte un objeto PIL.Image a bytes JPEG."""
         out = io.BytesIO()
         rgb = img.convert("RGB") if img.mode not in ("RGB", "L") else img
         rgb.save(out, format="JPEG", quality=95, optimize=True)
         return out.getvalue()
-
 
     def _strip_cover_tags(self, file_path):
         self.audio_manager.strip_cover_tags(file_path)
@@ -775,7 +553,7 @@ class App(ctk.CTk):
         for row_id in target_rows:
             file_path = self.file_paths_map.get(row_id)
             if not file_path or not os.path.exists(file_path):
-                logger.warning("Se omite limpieza de metadatos: archivo no encontrado en disco.")
+                self.logger.warning("Se omite limpieza de metadatos: archivo no encontrado en disco.")
                 failed_count += 1
                 continue
 
@@ -784,13 +562,13 @@ class App(ctk.CTk):
                 continue
 
             self._update_row_from_file_metadata(row_id, file_path)
-            logger.info(f"Metadatos eliminados de: {os.path.basename(file_path)}")
+            self.logger.info(f"Metadatos eliminados de: {os.path.basename(file_path)}")
             cleaned_count += 1
 
         if self.tree.selection():
             self.detail_panel.on_row_select(None)
 
-        logger.info(
+        self.logger.info(
             f"Limpieza de metadatos completada ({scope_label}) -> OK: {cleaned_count}, Fallos: {failed_count}"
         )
         return cleaned_count
@@ -834,9 +612,9 @@ class App(ctk.CTk):
 
     def refresh_folder(self):
         if not self.folder_path:
-            logger.warning("No hay ninguna carpeta seleccionada para actualizar.")
+            self.logger.warning("No hay ninguna carpeta seleccionada para actualizar.")
             return
-        logger.info("Actualizando lista de archivos...")
+        self.logger.info("Actualizando lista de archivos...")
         self.load_audio_files(self.folder_path)
 
     def clear_all(self):
@@ -845,14 +623,14 @@ class App(ctk.CTk):
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
-        self._all_tree_items = []
+        self.search_manager.reset_all_tree_items()
 
         self.detail_panel.clear_fields()
         self.folder_path = ""
         self.label_folder.configure(text="Ninguna carpeta seleccionada", text_color="gray")
         self.progress_bar.set(0)
         self.detail_panel.refresh_process_button_text(0)
-        logger.info("Lista y estado limpiados.")
+        self.logger.info("Lista y estado limpiados.")
 
     def _apply_catalog_selection_to_row(self, row_id, attr_name, catalog_key, new_value):
         column_map = {
@@ -878,7 +656,7 @@ class App(ctk.CTk):
             self.save_single_tag(file_path, col_name, new_value)
 
         self.add_catalog_value(catalog_key, new_value, persist=True)
-        logger.info(
+        self.logger.info(
             f"Campo '{self.catalog_labels.get(catalog_key, catalog_key)}' actualizado desde panel: "
             f"'{self.columns[col_index]}' -> '{new_value}'"
         )
@@ -889,57 +667,48 @@ class App(ctk.CTk):
         self.destroy()
 
     def load_audio_files(self, folder):
-        if not os.path.isdir(folder):
-            logger.error(f"La ruta seleccionada no es una carpeta válida: {folder}")
-            return
-        if not os.access(folder, os.R_OK):
-            logger.error(f"No hay permisos de lectura sobre la carpeta: {folder}")
-            return
-
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
-        self._all_tree_items = []
+        self.search_manager.reset_all_tree_items()
 
-        logger.info(f"Escaneando carpeta: {folder}")
-        count = 0
+        self.logger.info(f"Escaneando carpeta: {folder}")
 
-        for root, _, files in os.walk(folder):
-            for file in files:
-                if file.lower().endswith(AUDIO_EXTENSIONS):
-                    file_path = os.path.join(root, file)
-                    metadata = self.audio_manager.extract_metadata(file_path, file)
+        items = self.audio_manager.scan_audio_files(folder)
 
-                    metadata["Album"] = self.normalize_catalog_text(metadata.get("Album", ""))
-                    metadata["Genre"] = self.normalize_catalog_text(metadata.get("Genre", ""))
-                    metadata["Publisher"] = self.normalize_catalog_text(metadata.get("Publisher", ""))
+        for count, item in enumerate(items):
+            file_path = item["file_path"]
+            metadata = item["metadata"]
 
-                    self.add_catalog_value("Album", metadata.get("Album", ""), persist=False)
-                    self.add_catalog_value("Genre", metadata.get("Genre", ""), persist=False)
-                    self.add_catalog_value("Publisher", metadata.get("Publisher", ""), persist=False)
+            metadata["Album"] = self.normalize_catalog_text(metadata.get("Album", ""))
+            metadata["Genre"] = self.normalize_catalog_text(metadata.get("Genre", ""))
+            metadata["Publisher"] = self.normalize_catalog_text(metadata.get("Publisher", ""))
 
-                    tag = "even" if count % 2 == 0 else "odd"
+            self.add_catalog_value("Album", metadata.get("Album", ""), persist=False)
+            self.add_catalog_value("Genre", metadata.get("Genre", ""), persist=False)
+            self.add_catalog_value("Publisher", metadata.get("Publisher", ""), persist=False)
 
-                    row_id = self.tree.insert("", "end", values=(
-                        metadata["Filename"],
-                        metadata["Artist"],
-                        metadata["Title"],
-                        metadata["MixArtist"],
-                        metadata["Album"],
-                        metadata["Genre"],
-                        metadata["Publisher"],
-                        metadata["Year"],
-                        metadata["Cover"]
-                    ), tags=(tag,))
+            tag = "even" if count % 2 == 0 else "odd"
 
-                    self.file_paths_map[row_id] = file_path
-                    count += 1
+            row_id = self.tree.insert("", "end", values=(
+                metadata["Filename"],
+                metadata["Artist"],
+                metadata["Title"],
+                metadata["MixArtist"],
+                metadata["Album"],
+                metadata["Genre"],
+                metadata["Publisher"],
+                metadata["Year"],
+                metadata["Cover"]
+            ), tags=(tag,))
+
+            self.file_paths_map[row_id] = file_path
 
         self.refresh_catalog_comboboxes()
-        self._all_tree_items = list(self.tree.get_children(""))
-        if self._search_visible:
-            self.apply_search_filter()
-        logger.info(f"Se encontraron {count} archivo(s) de audio compatibles.")
+        self.search_manager.sync_all_tree_items()
+        if self.search_manager.is_visible:
+            self.search_manager.apply_search_filter()
+        self.logger.info(f"Se encontraron {len(items)} archivo(s) de audio compatibles.")
 
     def append_log_to_dialog(self, msg):
         if self.log_window is None or self.log_textbox is None:
@@ -955,13 +724,19 @@ class App(ctk.CTk):
         self.log_textbox.configure(state="disabled")
 
     def select_all_rows(self):
-        """Selecciona todas las filas del árbol de archivos."""
         all_items = self.tree.get_children()
         self.tree.selection_set(all_items)
         self.detail_panel.refresh_process_button_text(len(all_items))
-        logger.info(f"Seleccionados todos los {len(all_items)} archivo(s).")
-
+        self.logger.info(f"Seleccionados todos los {len(all_items)} archivo(s).")
 
 if __name__ == "__main__":
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('sonometa.audiotagsuite.1.0')
+    except Exception:
+        pass
+
+    ctk.set_appearance_mode("Dark")
+    ctk.set_default_color_theme("blue")
+
     app = App()
     app.mainloop()

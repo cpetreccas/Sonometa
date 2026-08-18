@@ -341,6 +341,28 @@ class AudioManager:
     # Eliminación completa de metadatos
     # ------------------------------------------------------------------
 
+
+    def scan_audio_files(self, folder):
+        """Escanea recursivamente una carpeta y devuelve una lista de diccionarios con
+        la ruta del archivo y sus metadatos extraídos.
+        """
+        AUDIO_EXTENSIONS = ('.mp3', '.flac', '.m4a', '.aac', '.wav', '.ogg', '.wma', '.aiff')
+        if not os.path.isdir(folder) or not os.access(folder, os.R_OK):
+            logger.error(f"Ruta inválida o sin permisos de lectura: {folder}")
+            return []
+
+        results = []
+        for root, _, files in os.walk(folder):
+            for file in files:
+                if file.lower().endswith(AUDIO_EXTENSIONS):
+                    file_path = os.path.join(root, file)
+                    metadata = self.extract_metadata(file_path, file)
+                    results.append({
+                        "file_path": file_path,
+                        "metadata": metadata
+                    })
+        return results
+
     def clear_audio_file_metadata(self, file_path):
         """Elimina todos los metadatos del archivo de audio, conservando solo el nombre."""
         from mutagen.id3 import ID3, ID3NoHeaderError
@@ -424,4 +446,3 @@ class AudioManager:
             return output.getvalue()
         except Exception:
             return image_bytes
-
