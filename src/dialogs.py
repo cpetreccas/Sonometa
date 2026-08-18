@@ -1,7 +1,9 @@
 import os
 import sys
 import ctypes
+import logging as logger
 import tkinter as tk
+from catalog_manager import CatalogManager
 import customtkinter as ctk
 
 
@@ -250,7 +252,7 @@ class DialogManager:
         def save_token():
             token = entry_token.get().strip()
             app.discogs_token = token
-            app._save_settings()
+            app.catalog_manager.save_settings(app.discogs_token)
             if token:
                 logger.info("Token de Discogs guardado correctamente.")
             else:
@@ -267,3 +269,148 @@ class DialogManager:
             btns, text="Guardar", fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER,
             command=save_token
         ).pack(side="right")
+
+
+    @staticmethod
+    def show_logs_dialog(app):
+        if app.log_window is not None and app.log_window.winfo_exists():
+            app.log_window.deiconify()
+            app.log_window.lift()
+            app.log_window.focus_force()
+            return
+
+        app.log_window = ctk.CTkToplevel(app)
+        app.log_window.title("Historial de Logs")
+        app.log_window.geometry("700x400")
+        DialogManager.apply_popup_style(app, app.log_window, is_modal=False, owner=app)
+        app.log_window.protocol("WM_DELETE_WINDOW", lambda: DialogManager.close_logs_dialog(app))
+
+        app.log_textbox = ctk.CTkTextbox(app.log_window, wrap="none")
+        app.log_textbox.pack(fill="both", expand=True, padx=10, pady=10)
+
+        app.log_textbox.insert("1.0", "\n".join(app.log_history))
+        app.log_textbox.configure(state="disabled")
+
+    @staticmethod
+    def close_logs_dialog(app):
+        if app.log_window is not None and app.log_window.winfo_exists():
+            app.log_window.destroy()
+        app.log_window = None
+        app.log_textbox = None
+
+    @staticmethod
+    def open_catalog_manager(app, catalog_key):
+        if catalog_key not in app.catalog_fields:
+            return
+
+        logger.info(f"Abriendo gestión de {app.catalog_labels[catalog_key]}.")
+
+        win = ctk.CTkToplevel(app)
+        win.title(f"Gestionar {app.catalog_labels[catalog_key]}")
+        win.geometry("420x380")
+        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
+
+        frame = ctk.CTkFrame(win)
+        frame.pack(fill="both", expand=True, padx=12, pady=12)
+
+        listbox = tk.Listbox(frame, bg="#1E1E1E", fg="#E5E7EB", selectbackground=app.CORP_COLOR, height=10)
+        listbox.pack(fill="both", expand=True, pady=(0, 8))
+
+        entry = ctk.CTkEntry(frame, placeholder_text="Nuevo valor o valor modificado")
+        entry.pack(fill="x", pady=(0, 8))
+
+        def refresh_listbox():
+            listbox.delete(0, "end")
+            for item in app.catalog_values.get(catalog_key, []):
+                listbox.insert("end", item)
+
+        def add_value():
+            value = app.normalize_catalog_text(entry.get())
+            if not value:
+                logger.warning(f"Alta en {app.catalog_labels[catalog_key]} cancelada: valor vacío.")
+                app.show_themed_dialog("Valor no válido", "Debes introducir un valor.", level="warning", parent=win)
+                return
+            if value in app.catalog_values[catalog_key]:
+                logger.warning(f"Alta en {app.catalog_labels[catalog_key]} cancelada: '{value}' ya existe.")
+                app.show_themed_dialog("Duplicado", "Ese valor ya existe.", level="warning", parent=win)
+                return
+            app.catalog_values[catalog_key].append(value)
+            app.catalog_values[catalog_key].sort(key=lambda x: x.lower())
+            app.refresh_catalog_comboboxes()
+            app.save_catalog_values()
+            refresh_listbox()
+            entry.delete(0, "end")
+            logger.info(f"Añadido '{value}' a {app.catalog_labels[catalog_key]}.")
+
+        def update_value():
+            selected = listbox.curselection()
+            if not selected:
+                logger.warning(f"Modificación en {app.catalog_labels[catalog_key]} cancelada: sin selección.")
+                app.show_themed_dialog("Selección requerida", "Selecciona un valor para modificar.", level="warning", parent=win)
+                return
+            new_value = app.normalize_catalog_text(entry.get())
+            if not new_value:
+                logger.warning(f"Modificación en {app.catalog_labels[catalog_key]} cancelada: valor vacío.")
+                app.show_themed_dialog("Valor no válido", "Debes introducir el nuevo valor.", level="warning", parent=win)
+                return
+            idx = selected[0]
+            old_value = app.normalize_catalog_text(app.catalog_values[catalog_key][idx])
+            if new_value == old_value:
+                logger.info(f"Modificación en {app.catalog_labels[catalog_key]} omitida: '{old_value}' no cambia.")
+                return
+
+            updated_count, merged = app.rename_catalog_value(catalog_key, old_value, new_value)
+            refresh_listbox()
+            entry.delete(0, "end")
+
+            logger.info(f"Modificada {app.catalog_labels[catalog_key]}: '{old_value}' -> '{new_value}'. Afectados: {updated_count}.")
+
+            if merged:
+                app.show_themed_dialog("Valores fusionados", f"'{old_value}' se fusionó con '{new_value}'.\nSe actualizaron {updated_count} archivo(s).", level="info", parent=win)
+            else:
+                app.show_themed_dialog("Valor actualizado", f"Se reemplazó '{old_value}' por '{new_value}'.\nSe actualizaron {updated_count} archivo(s).", level="info", parent=win)
+
+        def delete_value():
+            selected = listbox.curselection()
+            if not selected:
+                logger.warning(f"Eliminación en {app.catalog_labels[catalog_key]} cancelada: sin selección.")
+                app.show_themed_dialog("Selección requerida", "Selecciona un valor para eliminar.", level="warning", parent=win)
+                return
+            idx = selected[0]
+            value = app.catalog_values[catalog_key][idx]
+
+            affected_count = 0
+            col_info = app.get_catalog_column_info(catalog_key)
+            if col_info:
+                _, col_index = col_info
+                for row_id in app.tree.get_children():
+                    row_values = app.tree.item(row_id, "values")
+                    if col_index < len(row_values) and app.normalize_catalog_text(row_values[col_index]) == value:
+                        affected_count += 1
+
+            confirm_msg = f"¿Eliminar '{value}'?\n\nEsto vaciará el campo en {affected_count} archivo(s)."
+            if not app.show_themed_dialog("Confirmar eliminación", confirm_msg, level="warning", is_confirm=True, parent=win):
+                logger.info(f"Eliminación en {app.catalog_labels[catalog_key]} cancelada por usuario ('{value}').")
+                return
+
+            updated_count = app.apply_catalog_value_change(catalog_key, value, "")
+            app.catalog_values[catalog_key].pop(idx)
+            app.refresh_catalog_comboboxes()
+            app.save_catalog_values()
+            refresh_listbox()
+            entry.delete(0, "end")
+            app.on_row_select(None)
+
+            logger.info(f"Eliminado '{value}' de {app.catalog_labels[catalog_key]}. Campos vaciados en {updated_count} archivo(s).")
+            app.show_themed_dialog("Valor eliminado", f"Se eliminó '{value}'.\nSe vació el campo en {updated_count} archivo(s).", level="info", parent=win)
+
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(fill="x", pady=(0, 6))
+
+        ctk.CTkButton(btns, text="Añadir", command=add_value, fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ctk.CTkButton(btns, text="Modificar", command=update_value, fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=4)
+        ctk.CTkButton(btns, text="Eliminar", command=delete_value, fg_color="#B91C1C", hover_color="#991B1B").pack(side="left", expand=True, fill="x", padx=(4, 0))
+
+        ctk.CTkButton(frame, text="Cerrar", command=win.destroy, fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(fill="x")
+
+        refresh_listbox()

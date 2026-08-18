@@ -4,7 +4,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
-from PIL import Image
+from detail_panel import DetailPanel
 
 
 class GridPanel:
@@ -124,7 +124,7 @@ class GridPanel:
         self.tree.tag_configure("even", background="#181818")
         self.tree.tag_configure("odd", background="#1E1E1E")
 
-        self.tree.bind("<<TreeviewSelect>>", self.app.on_row_select)
+        self.tree.bind("<<TreeviewSelect>>", lambda event: self.app.detail_panel.on_row_select(event))
         self.tree.bind("<Double-1>", self.on_cell_double_click)
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.tree.bind(btn_right, self._show_tree_context_menu)
@@ -157,7 +157,7 @@ class GridPanel:
             self.tree.selection_set(row_id)
 
         self.tree.focus(row_id)
-        self.app.on_row_select(None)
+        self.app.detail_panel.on_row_select(None)
 
         try:
             self._tree_context_menu.tk_popup(event.x_root, event.y_root)
@@ -374,7 +374,7 @@ class GridPanel:
                     values = list(self.tree.item(row_id, "values"))
                     values[col_index] = final_filename
                     self.tree.item(row_id, values=values)
-                    self.app.on_row_select(None)
+                    self.app.detail_panel.on_row_select(None)
                     self.logger.info(f"Renombrado manual: '{original_filename}' -> '{final_filename}'")
                 except Exception as e:
                     self.logger.error(f"No se pudo renombrar el archivo '{original_filename}': {str(e)}")
@@ -394,7 +394,7 @@ class GridPanel:
             values[col_index] = new_value
             self.tree.item(row_id, values=values)
 
-            self.app.on_row_select(None)
+            self.app.detail_panel.on_row_select(None)
 
             file_path = self.app.file_paths_map.get(row_id)
             file_path and self.app.save_single_tag(file_path, col_name, new_value)

@@ -1,12 +1,15 @@
 import io
 import os
 import sys
+import logging as logger
 import tkinter as tk
+from tkinter import messagebox
+from io import BytesIO
 
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageGrab
 
-from ui_utils import ToolTip
+from ui_utils import UiUtils
 
 
 class DetailPanel:
@@ -132,7 +135,7 @@ class DetailPanel:
             cursor="hand2"
         )
         self.label_cover.pack(padx=5, pady=5)
-        ToolTip(self.label_cover, "Clic derecho para opciones de carátula")
+        UiUtils(self.label_cover, "Clic derecho para opciones de carátula")
 
         self._cover_context_menu = tk.Menu(
             self.app,
@@ -148,12 +151,12 @@ class DetailPanel:
         )
         self._cover_context_menu.add_command(
             label="📋  Pegar imagen desde el portapapeles",
-            command=self.app.paste_cover_from_clipboard
+            command=self.paste_cover_from_clipboard
         )
         self._cover_context_menu.add_separator()
         self._cover_context_menu.add_command(
             label="🗑  Eliminar carátula",
-            command=self.app.remove_cover_art
+            command=self.remove_cover_art
         )
 
         self._cover_context_menu_multi = tk.Menu(
@@ -169,12 +172,12 @@ class DetailPanel:
         )
         self._cover_context_menu_multi.add_command(
             label="📋  Pegar imagen a todos los seleccionados",
-            command=self.app.paste_cover_from_clipboard
+            command=self.paste_cover_from_clipboard
         )
         self._cover_context_menu_multi.add_separator()
         self._cover_context_menu_multi.add_command(
             label="🗑  Eliminar carátula de todos los seleccionados",
-            command=self.app.remove_cover_art
+            command=self.remove_cover_art
         )
 
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
@@ -201,7 +204,7 @@ class DetailPanel:
             command=self.app.process_discogs_data
         )
         self.btn_process.pack(fill="x", padx=5, pady=(6, 10))
-        ToolTip(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
+        UiUtils(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
 
         self.btn_clean = ctk.CTkButton(
             self.frame_sidebar,
@@ -219,7 +222,7 @@ class DetailPanel:
             command=self.app.clear_selected_metadata
         )
         self.btn_clean.pack(fill="x", padx=5, pady=(0, 10))
-        ToolTip(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
+        UiUtils(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
 
     def compute_common_panel_values(self, selected_rows):
         result = {}
@@ -260,7 +263,7 @@ class DetailPanel:
                     str(self.app.tree.item(r, "values")[col_index]).strip()
                     for r in selected_rows
                     if col_index < len(self.app.tree.item(r, "values"))
-                    and self.app.tree.item(r, "values")[col_index]
+                       and self.app.tree.item(r, "values")[col_index]
                 })
                 options = [self.app.KEEP_VALUE] + [v for v in distinct if v]
 
@@ -500,3 +503,95 @@ class DetailPanel:
         self.label_cover.configure(image="", text="Sin carátula")
         self.label_cover.image = None
 
+    def on_row_select(self, event):
+        selected = self.app.tree.selection()
+        self.refresh_process_button_text(len(selected))
+
+        if len(selected) > 1:
+            self.enter_multi_mode(selected)
+            return
+
+        if self.app._multi_select_mode:
+            self.exit_multi_mode()
+
+        if not selected:
+            return
+
+        item_id = selected[0]
+        item = self.app.tree.item(item_id)
+        values = item['values']
+        if len(values) < 8:
+            logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
+            return
+
+        self.set_panel_widget_value("entry_artist", values[1])
+        self.set_panel_widget_value("entry_title", values[2])
+        self.set_panel_widget_value("entry_mixartist", values[3])
+        self.set_panel_widget_value("entry_album", values[4])
+        self.set_panel_widget_value("entry_genre", values[5])
+        self.set_panel_widget_value("entry_publisher", values[6])
+        self.set_panel_widget_value("entry_year", values[7])
+
+        file_path = self.app.file_paths_map.get(item_id)
+        if file_path:
+            self.display_cover_art(file_path)
+
+    def paste_cover_from_clipboard(self, event=None):
+        try:
+            image = ImageGrab.grabclipboard()
+
+            if image is None:
+                messagebox.showwarning("Portapapeles vacío", "No hay ninguna imagen en el portapapeles.")
+                return
+
+            buffer = BytesIO()
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            image.save(buffer, format="JPEG")
+            image_bytes = buffer.getvalue()
+
+            self.display_cover_art(image_bytes)
+
+            selected_items = self.app.tree.selection()
+            if selected_items:
+                for item_id in selected_items:
+                    file_path = self.app.file_paths_map.get(item_id)
+                    if file_path:
+                        self.app.audio_manager.embed_cover_art(file_path, image_bytes)
+                        self.app.update_row_cover_status(item_id, "Sí")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo pegar la imagen: {e}")
+
+    def remove_cover_art(self, event=None):
+        # 1. Obtener filas seleccionadas en la UI
+        selected_rows = self.get_selected_rows()  # O la variable donde guardas la selección
+        if not selected_rows:
+            return
+
+        success_count = 0
+        fail_count = 0
+
+        # 2. Iterar sobre las filas seleccionadas y procesar
+        for row in selected_rows:
+            file_path = row.get("path")  # O la clave donde almacenes la ruta
+            if not file_path:
+                continue
+
+            try:
+                # Eliminar las etiquetas de carátula del archivo
+                self.audio_manager.strip_cover_tags(file_path)
+
+                # Actualizar el estado visual de la fila en la tabla
+                self.update_row_cover_status(row, has_cover=False)
+                success_count += 1
+            except Exception as e:
+                print(f"Error al eliminar carátula en {file_path}: {e}")
+                fail_count += 1
+
+        # 3. Limpiar la vista previa de la carátula en el panel
+        if success_count > 0:
+            self.clear_cover_art()
+
+        # Opcional: Notificar estado en la consola o barra de estado
+        print(f"Proceso finalizado. Éxitos: {success_count}, Fallos: {fail_count}")

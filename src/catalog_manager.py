@@ -25,6 +25,12 @@ class CatalogManager:
         os.makedirs(app_dir, exist_ok=True)
         return os.path.join(app_dir, "catalogos.json")
 
+    def get_settings_file_path(self):
+        base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
+        app_dir = os.path.join(base_dir, "Sonometa")
+        os.makedirs(app_dir, exist_ok=True)
+        return os.path.join(app_dir, "settings.json")
+
     @staticmethod
     def normalize_catalog_text(value):
         value_str = str(value).strip() if value is not None else ""
@@ -58,6 +64,35 @@ class CatalogManager:
                 json.dump(self.catalog_values, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"No se pudieron guardar los catálogos: {str(e)}")
+
+
+    def load_settings(self):
+        settings_path = self.get_settings_file_path()
+        if not os.path.exists(settings_path):
+            return
+        try:
+            # utf-8-sig elimina el BOM que añaden herramientas como PowerShell
+            with open(settings_path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            token = data.get("discogs_token", "").strip()
+            if token:
+                self.discogs_token = token
+                # El handler de GUI todavía no está registrado en __init__, el log irá solo a consola
+                logger.info("Token de Discogs cargado desde configuración.")
+            else:
+                logger.warning("settings.json encontrado pero sin token de Discogs.")
+        except Exception as e:
+            logger.warning(f"No se pudo cargar la configuración: {str(e)}")
+
+
+    def save_settings(self):
+        try:
+            data = {"discogs_token": self.discogs_token}
+            with open(self.settings_file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"No se pudo guardar la configuración: {str(e)}")
+
 
     def add_catalog_value(self, field_name, value, persist=False):
         value_str = self.normalize_catalog_text(value)
@@ -146,5 +181,5 @@ class CatalogManager:
 
         self.app.refresh_catalog_comboboxes()
         self.save_catalog_values()
-        self.app.on_row_select(None)
+        self.app.detail_panel.on_row_select(None)
         return updated_count, merged

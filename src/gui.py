@@ -1,10 +1,8 @@
 import logging
 import os
-import sys
 import ctypes
 import io
 import re
-import json
 from collections import deque
 import tkinter as tk
 from grid_panel import GridPanel
@@ -17,17 +15,11 @@ from format_filename import FilenameFormatter
 from discogs_client import DiscogsClient
 from catalog_manager import CatalogManager
 from dialogs import DialogManager
+from ui_utils import UiUtils
 
 AUDIO_EXTENSIONS = ('.mp3', '.flac', '.m4a', '.aac', '.wav', '.ogg', '.wma', '.aiff')
 
-
-def get_resource_path(relative_path):
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
-
-
-ruta_logo = get_resource_path("assets/logo_blanco.png")
+ruta_logo = UiUtils.get_resource_path("assets/logo_blanco.png")
 if os.path.exists(ruta_logo):
     try:
         img_pil = Image.open(ruta_logo)
@@ -104,7 +96,7 @@ class App(ctk.CTk):
         self.title("Sonometa v0.06 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
-        self.after(10, self.maximize_window)
+        self.after(100, lambda: UiUtils.maximize_window(self))
         self.after(10, lambda: DialogManager.apply_dark_title_bar(self))
         self.folder_path = ""
         self.sort_directions = {}
@@ -122,20 +114,23 @@ class App(ctk.CTk):
         self.catalog_fields = self.catalog_manager.catalog_fields
         self.catalog_labels = self.catalog_manager.catalog_labels
         self.catalog_values = self.catalog_manager.catalog_values
-        self.catalog_file_path = self.get_catalog_file_path()
+        self.catalog_file_path = self.catalog_manager.get_catalog_file_path()
         self.load_catalog_values()
 
         # Token Discogs (leído del archivo de config, con fallback a variable de entorno)
         self.discogs_token = os.getenv("DISCOGS_TOKEN", "").strip()
-        self.settings_file_path = self._get_settings_file_path()
-        self._load_settings()
+        self.settings_file_path = self.catalog_manager.get_settings_file_path()
+        self.catalog_values = self.catalog_manager.catalog_values
+        self.catalog_manager.get_catalog_file_path()
+        self.catalog_manager.load_settings()
 
         self.gui_log_handler = TextHandler(self)
         self.gui_log_handler.setFormatter(formatter)
         logger.addHandler(self.gui_log_handler)
 
-        self.ico_path = get_resource_path("assets/logo.ico")
-        png_path = get_resource_path("assets/logo.png")
+        self.ico_path = UiUtils.get_resource_path("assets/logo.ico")
+        png_path = UiUtils.get_resource_path("assets/logo.png")
+        ruta_logo = UiUtils.get_resource_path("assets/logo_blanco.png")
         self.app_icon_photo = None
 
         icon_broom_img = Image.open("assets/broom_icon.png")
@@ -204,7 +199,7 @@ class App(ctk.CTk):
             app=self,
             parent=self.frame_main,
             logger=logger,
-            get_resource_path=get_resource_path,
+            get_resource_path=UiUtils.get_resource_path,
             fallback_process_icon=icono_procesar
         )
         # Compatibilidad con referencias existentes en la app.
@@ -252,50 +247,6 @@ class App(ctk.CTk):
         else:
             logger.warning("No hay token de Discogs configurado. Ve a Archivo → ⚙ Configuración.")
 
-    def maximize_window(self):
-        try:
-            self.state("zoomed")
-        except Exception:
-            # Fallback multiplataforma si zoomed no está disponible.
-            self.state("normal")
-            self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
-
-    def get_catalog_file_path(self):
-        base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
-        app_dir = os.path.join(base_dir, "Sonometa")
-        os.makedirs(app_dir, exist_ok=True)
-        return os.path.join(app_dir, "catalogos.json")
-
-    def _get_settings_file_path(self):
-        base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
-        app_dir = os.path.join(base_dir, "Sonometa")
-        os.makedirs(app_dir, exist_ok=True)
-        return os.path.join(app_dir, "settings.json")
-
-    def _load_settings(self):
-        if not os.path.exists(self.settings_file_path):
-            return
-        try:
-            # utf-8-sig elimina el BOM que añaden herramientas como PowerShell
-            with open(self.settings_file_path, "r", encoding="utf-8-sig") as f:
-                data = json.load(f)
-            token = data.get("discogs_token", "").strip()
-            if token:
-                self.discogs_token = token
-                # El handler de GUI todavía no está registrado en __init__, el log irá solo a consola
-                logger.info("Token de Discogs cargado desde configuración.")
-            else:
-                logger.warning("settings.json encontrado pero sin token de Discogs.")
-        except Exception as e:
-            logger.warning(f"No se pudo cargar la configuración: {str(e)}")
-
-    def _save_settings(self):
-        try:
-            data = {"discogs_token": self.discogs_token}
-            with open(self.settings_file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"No se pudo guardar la configuración: {str(e)}")
 
     def load_catalog_values(self):
         self.catalog_manager.load_catalog_values()
@@ -335,7 +286,7 @@ class App(ctk.CTk):
         self.menu_archivo.add_command(label="Seleccionar carpeta...  (Ctrl+O)", command=self.browse_folder)
         self.menu_archivo.add_command(label="Actualizar  (F5)", command=self.refresh_folder)
         self.menu_archivo.add_separator()
-        self.menu_archivo.add_command(label="⚙ Configuración (Token Discogs)", command=self.show_settings_dialog)
+        self.menu_archivo.add_command(label="⚙ Configuración (Token Discogs)", command=lambda: DialogManager.show_settings_dialog(self, logger))
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(label="Cerrar  (Ctrl+Q)", command=self.destroy)
 
@@ -347,15 +298,15 @@ class App(ctk.CTk):
         self.menu_acciones.add_command(label="Limpiar todo", command=self.clear_all_loaded_metadata)
 
         self.menu_gestionar = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
-        self.menu_gestionar.add_command(label="Géneros", command=lambda: self.open_catalog_manager("Genre"))
-        self.menu_gestionar.add_command(label="Álbumes", command=lambda: self.open_catalog_manager("Album"))
-        self.menu_gestionar.add_command(label="Etiquetas", command=lambda: self.open_catalog_manager("Publisher"))
+        self.menu_gestionar.add_command(label="Géneros", command=lambda: DialogManager.open_catalog_manager(self, "Genre"))
+        self.menu_gestionar.add_command(label="Álbumes", command=lambda: DialogManager.open_catalog_manager(self, "Album"))
+        self.menu_gestionar.add_command(label="Etiquetas", command=lambda: DialogManager.open_catalog_manager(self, "Publisher"))
 
         self.menu_ayuda = tk.Menu(self, tearoff=0, bg="#252526", fg="#FFFFFF", activebackground=self.CORP_COLOR, activeforeground="#FFFFFF", bd=1, relief="flat", font=('Segoe UI', 10))
-        self.menu_ayuda.add_command(label="Atajos de teclado", command=self.show_keyboard_shortcuts_dialog)
-        self.menu_ayuda.add_command(label="Ver logs", command=self.show_logs_dialog)
+        self.menu_ayuda.add_command(label="Atajos de teclado", command=lambda: DialogManager.show_keyboard_shortcuts_dialog(self))
+        self.menu_ayuda.add_command(label="Ver logs", command=lambda: DialogManager.show_logs_dialog(self))
         self.menu_ayuda.add_separator()
-        self.menu_ayuda.add_command(label="Acerca de Sonometa", command=self.show_about_dialog)
+        self.menu_ayuda.add_command(label="Acerca de Sonometa", command=lambda: DialogManager.show_about_dialog(self))
 
         def create_menu_btn(text, menu_widget):
             btn = ctk.CTkButton(
@@ -375,14 +326,6 @@ class App(ctk.CTk):
         create_menu_btn("Acciones", self.menu_acciones)
         create_menu_btn("Gestionar", self.menu_gestionar)
         create_menu_btn("Ayuda", self.menu_ayuda)
-
-
-    def apply_popup_style(self, win, is_modal=True, owner=None):
-        DialogManager.apply_popup_style(self, win, is_modal, owner)
-
-
-    def show_themed_dialog(self, title, message, level="info", is_confirm=False, parent=None):
-        return DialogManager.show_themed_dialog(self, title, message, level, is_confirm, parent)
 
 
     def setup_search_bar(self):
@@ -492,9 +435,10 @@ class App(ctk.CTk):
         selected_visible = [row_id for row_id in self.tree.selection() if row_id in visible_set]
         self.tree.selection_set(selected_visible)
 
-        self._refresh_process_button_text(len(selected_visible))
-        self.on_row_select(None)
-        self._update_tree_scrollbars()
+        self.detail_panel.refresh_process_button_text(len(selected_visible))
+        self.detail_panel.on_row_select(None)
+        if hasattr(self.grid_panel, "_update_tree_scrollbars"):
+            self.grid_panel._update_tree_scrollbars()
 
 
     def process_discogs_data(self):
@@ -503,7 +447,7 @@ class App(ctk.CTk):
             target_rows = self.tree.get_children()
 
         if not target_rows:
-            self.show_themed_dialog("Advertencia", "No hay archivos cargados en la tabla.", level="warning")
+            DialogManager.show_themed_dialog(self, "Advertencia", "No hay archivos cargados en la tabla.", level="warning")
             return
 
         # Bloquear el botón y dar feedback visual al usuario
@@ -677,7 +621,7 @@ class App(ctk.CTk):
                 self.progress_bar.set(processed / total_files)
                 self.update_idletasks()
 
-            self.on_row_select(None)
+            self.detail_panel.on_row_select(None)
             logger.info("Procesamiento finalizado con éxito.")
 
         finally:
@@ -723,40 +667,6 @@ class App(ctk.CTk):
     def save_single_tag(self, file_path, field_name, new_value):
         self.audio_manager.save_single_tag(file_path, field_name, new_value)
 
-    def on_row_select(self, event):
-        selected = self.tree.selection()
-        self.detail_panel.refresh_process_button_text(len(selected))
-
-        if len(selected) > 1:
-            self.detail_panel.enter_multi_mode(selected)
-            return
-
-        # Salir del modo multi si se estaba en él
-        if self._multi_select_mode:
-            self.detail_panel.exit_multi_mode()
-
-        if not selected:
-            return
-
-        item_id = selected[0]
-        item = self.tree.item(item_id)
-        values = item['values']
-        if len(values) < 8:
-            logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
-            return
-
-        self.detail_panel.set_panel_widget_value("entry_artist", values[1])
-        self.detail_panel.set_panel_widget_value("entry_title", values[2])
-        self.detail_panel.set_panel_widget_value("entry_mixartist", values[3])
-        self.detail_panel.set_panel_widget_value("entry_album", values[4])
-        self.detail_panel.set_panel_widget_value("entry_genre", values[5])
-        self.detail_panel.set_panel_widget_value("entry_publisher", values[6])
-        self.detail_panel.set_panel_widget_value("entry_year", values[7])
-
-        file_path = self.file_paths_map.get(item_id)
-        if file_path:
-            self.detail_panel.display_cover_art(file_path)
-
     def _enter_multi_mode(self, selected_rows):
         self.detail_panel.enter_multi_mode(selected_rows)
 
@@ -801,80 +711,6 @@ class App(ctk.CTk):
         self.detail_panel.on_panel_text_field_commit(attr_name)
 
 
-    def paste_cover_from_clipboard(self):
-        """Obtiene imagen del portapapeles y la incrusta en el archivo seleccionado."""
-        try:
-            from PIL import ImageGrab
-            img = ImageGrab.grabclipboard()
-        except Exception as e:
-            logger.error(f"Error accediendo al portapapeles: {str(e)}")
-            self.show_themed_dialog(
-                "Error de portapapeles",
-                f"No se pudo leer el portapapeles:\n{str(e)}",
-                level="error"
-            )
-            return
-
-        if img is None:
-            self.show_themed_dialog(
-                "Portapapeles vacío",
-                "No hay ninguna imagen en el portapapeles.\n"
-                "Copia primero una imagen (Ctrl+C sobre ella).",
-                level="warning"
-            )
-            return
-
-        if not isinstance(img, Image.Image):
-            self.show_themed_dialog(
-                "Contenido no válido",
-                "El portapapeles no contiene una imagen válida.",
-                level="warning"
-            )
-            return
-
-        # Convertir a JPEG en memoria
-        image_bytes = self._pil_to_bytes(img)
-        if not image_bytes:
-            return
-
-        # Obtener filas seleccionadas
-        selected = self.tree.selection()
-        if not selected:
-            self.show_themed_dialog(
-                "Sin selección",
-                "Selecciona primero un archivo en la tabla.",
-                level="warning"
-            )
-            return
-
-        target_rows = list(selected) if self._multi_select_mode else [selected[0]]
-
-        image_bytes = self.normalize_cover_image_bytes(image_bytes)
-        ok_count = 0
-        for row_id in target_rows:
-            file_path = self.file_paths_map.get(row_id)
-            if not file_path or not os.path.exists(file_path):
-                continue
-            if self.audio_manager.embed_cover_art(file_path, image_bytes):
-                self.update_row_cover_status(row_id, "Sí")
-                logger.info(f"Carátula pegada desde portapapeles e incrustada en: {os.path.basename(file_path)}")
-                ok_count += 1
-            else:
-                logger.error(f"No se pudo incrustar la carátula en: {os.path.basename(file_path)}")
-
-        if ok_count and not self._multi_select_mode:
-            self.detail_panel.display_cover_art(image_bytes)
-        elif ok_count and self._multi_select_mode:
-            self.detail_panel.display_multi_cover_placeholder(selected_rows=self.tree.selection())
-            logger.info(f"Carátula pegada a {ok_count} archivo(s) seleccionado(s).")
-
-        if ok_count == 0:
-            self.show_themed_dialog(
-                "Error al guardar",
-                "No se pudo incrustar la carátula en ningún archivo.",
-                level="error"
-            )
-
     @staticmethod
     def _pil_to_bytes(img):
         """Convierte un objeto PIL.Image a bytes JPEG."""
@@ -883,51 +719,6 @@ class App(ctk.CTk):
         rgb.save(out, format="JPEG", quality=95, optimize=True)
         return out.getvalue()
 
-    def remove_cover_art(self):
-        """Elimina la carátula del/los archivo(s) seleccionado(s) y actualiza la UI."""
-        selected = self.tree.selection()
-        if not selected:
-            self.show_themed_dialog(
-                "Sin selección",
-                "Selecciona primero un archivo en la tabla.",
-                level="warning"
-            )
-            return
-
-        target_rows = list(selected) if self._multi_select_mode else [selected[0]]
-
-        # Mensaje de confirmación adaptado al número de archivos
-        if len(target_rows) == 1:
-            row_id = target_rows[0]
-            file_path = self.file_paths_map.get(row_id)
-            file_name = os.path.basename(file_path) if file_path else "el archivo seleccionado"
-            confirm_msg = f"¿Eliminar la carátula de:\n{file_name}?"
-        else:
-            confirm_msg = f"¿Eliminar la carátula de los {len(target_rows)} archivos seleccionados?"
-
-        if not self.show_themed_dialog("Confirmar", confirm_msg, level="warning", is_confirm=True):
-            return
-
-        ok_count = 0
-        for row_id in target_rows:
-            file_path = self.file_paths_map.get(row_id)
-            if not file_path or not os.path.exists(file_path):
-                continue
-            try:
-                self._strip_cover_tags(file_path)
-                self.update_row_cover_status(row_id, "No")
-                logger.info(f"Carátula eliminada de: {os.path.basename(file_path)}")
-                ok_count += 1
-            except Exception as e:
-                logger.error(f"Error eliminando carátula de {os.path.basename(file_path)}: {str(e)}")
-
-        # Actualizar panel de carátula
-        if ok_count:
-            if self._multi_select_mode:
-                self.detail_panel.display_multi_cover_placeholder(selected_rows=self.tree.selection())
-                logger.info(f"Carátula eliminada de {ok_count} archivo(s) seleccionado(s).")
-            else:
-                self.detail_panel.display_cover_art(b"")
 
     def _strip_cover_tags(self, file_path):
         self.audio_manager.strip_cover_tags(file_path)
@@ -956,7 +747,8 @@ class App(ctk.CTk):
     def clear_metadata_for_rows(self, target_rows, scope_label="selección"):
         target_rows = list(target_rows)
         if not target_rows:
-            self.show_themed_dialog(
+            DialogManager.show_themed_dialog(
+                self,
                 "Sin archivos",
                 "No hay archivos disponibles para limpiar metadatos.",
                 level="warning"
@@ -974,7 +766,7 @@ class App(ctk.CTk):
                 f"de la {scope_label}?"
             )
 
-        if not self.show_themed_dialog("Confirmar limpieza", message, level="warning", is_confirm=True):
+        if not DialogManager.show_themed_dialog(self, "Confirmar limpieza", message, level="warning", is_confirm=True):
             return 0
 
         cleaned_count = 0
@@ -996,7 +788,7 @@ class App(ctk.CTk):
             cleaned_count += 1
 
         if self.tree.selection():
-            self.on_row_select(None)
+            self.detail_panel.on_row_select(None)
 
         logger.info(
             f"Limpieza de metadatos completada ({scope_label}) -> OK: {cleaned_count}, Fallos: {failed_count}"
@@ -1006,7 +798,8 @@ class App(ctk.CTk):
     def clear_selected_metadata(self):
         selected_rows = self.tree.selection()
         if not selected_rows:
-            self.show_themed_dialog(
+            DialogManager.show_themed_dialog(
+                self,
                 "Sin selección",
                 "Selecciona al menos un archivo en la tabla para limpiar sus metadatos.",
                 level="warning"
@@ -1089,154 +882,7 @@ class App(ctk.CTk):
             f"Campo '{self.catalog_labels.get(catalog_key, catalog_key)}' actualizado desde panel: "
             f"'{self.columns[col_index]}' -> '{new_value}'"
         )
-        self.on_row_select(None)
-
-
-    def open_catalog_manager(self, catalog_key):
-        if catalog_key not in self.catalog_fields:
-            return
-
-        logger.info(f"Abriendo gestión de {self.catalog_labels[catalog_key]}.")
-
-        win = ctk.CTkToplevel(self)
-        win.title(f"Gestionar {self.catalog_labels[catalog_key]}")
-        win.geometry("420x380")
-        self.apply_popup_style(win, is_modal=True, owner=self)
-
-        frame = ctk.CTkFrame(win)
-        frame.pack(fill="both", expand=True, padx=12, pady=12)
-
-        listbox = tk.Listbox(frame, bg="#1E1E1E", fg="#E5E7EB", selectbackground=self.CORP_COLOR, height=10)
-        listbox.pack(fill="both", expand=True, pady=(0, 8))
-
-        entry = ctk.CTkEntry(frame, placeholder_text="Nuevo valor o valor modificado")
-        entry.pack(fill="x", pady=(0, 8))
-
-        def refresh_listbox():
-            listbox.delete(0, "end")
-            for item in self.catalog_values.get(catalog_key, []):
-                listbox.insert("end", item)
-
-        def add_value():
-            value = self.normalize_catalog_text(entry.get())
-            if not value:
-                logger.warning(f"Alta en {self.catalog_labels[catalog_key]} cancelada: valor vacío.")
-                self.show_themed_dialog("Valor no válido", "Debes introducir un valor.", level="warning", parent=win)
-                return
-            if value in self.catalog_values[catalog_key]:
-                logger.warning(f"Alta en {self.catalog_labels[catalog_key]} cancelada: '{value}' ya existe.")
-                self.show_themed_dialog("Duplicado", "Ese valor ya existe.", level="warning", parent=win)
-                return
-            self.catalog_values[catalog_key].append(value)
-            self.catalog_values[catalog_key].sort(key=lambda x: x.lower())
-            self.refresh_catalog_comboboxes()
-            self.save_catalog_values()
-            refresh_listbox()
-            entry.delete(0, "end")
-            logger.info(f"Añadido '{value}' a {self.catalog_labels[catalog_key]}.")
-
-        def update_value():
-            selected = listbox.curselection()
-            if not selected:
-                logger.warning(f"Modificación en {self.catalog_labels[catalog_key]} cancelada: sin selección.")
-                self.show_themed_dialog("Selección requerida", "Selecciona un valor para modificar.", level="warning", parent=win)
-                return
-            new_value = self.normalize_catalog_text(entry.get())
-            if not new_value:
-                logger.warning(f"Modificación en {self.catalog_labels[catalog_key]} cancelada: valor vacío.")
-                self.show_themed_dialog("Valor no válido", "Debes introducir el nuevo valor.", level="warning", parent=win)
-                return
-            idx = selected[0]
-            old_value = self.normalize_catalog_text(self.catalog_values[catalog_key][idx])
-            if new_value == old_value:
-                logger.info(
-                    f"Modificación en {self.catalog_labels[catalog_key]} omitida: '{old_value}' no cambia."
-                )
-                return
-
-            updated_count, merged = self.rename_catalog_value(catalog_key, old_value, new_value)
-            refresh_listbox()
-            entry.delete(0, "end")
-
-            logger.info(
-                f"Modificada {self.catalog_labels[catalog_key]}: '{old_value}' -> '{new_value}'. "
-                f"Afectados: {updated_count}. Fusión: {'sí' if merged else 'no'}."
-            )
-
-            if merged:
-                self.show_themed_dialog(
-                    "Valores fusionados",
-                    f"'{old_value}' se fusionó con '{new_value}'.\n"
-                    f"Se actualizaron {updated_count} archivo(s).",
-                    level="info",
-                    parent=win
-                )
-            else:
-                self.show_themed_dialog(
-                    "Valor actualizado",
-                    f"Se reemplazó '{old_value}' por '{new_value}'.\n"
-                    f"Se actualizaron {updated_count} archivo(s).",
-                    level="info",
-                    parent=win
-                )
-
-        def delete_value():
-            selected = listbox.curselection()
-            if not selected:
-                logger.warning(f"Eliminación en {self.catalog_labels[catalog_key]} cancelada: sin selección.")
-                self.show_themed_dialog("Selección requerida", "Selecciona un valor para eliminar.", level="warning", parent=win)
-                return
-            idx = selected[0]
-            value = self.catalog_values[catalog_key][idx]
-
-            affected_count = 0
-            col_info = self.get_catalog_column_info(catalog_key)
-            if col_info:
-                _, col_index = col_info
-                for row_id in self.tree.get_children():
-                    row_values = self.tree.item(row_id, "values")
-                    if col_index < len(row_values) and self.normalize_catalog_text(row_values[col_index]) == value:
-                        affected_count += 1
-
-            confirm_msg = (
-                f"¿Eliminar '{value}'?\n\n"
-                f"Esto vaciará el campo en {affected_count} archivo(s)."
-            )
-            if not self.show_themed_dialog("Confirmar eliminación", confirm_msg, level="warning", is_confirm=True, parent=win):
-                logger.info(f"Eliminación en {self.catalog_labels[catalog_key]} cancelada por usuario ('{value}').")
-                return
-
-            updated_count = self.apply_catalog_value_change(catalog_key, value, "")
-            self.catalog_values[catalog_key].pop(idx)
-            self.refresh_catalog_comboboxes()
-            self.save_catalog_values()
-            refresh_listbox()
-            entry.delete(0, "end")
-            self.on_row_select(None)
-
-            logger.info(
-                f"Eliminado '{value}' de {self.catalog_labels[catalog_key]}. "
-                f"Campos vaciados en {updated_count} archivo(s)."
-            )
-
-            self.show_themed_dialog(
-                "Valor eliminado",
-                f"Se eliminó '{value}'.\n"
-                f"Se vació el campo en {updated_count} archivo(s).",
-                level="info",
-                parent=win
-            )
-
-        btns = ctk.CTkFrame(frame, fg_color="transparent")
-        btns.pack(fill="x", pady=(0, 6))
-
-        ctk.CTkButton(btns, text="Añadir", command=add_value, fg_color=self.CORP_COLOR, hover_color=self.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=(0, 4))
-        ctk.CTkButton(btns, text="Modificar", command=update_value, fg_color=self.CORP_COLOR, hover_color=self.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=4)
-        ctk.CTkButton(btns, text="Eliminar", command=delete_value, fg_color="#B91C1C", hover_color="#991B1B").pack(side="left", expand=True, fill="x", padx=(4, 0))
-
-        ctk.CTkButton(frame, text="Cerrar", command=win.destroy, fg_color=self.CORP_COLOR, hover_color=self.CORP_HOVER).pack(fill="x")
-
-        refresh_listbox()
+        self.detail_panel.on_row_select(None)
 
     def on_close(self):
         self.save_catalog_values()
@@ -1295,26 +941,6 @@ class App(ctk.CTk):
             self.apply_search_filter()
         logger.info(f"Se encontraron {count} archivo(s) de audio compatibles.")
 
-
-    def show_logs_dialog(self):
-        if self.log_window is not None and self.log_window.winfo_exists():
-            self.log_window.deiconify()
-            self.log_window.lift()
-            self.log_window.focus_force()
-            return
-
-        self.log_window = ctk.CTkToplevel(self)
-        self.log_window.title("Historial de Logs")
-        self.log_window.geometry("700x400")
-        self.apply_popup_style(self.log_window, is_modal=False, owner=self)
-        self.log_window.protocol("WM_DELETE_WINDOW", self.close_logs_dialog)
-
-        self.log_textbox = ctk.CTkTextbox(self.log_window, wrap="none")
-        self.log_textbox.pack(fill="both", expand=True, padx=10, pady=10)
-
-        self.log_textbox.insert("1.0", "\n".join(self.log_history))
-        self.log_textbox.configure(state="disabled")
-
     def append_log_to_dialog(self, msg):
         if self.log_window is None or self.log_textbox is None:
             return
@@ -1328,27 +954,12 @@ class App(ctk.CTk):
         self.log_textbox.see("end")
         self.log_textbox.configure(state="disabled")
 
-    def close_logs_dialog(self):
-        if self.log_window is not None and self.log_window.winfo_exists():
-            self.log_window.destroy()
-        self.log_window = None
-        self.log_textbox = None
-
-    def show_about_dialog(self):
-        DialogManager.show_about_dialog(self)
-
     def select_all_rows(self):
         """Selecciona todas las filas del árbol de archivos."""
         all_items = self.tree.get_children()
         self.tree.selection_set(all_items)
         self.detail_panel.refresh_process_button_text(len(all_items))
         logger.info(f"Seleccionados todos los {len(all_items)} archivo(s).")
-
-    def show_keyboard_shortcuts_dialog(self):
-        DialogManager.show_keyboard_shortcuts_dialog(self)
-
-    def show_settings_dialog(self):
-        DialogManager.show_settings_dialog(self, logger)
 
 
 if __name__ == "__main__":

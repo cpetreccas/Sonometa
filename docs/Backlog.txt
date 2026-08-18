@@ -15,6 +15,10 @@ Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
 
 Undo / Redo de cambios	Guardar un búfer de estados anteriores para revertir escrituras accidentales.
 
+Al navegar por el grid, al hacer ENTER no se actualiza el panel de detalle.
+
+Al presionar ESC se debe salir del modo edición en el GRID
+
 
 MEJORAS TÉCNICAS:
 - Refactorización:
