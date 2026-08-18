@@ -1,11 +1,13 @@
+import io
 import os
 import sys
 import ctypes
-import logging as logger
+import threading
+import urllib.request
+from PIL import Image
 import tkinter as tk
 from catalog_manager import CatalogManager
 import customtkinter as ctk
-
 
 class DialogManager:
     """Clase especializada en la gestión de ventanas emergentes, diálogos y popups de la aplicación."""
@@ -211,8 +213,8 @@ class DialogManager:
     @staticmethod
     def show_settings_dialog(app, logger_inst):
         win = ctk.CTkToplevel(app)
-        win.title("Configuración - Token Discogs")
-        win.geometry("500x260")
+        win.title("Configuración")
+        win.geometry("450x180")
         win.resizable(False, False)
         DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
 
@@ -220,44 +222,29 @@ class DialogManager:
         frame.pack(fill="both", expand=True, padx=16, pady=16)
 
         ctk.CTkLabel(
-            frame, text="Token de Discogs",
+            frame, text="Opciones de Procesamiento",
             font=ctk.CTkFont(size=13, weight="bold"), anchor="w"
-        ).pack(fill="x", pady=(0, 4))
-
-        ctk.CTkLabel(
-            frame,
-            text=(
-                "El token se usa para buscar carátulas de vinilos.\n"
-                "Puedes obtenerlo en discogs.com → Ajustes → Desarrolladores."
-            ),
-            font=ctk.CTkFont(size=11), text_color="#9CA3AF",
-            anchor="w", justify="left"
         ).pack(fill="x", pady=(0, 10))
 
-        entry_token = ctk.CTkEntry(
-            frame, placeholder_text="Pega aquí tu token de Discogs",
-            height=34, font=ctk.CTkFont(size=12), show="*"
-        )
-        entry_token.pack(fill="x", pady=(0, 4))
-        if getattr(app, "discogs_token", None):
-            entry_token.insert(0, app.discogs_token)
+        # Flag de selección manual
+        current_val = getattr(app.catalog_manager, "manual_cover_selection", True)
+        manual_cover_var = tk.BooleanVar(value=current_val)
 
-        show_var = tk.BooleanVar(value=False)
-        chk = ctk.CTkCheckBox(
-            frame, text="Mostrar token", variable=show_var,
-            command=lambda: entry_token.configure(show="" if show_var.get() else "*"),
-            font=ctk.CTkFont(size=11)
+        chk_manual_cover = ctk.CTkCheckBox(
+            frame,
+            text="Seleccionar manualmente la carátula",
+            variable=manual_cover_var,
+            font=ctk.CTkFont(size=12),
+            fg_color=app.CORP_COLOR,
+            hover_color=app.CORP_HOVER
         )
-        chk.pack(anchor="w", pady=(0, 12))
+        chk_manual_cover.pack(anchor="w", pady=(5, 15))
 
-        def save_token():
-            token = entry_token.get().strip()
-            app.discogs_token = token
-            app.catalog_manager.save_settings(app.discogs_token)
-            if token:
-                logger_inst.info("Token de Discogs guardado correctamente.")
-            else:
-                logger_inst.info("Token de Discogs eliminado.")
+        def save_settings():
+            new_val = manual_cover_var.get()
+            app.catalog_manager.manual_cover_selection = new_val
+            app.catalog_manager.save_settings()
+            logger_inst.info(f"Configuración guardada -> Selección manual de carátula: {new_val}")
             win.destroy()
 
         btns = ctk.CTkFrame(frame, fg_color="transparent")
@@ -268,7 +255,7 @@ class DialogManager:
         ).pack(side="right", padx=(6, 0))
         ctk.CTkButton(
             btns, text="Guardar", fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER,
-            command=save_token
+            command=save_settings
         ).pack(side="right")
 
     @staticmethod
@@ -430,3 +417,131 @@ class DialogManager:
         ctk.CTkButton(frame, text="Cerrar", command=win.destroy, fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(fill="x")
 
         refresh_listbox()
+
+    @staticmethod
+    def select_discogs_cover_dialog(app, image_urls):
+        """Muestra un diálogo con previsualización de imágenes mediante clics en miniaturas."""
+        if not image_urls:
+            return None
+
+        # Si solo hay una imagen, no es necesario abrir el diálogo
+        if len(image_urls) == 1:
+            return image_urls[0]
+
+        selected_url = [None]  # Lista mutable para almacenar el resultado
+
+        win = ctk.CTkToplevel(app)
+        win.title("Seleccionar Carátula - Discogs")
+        # Cuadro de diálogo más grande
+        win.geometry("800x600")
+        win.resizable(True, True)
+
+        # Configuración de estilo y asignación del icono de la aplicación a la barra de título
+        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
+        if hasattr(app, "app_icon_photo") and app.app_icon_photo:
+            try:
+                win.iconphoto(False, app.app_icon_photo)
+            except Exception:
+                pass
+
+        frame = ctk.CTkFrame(win, fg_color="#1E1E1E")
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(
+            frame,
+            text=f"Se encontraron {len(image_urls)} carátulas. Haz clic sobre una para seleccionarla:",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        ).pack(fill="x", pady=(0, 10))
+
+        # Marco con scroll dinámico para la cuadrícula de previsualizaciones
+        scroll_frame = ctk.CTkScrollableFrame(frame, fg_color="#111827")
+        scroll_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Configurar 3 columnas en la cuadrícula
+        scroll_frame.grid_columnconfigure((0, 1, 2), weight=1, uniform="cover_grid")
+
+        def select_and_close(url):
+            selected_url[0] = url
+            win.destroy()
+
+        def on_cancel():
+            selected_url[0] = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", on_cancel)
+
+        # Función que descarga la miniatura en segundo plano para no bloquear la interfaz
+        def load_thumbnail_async(url, parent_button, img_label):
+            try:
+                headers = app.discogs_client._get_headers() if hasattr(app, 'discogs_client') else {}
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    raw_data = resp.read()
+
+                pil_img = Image.open(io.BytesIO(raw_data))
+                pil_img.thumbnail((200, 200), Image.Resampling.LANCZOS)
+
+                # Crear CTkImage compatible con customtkinter
+                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
+
+                # Actualizar la UI en el hilo principal
+                def update_ui():
+                    if win.winfo_exists():
+                        img_label.configure(image=ctk_img, text="")
+                        img_label._image_ref = ctk_img  # Evitar que el recolector de basura elimine la imagen
+
+                win.after(0, update_ui)
+            except Exception:
+                def update_err():
+                    if win.winfo_exists():
+                        img_label.configure(text="Error al cargar")
+                win.after(0, update_err)
+
+        # Generar las tarjetas de previsualización sin RadioButtons
+        for idx, url in enumerate(image_urls):
+            row = idx // 3
+            col = idx % 3
+
+            card = ctk.CTkFrame(scroll_frame, fg_color="#1F2937", corner_radius=8)
+            card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+
+            # Etiqueta contenedora para la imagen/loader
+            img_label = ctk.CTkLabel(
+                card,
+                text="Cargando...",
+                width=200,
+                height=200,
+                fg_color="#111827",
+                corner_radius=6
+            )
+            img_label.pack(padx=10, pady=(10, 5))
+
+            # Botón de selección por clic directo
+            btn_select = ctk.CTkButton(
+                card,
+                text=f"Seleccionar #{idx + 1}",
+                fg_color=app.CORP_COLOR,
+                hover_color=app.CORP_HOVER,
+                command=lambda u=url: select_and_close(u)
+            )
+            btn_select.pack(padx=10, pady=(5, 10), fill="x")
+
+            # Hacer que hacer clic directamente sobre la imagen o la tarjeta también seleccione
+            img_label.bind("<Button-1>", lambda e, u=url: select_and_close(u))
+            card.bind("<Button-1>", lambda e, u=url: select_and_close(u))
+
+            # Lanzar descarga asíncrona de la imagen
+            threading.Thread(target=load_thumbnail_async, args=(url, btn_select, img_label), daemon=True).start()
+
+        # Botón inferior de cancelación
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(fill="x", side="bottom")
+
+        ctk.CTkButton(
+            btns, text="Cancelar", fg_color="#374151", hover_color="#1F2937",
+            command=on_cancel
+        ).pack(side="right")
+
+        app.wait_window(win)
+        return selected_url[0]

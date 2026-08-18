@@ -99,3 +99,25 @@ class DiscogsClient:
                 f"Error descargando imagen de carátula ({image_url}): {str(e)}"
             )
         return None
+
+    def get_release_images(self, query):
+        """Busca un lanzamiento en Discogs y devuelve una lista con las URLs de todas las imágenes o resultados disponibles."""
+        try:
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release"
+            req = urllib.request.Request(url, headers=self._get_headers())
+
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    results = data.get("results", [])
+                    images = []
+                    for res in results:
+                        img = res.get("cover_image") or res.get("thumb")
+                        if img and img not in images:
+                            images.append(img)
+                    return images
+        except Exception as e:
+            logger.error(f"Error obteniendo lista de imágenes de Discogs: {str(e)}")
+
+        return []

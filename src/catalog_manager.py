@@ -9,6 +9,7 @@ class CatalogManager:
 
     def __init__(self, app_instance):
         self.app = app_instance
+        self.manual_cover_selection = True
         self.catalog_fields = ("Genre", "Album", "Publisher")
         self.catalog_labels = {
             "Genre": "Géneros",
@@ -73,19 +74,25 @@ class CatalogManager:
             with open(self.settings_file_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             token = data.get("discogs_token", "").strip()
+            self.manual_cover_selection = data.get("manual_cover_selection", True)
+
             if token:
                 logger.info("Token de Discogs cargado desde configuración.")
-                return token
             else:
                 logger.warning("settings.json encontrado pero sin token de Discogs.")
-                return ""
+            return token
         except Exception as e:
             logger.warning(f"No se pudo cargar la configuración: {str(e)}")
             return ""
 
     def save_settings(self, token=""):
         try:
-            data = {"discogs_token": token}
+            # Si se le pasa un token explícito, lo usa; si no, preserva el que tenga la app o deja cadena vacía
+            current_token = token if token else getattr(self.app, "discogs_token", "")
+            data = {
+                "discogs_token": current_token,
+                "manual_cover_selection": getattr(self, "manual_cover_selection", True)
+            }
             with open(self.settings_file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:

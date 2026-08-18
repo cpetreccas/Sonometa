@@ -151,26 +151,45 @@ class ProcessManager:
                 if already_has_cover:
                     values[8] = "Sí"
                     self.app.grid_panel.update_row_cover_status(row_id, "Sí")
-                elif cover_url:
-                    self.logger.info(f"Descargando carátula del vinilo desde: {cover_url}")
-                    image_data = self.app.discogs_client.download_image_bytes(cover_url)
-                    if image_data:
-                        image_data = AudioManager.normalize_cover_image_bytes(image_data)
-                        if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                            values[8] = "Sí"
-                            self.logger.info(f"Carátula incrustada con éxito en: {new_filename}")
-                            self.app.detail_panel.display_cover_art(image_data)
-                            self.app.grid_panel.update_row_cover_status(row_id, "Sí")
+                else:
+                    # Buscamos todas las imágenes disponibles si el cliente lo soporta
+                    all_images = self.app.discogs_client.get_release_images(query_term) if hasattr(self.app.discogs_client, 'get_release_images') else []
+
+                    # Si no hay lista extendida de imágenes, usamos la cover_url principal como fallback
+                    if not all_images and cover_url:
+                        all_images = [cover_url]
+
+                    chosen_cover_url = None
+                    manual_mode = getattr(self.app.catalog_manager, "manual_cover_selection", True)
+
+                    if all_images:
+                        if manual_mode:
+                            # Se abre el cuadro emergente para seleccionar la carátula manualmente
+                            chosen_cover_url = DialogManager.select_discogs_cover_dialog(self.app, all_images)
+                        else:
+                            # Modo automático: se toma la primera imagen por defecto
+                            chosen_cover_url = all_images[0]
+
+                    if chosen_cover_url:
+                        self.logger.info(f"Descargando carátula seleccionada desde: {chosen_cover_url}")
+                        image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
+                        if image_data:
+                            image_data = AudioManager.normalize_cover_image_bytes(image_data)
+                            if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
+                                values[8] = "Sí"
+                                self.logger.info(f"Carátula incrustada con éxito en: {new_filename}")
+                                self.app.detail_panel.display_cover_art(image_data)
+                                self.app.grid_panel.update_row_cover_status(row_id, "Sí")
+                            else:
+                                values[8] = "No"
+                                self.logger.error(f"La carátula no quedó persistida en el archivo: {new_filename}")
                         else:
                             values[8] = "No"
-                            self.logger.error(f"La carátula no quedó persistida en el archivo: {new_filename}")
+                            self.logger.warning(f"No se pudieron descargar los bytes de la carátula ({chosen_cover_url})")
                     else:
                         values[8] = "No"
-                        self.logger.warning(f"No se pudieron descargar los bytes de la carátula ({cover_url})")
-                else:
-                    values[8] = "No"
-                    self.logger.warning(f"Discogs no devolvió carátula para: '{query_term}'")
-                    self.app.grid_panel.update_row_cover_status(row_id, "No")
+                        self.logger.warning(f"No se seleccionó ninguna carátula para: '{query_term}'")
+                        self.app.grid_panel.update_row_cover_status(row_id, "No")
 
                 self.app.tree.item(row_id, values=values)
                 if metadata_changes:

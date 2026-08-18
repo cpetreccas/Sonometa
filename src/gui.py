@@ -2,6 +2,7 @@ import os
 import ctypes
 from collections import deque
 import customtkinter as ctk
+from PIL import ImageTk
 from customtkinter import filedialog
 
 from grid_panel import GridPanel
@@ -72,8 +73,7 @@ class App(ctk.CTk):
 
         # 1. Primero cargamos el token desde el entorno
         #self.discogs_token = os.getenv("DISCOGS_TOKEN", "").strip()
-        TOKEN_DISCOGS_HARDCODED = "RYvclJgMalquxdkpdHutNJEQqGjlaiqtuBvipCfq"
-        self.discogs_token = os.getenv("DISCOGS_TOKEN", TOKEN_DISCOGS_HARDCODED).strip()
+        self.discogs_token = os.getenv("DISCOGS_TOKEN", "RYvclJgMalquxdkpdHutNJEQqGjlaiqtuBvipCfq").strip()
 
         # 2. Inicializamos el gestor de catálogos y cargamos sus datos
         self.catalog_manager = CatalogManager(self)
@@ -87,6 +87,11 @@ class App(ctk.CTk):
     def _load_app_resources(self):
         self.app_icon_photo = None
         self.logo_pil, self.broom_icon, self.process_icon = UiUtils.load_app_icons(self)
+        if self.logo_pil:
+            try:
+                self.app_icon_photo = ImageTk.PhotoImage(self.logo_pil)
+            except Exception:
+                pass
 
     def _setup_ui(self):
         # 0. Menú Superior

@@ -1,6 +1,4 @@
 FUNCIONALIDADES:
-En el modo multiedición falta '<Limpiar>'
-
 Agente AI que genere el filename acorde al estilo de Sonometa.
 
 Format_filename.py debe sustituir guiones bajos por espacios.
@@ -8,8 +6,6 @@ Format_filename.py debe sustituir guiones bajos por espacios.
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
 Ayuda+Acerca de Sonometa abre un modal con el title bar oscuro sin embargo la gestión de catálogos y ver logs no, hacer que todas las ventanas emergentes sean con title bar oscuro
-
-Dejar seleccionar la carátula correcta si la búsqueda en Discogs trae más de un resultado
 
 Al editar algo en el panel izquierdo, al hacer zoomout en el grid se aplican los cambios a la fila seleccionada nueva, no a la antigua
 
@@ -20,19 +16,3 @@ Undo / Redo de cambios	Guardar un búfer de estados anteriores para revertir esc
 Al navegar por el grid, al hacer ENTER no se actualiza el panel de detalle.
 
 Al presionar ESC se debe salir del modo edición en el GRID
-
-
-MEJORAS TÉCNICAS:
-- Refactorización:
-│
-├── main.py                # Instanciador principal y loop
-├── app.py                 # Ventana principal (Ensamblador de UI y eventos)
-├── audio_manager.py       # (Existente) Operaciones de lectura/escritura de audio
-├── detail_panel.py        # (Existente) Panel lateral de metadatos
-├── format_filename.py     # (Existente) Formateador de nombres
-│
-├── discogs_service.py     # [NUEVO] Conexión e integración con API Discogs
-├── catalog_manager.py     # [NUEVO] Controladores de listas desplegables/JSON
-├── settings_manager.py    # [NUEVO] Gestor de tokens y ajustes
-├── grid_panel.py          # [NUEVO] Encapsulamiento del ttk.Treeview
-└── dialogs.py             # [NUEVO] Ventanas emergentes y diálogos

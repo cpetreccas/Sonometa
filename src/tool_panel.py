@@ -22,7 +22,7 @@ class ToolPanel(ctk.CTkFrame):
         self.menu_archivo.add_command(label="Actualizar  (F5)", command=app.refresh_folder)
         self.menu_archivo.add_separator()
         self.menu_archivo.add_command(
-            label="⚙ Configuración (Token Discogs)",
+            label="⚙ Configuración",
             command=lambda: DialogManager.show_settings_dialog(app, app.logger)
         )
         self.menu_archivo.add_separator()
