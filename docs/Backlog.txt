@@ -1,5 +1,4 @@
 FUNCIONALIDADES:
-
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
 Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)

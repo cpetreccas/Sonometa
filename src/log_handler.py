@@ -7,13 +7,32 @@ class LogManager(logging.Handler):
 
     def emit(self, record):
         msg = self.format(record)
-        self.app_instance.log_history.append(msg)
-        # Programar el update en el hilo de UI evita errores si llega desde callback externo.
+        if hasattr(self.app_instance, "log_history"):
+            self.app_instance.log_history.append(msg)
+
+        # Si la ventana principal ya fue destruida, evitamos llamar a after()
+        if not hasattr(self.app_instance, "winfo_exists") or not self.app_instance.winfo_exists():
+            return
+
         try:
-            self.app_instance.after(0, lambda: self.app_instance.label_status.configure(text=record.getMessage()))
-            self.app_instance.after(0, lambda: LogManager.append_log_to_dialog(self.app_instance, msg))
+            # Programar la actualización UI en el hilo principal
+            message_text = record.getMessage()
+            self.app_instance.after(
+                0,
+                lambda: self._update_ui_log(message_text, msg)
+            )
         except Exception:
             pass
+
+    def _update_ui_log(self, status_msg, full_msg):
+        """Actualiza la barra de estado y el cuadro de texto del diálogo si existen."""
+        if hasattr(self.app_instance, "label_status") and self.app_instance.label_status:
+            try:
+                self.app_instance.label_status.configure(text=status_msg)
+            except Exception:
+                pass
+
+        LogManager.append_log_to_dialog(self.app_instance, full_msg)
 
     @staticmethod
     def setup_logger(app_instance, name="Sonometa", level=logging.INFO):
@@ -21,13 +40,13 @@ class LogManager(logging.Handler):
         logger = logging.getLogger(name)
         logger.setLevel(level)
 
-        # Si ya tiene handlers configurados, evitamos duplicar
+        # Evitar duplicar handlers en re-inicializaciones
         if not logger.handlers:
             formatter = logging.Formatter(
                 "%(asctime)s [%(levelname)s] %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S"
             )
-            # 1. Console Handler (Consola)
+            # 1. Console Handler
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
@@ -42,14 +61,21 @@ class LogManager(logging.Handler):
     @staticmethod
     def append_log_to_dialog(app, msg):
         """Agrega una línea de texto al cuadro de texto del diálogo de logs si está abierto."""
-        if app.log_window is None or app.log_textbox is None:
-            return
-        if not app.log_window.winfo_exists():
-            app.log_window = None
-            app.log_textbox = None
+        log_win = getattr(app, "log_window", None)
+        log_box = getattr(app, "log_textbox", None)
+
+        if not log_win or not log_box:
             return
 
-        app.log_textbox.configure(state="normal")
-        app.log_textbox.insert("end", f"{msg}\n")
-        app.log_textbox.see("end")
-        app.log_textbox.configure(state="disabled")
+        try:
+            if not log_win.winfo_exists():
+                app.log_window = None
+                app.log_textbox = None
+                return
+
+            log_box.configure(state="normal")
+            log_box.insert("end", f"{msg}\n")
+            log_box.see("end")
+            log_box.configure(state="disabled")
+        except Exception:
+            pass

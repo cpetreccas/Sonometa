@@ -73,6 +73,10 @@ class App(ctk.CTk):
         self.audio_manager = AudioManager()
         self.filename_formatter = FilenameFormatter()
 
+        # Ruta global de la carátula por defecto
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.DEFAULT_COVER_PATH = os.path.join(base_dir, "assets", "no_cover_art.jpg")
+
         # 1. Primero cargamos el token desde el entorno
         self.discogs_token = os.getenv("DISCOGS_TOKEN", "RYvclJgMalquxdkpdHutNJEQqGjlaiqtuBvipCfq").strip()
 

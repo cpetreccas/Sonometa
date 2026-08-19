@@ -5,13 +5,36 @@ from concurrent.futures import ThreadPoolExecutor
 from dialogs import DialogManager
 from catalog_manager import CatalogManager
 from audio_manager import AudioManager
-from ui_utils import UiUtils
 
 class ProcessManager:
     def __init__(self, app):
         self.app = app
         self.logger = app.logger
-        self._lock = threading.Lock()  # Sincronización para hilos en recursos compartidos
+        self._lock = threading.Lock()  # Sincronización para acceso concurrente
+
+    def _get_default_cover_bytes(self):
+        """Obtiene los bytes de la carátula por defecto buscando de forma robusta."""
+        default_path = getattr(self.app, "DEFAULT_COVER_PATH", None)
+
+        # Si no está definida en la app, buscarla de manera relativa a este archivo o al directorio de trabajo
+        if not default_path or not os.path.exists(default_path):
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            default_path = os.path.join(base_dir, "assets", "no_cover_art.jpg")
+
+        if not os.path.exists(default_path):
+            # Intentar buscar un nivel más arriba si el gestor está en una subcarpeta
+            default_path = os.path.join(os.path.dirname(base_dir), "assets", "no_cover_art.jpg")
+
+        if default_path and os.path.exists(default_path):
+            try:
+                with open(default_path, "rb") as f:
+                    return f.read()
+            except Exception as e:
+                self.logger.error(f"Error leyendo la carátula por defecto '{default_path}': {str(e)}")
+        else:
+            self.logger.warning(f"No se encontró el archivo de carátula por defecto en ninguna ruta evaluada.")
+
+        return None
 
     def process_discogs_data(self):
         target_rows = self.app.tree.selection()
@@ -22,13 +45,13 @@ class ProcessManager:
             DialogManager.show_themed_dialog(self.app, "Advertencia", "No hay archivos cargados en la tabla.", level="warning")
             return
 
-        if hasattr(self.app, 'btn_process'):
+        if hasattr(self.app, 'detail_panel') and hasattr(self.app.detail_panel, 'btn_process'):
             self.app.detail_panel.btn_process.configure(state="disabled", text="Procesando...")
 
         total_files = len(target_rows)
         self.logger.info(f"Iniciando procesado multihilo para {total_files} archivo(s)...")
 
-        # Lanzar el flujo completo en un hilo secundario para evitar congelar la UI
+        # Lanzar la canalización en un hilo secundario para mantener la interfaz fluida
         threading.Thread(
             target=self._run_processing_pipeline,
             args=(target_rows, total_files),
@@ -44,11 +67,8 @@ class ProcessManager:
             r'\bpresents\b'
         ]
         omit_pattern = re.compile('|'.join(words_to_omit), flags=re.IGNORECASE)
-
-        # Estructura para almacenar las revisiones de carátula pendientes (fase 2)
         pending_cover_reviews = []
 
-        # Worker ejecutado en paralelo para cada archivo (Fase 1: Parsing, tags y Discogs API)
         def _process_single_file(row_id):
             nonlocal processed_count
 
@@ -153,12 +173,11 @@ class ProcessManager:
 
             has_year = bool(str(values[7]).strip()) if len(values) > 7 else False
 
-            # OPTIMIZACIÓN 1: Si ya tiene año Y carátula, omitir la consulta remota a Discogs
+            # Modificación de metadatos mediante Discogs
             if already_has_cover and has_year:
                 self.logger.info(f"Omitida consulta a Discogs para '{new_filename}': ya dispone de Año y Carátula.")
                 values[8] = "Sí"
             else:
-                # 3. Consulta a Discogs (solo si falta año o carátula)
                 query_term = f"{artist_parsed} {title_parsed}".strip()
                 query_term = omit_pattern.sub('', query_term)
                 query_term = query_term.replace('_', ' ')
@@ -174,14 +193,11 @@ class ProcessManager:
                     values[7] = str(year)
                     self.app.audio_manager.save_single_tag(file_path, "Year", str(year))
 
-                # Gestión de carátulas
                 if already_has_cover:
                     values[8] = "Sí"
                 else:
                     manual_mode = getattr(self.app.catalog_manager, "manual_cover_selection", True)
 
-                    # OPTIMIZACIÓN 2: Si solo hay 1 imagen, o si el modo manual está desactivado,
-                    # se descarga directamente sin abrir diálogo modal.
                     if len(all_images) == 1 or (all_images and not manual_mode):
                         chosen_cover_url = all_images[0]
                         image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
@@ -190,11 +206,10 @@ class ProcessManager:
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
                                 values[8] = "Sí"
                             else:
-                                values[8] = "No"
+                                values[8] = self._apply_default_cover(file_path)
                         else:
-                            values[8] = "No"
+                            values[8] = self._apply_default_cover(file_path)
                     elif len(all_images) > 1 and manual_mode:
-                        # Solo abre modal si hay más de 1 opción
                         with self._lock:
                             pending_cover_reviews.append({
                                 "row_id": row_id,
@@ -204,7 +219,7 @@ class ProcessManager:
                                 "values": values
                             })
                     else:
-                        values[8] = "No"
+                        values[8] = self._apply_default_cover(file_path)
 
             def _update_ui():
                 if self.app.tree.exists(row_id):
@@ -218,11 +233,10 @@ class ProcessManager:
                 progress = processed_count / total_files
                 self.app.after(0, lambda p=progress: self.app.progress_bar.set(p))
 
-        # Ejecución en paralelo de la fase 1 (4 hilos)
+        # Ejecución paralela con ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=4) as executor:
             executor.map(_process_single_file, target_rows)
 
-        # Fase 2: Gestión de diálogo interactivo de carátulas en el hilo principal
         def _handle_manual_covers_and_finish():
             if pending_cover_reviews:
                 self.logger.info(f"Iniciando selección de carátulas para {len(pending_cover_reviews)} archivo(s)...")
@@ -240,23 +254,42 @@ class ProcessManager:
                             image_data = AudioManager.normalize_cover_image_bytes(image_data)
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
                                 values[8] = "Sí"
-                                self.app.tree.item(row_id, values=values)
-                                self.app.grid_panel.update_row_cover_status(row_id, "Sí")
                             else:
-                                values[8] = "No"
+                                values[8] = self._apply_default_cover(file_path)
                         else:
-                            values[8] = "No"
+                            values[8] = self._apply_default_cover(file_path)
                     else:
-                        values[8] = "No"
-                        self.app.tree.item(row_id, values=values)
-                        self.app.grid_panel.update_row_cover_status(row_id, "No")
+                        values[8] = self._apply_default_cover(file_path)
 
-            if hasattr(self.app, 'btn_process'):
+                    self.app.tree.item(row_id, values=values)
+                    self.app.grid_panel.update_row_cover_status(row_id, values[8])
+
+            if hasattr(self.app, 'detail_panel') and hasattr(self.app.detail_panel, 'btn_process'):
                 self.app.detail_panel.btn_process.configure(state="normal", text="Procesar")
-            self.app.detail_panel.on_row_select(None)
+            if hasattr(self.app, 'detail_panel'):
+                self.app.detail_panel.on_row_select(None)
+
             self.logger.info("Procesamiento multihilo finalizado con éxito.")
 
         self.app.after(0, _handle_manual_covers_and_finish)
+
+    def _apply_default_cover(self, file_path):
+        """Lee la imagen por defecto, la incrusta físicamente en el archivo de audio y devuelve el estado."""
+        default_bytes = self._get_default_cover_bytes()
+        if default_bytes:
+            try:
+                normalized_bytes = AudioManager.normalize_cover_image_bytes(default_bytes)
+                if self.app.audio_manager.embed_cover_art_verified(file_path, normalized_bytes):
+                    self.logger.info(f"Aplicada e incrustada carátula por defecto para '{os.path.basename(file_path)}'")
+                    return "Sí"
+                else:
+                    self.logger.error(f"Error al verificar la incrustación de la carátula por defecto en '{os.path.basename(file_path)}'")
+            except Exception as e:
+                self.logger.error(f"Excepción al procesar la carátula por defecto para '{os.path.basename(file_path)}': {e}")
+        else:
+            self.logger.warning(f"No se pudo aplicar la carátula por defecto porque los bytes están vacíos.")
+
+        return "No"
 
     def update_row_from_file_metadata(self, row_id, file_path):
         metadata = self.app.audio_manager.extract_metadata(file_path, os.path.basename(file_path))
@@ -277,29 +310,29 @@ class ProcessManager:
         ))
 
     def clear_metadata_for_rows(self, rows, scope_label="selección"):
+        """Limpia los metadatos de los archivos recibidos registrando una sola línea de log por fichero."""
         if not rows:
             return
 
         for row_id in rows:
             file_path = self.app.file_paths_map.get(row_id)
-            if file_path:
-                for col_name in ["Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year"]:
-                    self.app.audio_manager.save_single_tag(file_path, col_name, "")
+            if file_path and os.path.exists(file_path):
+                filename = os.path.basename(file_path)
 
-                self.app.audio_manager.strip_cover_tags(file_path)
+                # Limpieza total directa para evitar múltiples llamadas e inundación del log
+                self.app.audio_manager.clear_audio_file_metadata(file_path)
                 self.app.grid_panel.update_row_cover_status(row_id, "No")
 
                 values = list(self.app.tree.item(row_id, "values"))
                 if values:
-                    filename = values[0]
-                    cover_status = values[8] if len(values) > 8 else "No"
-                    new_values = [filename, "", "", "", "", "", "", "", cover_status]
+                    new_values = [values[0], "", "", "", "", "", "", "", "No"]
                     self.app.tree.item(row_id, values=new_values)
+
+                # Un solo log limpio por cada archivo procesado
+                self.logger.info(f"Metadatos limpiados en: {filename}")
 
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)
-
-        self.logger.info(f"Metadatos limpiados en {len(rows)} archivo(s).")
 
     def clear_selected_metadata(self):
         selected_rows = self.app.tree.selection()
