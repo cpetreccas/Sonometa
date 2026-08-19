@@ -16,13 +16,12 @@ class ProcessManager:
         """Obtiene los bytes de la carátula por defecto buscando de forma robusta."""
         default_path = getattr(self.app, "DEFAULT_COVER_PATH", None)
 
-        # Si no está definida en la app, buscarla de manera relativa a este archivo o al directorio de trabajo
         if not default_path or not os.path.exists(default_path):
             base_dir = os.path.dirname(os.path.abspath(__file__))
             default_path = os.path.join(base_dir, "assets", "no_cover_art.jpg")
 
         if not os.path.exists(default_path):
-            # Intentar buscar un nivel más arriba si el gestor está en una subcarpeta
+            base_dir = os.path.dirname(os.path.abspath(__file__))
             default_path = os.path.join(os.path.dirname(base_dir), "assets", "no_cover_art.jpg")
 
         if default_path and os.path.exists(default_path):
@@ -32,7 +31,7 @@ class ProcessManager:
             except Exception as e:
                 self.logger.error(f"Error leyendo la carátula por defecto '{default_path}': {str(e)}")
         else:
-            self.logger.warning(f"No se encontró el archivo de carátula por defecto en ninguna ruta evaluada.")
+            self.logger.warning("No se encontró el archivo de carátula por defecto en ninguna ruta evaluada.")
 
         return None
 
@@ -239,7 +238,7 @@ class ProcessManager:
 
         def _handle_manual_covers_and_finish():
             if pending_cover_reviews:
-                self.logger.info(f"Iniciando selección de carátulas para {len(pending_cover_reviews)} archivo(s)...")
+                self.logger.info(f"Iniciando revisión única para {len(pending_cover_reviews)} archivo(s)...")
                 selections = DialogManager.process_pending_covers_dialog(self.app, pending_cover_reviews)
 
                 for item in pending_cover_reviews:
@@ -287,7 +286,7 @@ class ProcessManager:
             except Exception as e:
                 self.logger.error(f"Excepción al procesar la carátula por defecto para '{os.path.basename(file_path)}': {e}")
         else:
-            self.logger.warning(f"No se pudo aplicar la carátula por defecto porque los bytes están vacíos.")
+            self.logger.warning("No se pudo aplicar la carátula por defecto porque los bytes están vacíos.")
 
         return "No"
 

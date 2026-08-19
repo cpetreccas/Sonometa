@@ -1,4 +1,9 @@
 FUNCIONALIDADES:
+
+Corregir las mayusculas en el nombre del titulo de la canción
+
+Eliminar logs del estilo 'Bytes descargados de carátula'
+
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
 Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
