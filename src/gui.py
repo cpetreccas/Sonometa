@@ -2,7 +2,7 @@ import os
 import ctypes
 from collections import deque
 import customtkinter as ctk
-from PIL import ImageTk
+from PIL import Image, ImageTk
 from customtkinter import filedialog
 
 from grid_panel import GridPanel
@@ -86,12 +86,20 @@ class App(ctk.CTk):
 
     def _load_app_resources(self):
         self.app_icon_photo = None
-        self.logo_pil, self.broom_icon, self.process_icon = UiUtils.load_app_icons(self)
+        # Desempaquetamos los 4 elementos
+        self.logo_pil, self.header_logo_pil, self.broom_icon, self.process_icon = UiUtils.load_app_icons(self)
+
+        # Crear el .ico temporal para Windows a partir de logo_relleno.png
         if self.logo_pil:
             try:
-                self.app_icon_photo = ImageTk.PhotoImage(self.logo_pil)
-            except Exception:
-                pass
+                icon_path = UiUtils.get_resource_path("app_icon_temp.ico")
+                if not os.path.exists(icon_path):
+                    self.logo_pil.save(icon_path, format="ICO", sizes=[(32, 32), (48, 48), (64, 64)])
+
+                self.app_icon_ico = icon_path
+                self.iconbitmap(self.app_icon_ico)
+            except Exception as e:
+                self.logger.warning(f"No se pudo establecer el icono de la app: {e}")
 
     def _setup_ui(self):
         # 0. Menú Superior
@@ -99,7 +107,7 @@ class App(ctk.CTk):
         self.tool_panel.pack(side="top", fill="x")
 
         # 1. Header / Selección de carpeta
-        self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.logo_pil)
+        self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.header_logo_pil)
 
         # 2. Panel Central (Edición lateral + Tabla)
         self.frame_main = ctk.CTkFrame(self)

@@ -5,8 +5,6 @@ Format_filename.py debe sustituir guiones bajos por espacios.
 
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
-Ayuda+Acerca de Sonometa abre un modal con el title bar oscuro sin embargo la gestión de catálogos y ver logs no, hacer que todas las ventanas emergentes sean con title bar oscuro
-
 Al editar algo en el panel izquierdo, al hacer zoomout en el grid se aplican los cambios a la fila seleccionada nueva, no a la antigua
 
 Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
@@ -16,3 +14,5 @@ Undo / Redo de cambios	Guardar un búfer de estados anteriores para revertir esc
 Al navegar por el grid, al hacer ENTER no se actualiza el panel de detalle.
 
 Al presionar ESC se debe salir del modo edición en el GRID
+
+Mejorar menús de gestión de catálogos

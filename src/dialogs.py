@@ -14,32 +14,33 @@ class DialogManager:
 
     @staticmethod
     def apply_popup_style(app, win, is_modal=True, owner=None):
-        try:
-            ico_path = getattr(app, "ico_path", "")
-            if os.path.exists(ico_path):
-                win.iconbitmap(ico_path)
-            if getattr(app, "app_icon_photo", None) is not None:
-                win.wm_iconphoto(True, app.app_icon_photo)
-        except Exception:
-            pass
+        """Aplica estilos comunes, centra la ventana emergente y asigna el icono correctamente."""
+        # Se aplica la barra de título oscura
+        DialogManager.apply_dark_title_bar(win)
 
-        win.configure(fg_color="#181818")
-        owner_window = owner if owner is not None else app
-        win.transient(owner_window)
+        # Asignación del icono usando iconbitmap nativo
+        if hasattr(app, "app_icon_ico") and app.app_icon_ico and os.path.exists(app.app_icon_ico):
+            try:
+                win.iconbitmap(app.app_icon_ico)
+            except Exception:
+                pass
 
-        try:
+        # Centrar respecto a la ventana principal o el propietario
+        if owner:
             win.update_idletasks()
-            DialogManager.center_popup_on_screen(win)
-            DialogManager.apply_dark_title_bar(win)
-            win.bind("<Map>", lambda _e, w=win: DialogManager.apply_dark_title_bar(w), add="+")
-            win.after(80, lambda w=win: DialogManager.apply_dark_title_bar(w))
-            win.after(220, lambda w=win: DialogManager.apply_dark_title_bar(w))
-            win.lift()
+            x = owner.winfo_x() + (owner.winfo_width() // 2) - (win.winfo_width() // 2)
+            y = owner.winfo_y() + (owner.winfo_height() // 2) - (win.winfo_height() // 2)
+            win.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+        # Asegurar visibilidad
+        win.deiconify()
+
+        if is_modal:
+            win.grab_set()
             win.focus_force()
-            win.attributes("-topmost", True)
-            win.after(120, lambda w=win: w.attributes("-topmost", False) if w.winfo_exists() else None)
-        except Exception:
-            pass
+        else:
+            win.lift()
+            win.focus()
 
     @staticmethod
     def center_popup_on_screen(win):
@@ -260,15 +261,20 @@ class DialogManager:
 
     @staticmethod
     def show_logs_dialog(app):
+        # Si la ventana ya existe, solo la mostramos y la traemos al frente
         if app.log_window is not None and app.log_window.winfo_exists():
             app.log_window.deiconify()
             app.log_window.lift()
+            app.log_window.attributes("-topmost", True)
+            app.log_window.after(100, lambda: app.log_window.attributes("-topmost", False))
             app.log_window.focus_force()
             return
 
         app.log_window = ctk.CTkToplevel(app)
         app.log_window.title("Historial de Logs")
         app.log_window.geometry("700x400")
+
+        # Aplicamos estilo sin bloqueo modal
         DialogManager.apply_popup_style(app, app.log_window, is_modal=False, owner=app)
         app.log_window.protocol("WM_DELETE_WINDOW", lambda: DialogManager.close_logs_dialog(app))
 
@@ -277,6 +283,13 @@ class DialogManager:
 
         app.log_textbox.insert("1.0", "\n".join(app.log_history))
         app.log_textbox.configure(state="disabled")
+
+        # Forzar el foco y traer al primer plano inmediato en Windows
+        app.log_window.lift()
+        app.log_window.attributes("-topmost", True)
+        # Desactivamos topmost tras 150ms para que no se quede bloqueada de forma molesta sobre otras Apps externas
+        app.log_window.after(150, lambda: app.log_window.attributes("-topmost", False) if app.log_window and app.log_window.winfo_exists() else None)
+        app.log_window.focus_force()
 
     @staticmethod
     def close_logs_dialog(app):
@@ -438,11 +451,6 @@ class DialogManager:
 
         # Configuración de estilo y asignación del icono de la aplicación a la barra de título
         DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
-        if hasattr(app, "app_icon_photo") and app.app_icon_photo:
-            try:
-                win.iconphoto(False, app.app_icon_photo)
-            except Exception:
-                pass
 
         frame = ctk.CTkFrame(win, fg_color="#1E1E1E")
         frame.pack(fill="both", expand=True, padx=16, pady=16)

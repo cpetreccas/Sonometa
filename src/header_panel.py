@@ -9,14 +9,20 @@ class HeaderPanel(ctk.CTkFrame):
         self.pack(fill="x", padx=15, pady=(5, 5))
 
         # Logo principal
-        if logo_pil is not None:
-            logo_img = ctk.CTkImage(
+        if logo_pil:
+            # Mantiene la proporción original de logo_completo.png para que no se deforme
+            orig_w, orig_h = logo_pil.size
+            target_height = 36
+            target_width = int(orig_w * (target_height / orig_h))
+
+            header_logo = ctk.CTkImage(
                 light_image=logo_pil,
                 dark_image=logo_pil,
-                size=(180, 43)
+                size=(target_width, target_height)
             )
-            self.label_logo = ctk.CTkLabel(self, image=logo_img, text="")
-            self.label_logo.pack(side="left", padx=10, pady=5)
+
+            lbl_logo = ctk.CTkLabel(self, image=header_logo, text="")
+            lbl_logo.pack(side="left", padx=(10, 20))
 
         # Botón Seleccionar Carpeta
         self.btn_browse = ctk.CTkButton(

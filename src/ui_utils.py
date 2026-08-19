@@ -72,24 +72,32 @@ class UiUtils:
 
     @staticmethod
     def load_app_icons(app):
-        """Carga los iconos principales (.ico, .png) y secundarios de la aplicación."""
-        ico_path = UiUtils.get_resource_path("assets/logo.ico")
-        png_path = UiUtils.get_resource_path("assets/logo.png")
-        broom_path = UiUtils.get_resource_path("assets/broom_icon.png")
-        white_logo_path = UiUtils.get_resource_path("assets/logo_blanco.png")
+        """Carga los iconos (.png) principales de la ventana, cabecera y botones."""
+        # 1. Icono de la aplicación / ventana
+        icon_path = UiUtils.get_resource_path("assets/logo_relleno.png")
 
-        if os.path.exists(ico_path):
+        # 2. Logo panorámico para el Header Panel
+        header_logo_path = UiUtils.get_resource_path("assets/logo_completo.png")
+
+        # 3. Iconos secundarios
+        broom_path = UiUtils.get_resource_path("assets/icono_borrar.png")
+        white_logo_path = UiUtils.get_resource_path("assets/icono_procesar.png")
+
+        # Cargar icono de aplicación (para iconphoto/iconbitmap)
+        logo_pil = None
+        if os.path.exists(icon_path):
+            logo_pil = Image.open(icon_path)
+            img_icon = ImageTk.PhotoImage(logo_pil)
+            app.app_icon_photo = img_icon
             try:
-                app.iconbitmap(ico_path)
+                app.wm_iconphoto(True, img_icon)
             except Exception:
                 pass
 
-        logo_pil = None
-        if os.path.exists(png_path):
-            logo_pil = Image.open(png_path)
-            img_icon = ImageTk.PhotoImage(logo_pil)
-            app.app_icon_photo = img_icon
-            app.wm_iconphoto(True, img_icon)
+        # Cargar logo de cabecera
+        header_logo_pil = None
+        if os.path.exists(header_logo_path):
+            header_logo_pil = Image.open(header_logo_path)
 
         broom_icon = None
         if os.path.exists(broom_path):
@@ -109,4 +117,5 @@ class UiUtils:
                 size=(22, 22)
             )
 
-        return logo_pil, broom_icon, process_icon
+        # Devolvemos ambas referencias de imágenes de manera separada
+        return logo_pil, header_logo_pil, broom_icon, process_icon
