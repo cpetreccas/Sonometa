@@ -15,24 +15,20 @@ class DialogManager:
     @staticmethod
     def apply_popup_style(app, win, is_modal=True, owner=None):
         """Aplica estilos comunes, centra la ventana emergente y asigna el icono correctamente."""
-        # Se aplica la barra de título oscura
         DialogManager.apply_dark_title_bar(win)
 
-        # Asignación del icono usando iconbitmap nativo
         if hasattr(app, "app_icon_ico") and app.app_icon_ico and os.path.exists(app.app_icon_ico):
             try:
                 win.iconbitmap(app.app_icon_ico)
             except Exception:
                 pass
 
-        # Centrar respecto a la ventana principal o el propietario
         if owner:
             win.update_idletasks()
             x = owner.winfo_x() + (owner.winfo_width() // 2) - (win.winfo_width() // 2)
             y = owner.winfo_y() + (owner.winfo_height() // 2) - (win.winfo_height() // 2)
             win.geometry(f"+{max(0, x)}+{max(0, y)}")
 
-        # Asegurar visibilidad
         win.deiconify()
 
         if is_modal:
@@ -144,7 +140,7 @@ class DialogManager:
         DialogManager.show_themed_dialog(
             app,
             "Acerca de Sonometa",
-            "Sonometa v0.06 - Audio Tag Suite\n\n"
+            "Sonometa v0.07 - Audio Tag Suite\n\n"
             "Herramienta avanzada para la automatización y gestión de metadatos de audio.\n"
             "Integración con API Discogs para vinilos y soporte nativo de ID3, FLAC y MP4.",
             level="info"
@@ -227,7 +223,6 @@ class DialogManager:
             font=ctk.CTkFont(size=13, weight="bold"), anchor="w"
         ).pack(fill="x", pady=(0, 10))
 
-        # Flag de selección manual
         current_val = getattr(app.catalog_manager, "manual_cover_selection", True)
         manual_cover_var = tk.BooleanVar(value=current_val)
 
@@ -261,7 +256,6 @@ class DialogManager:
 
     @staticmethod
     def show_logs_dialog(app):
-        # Si la ventana ya existe, solo la mostramos y la traemos al frente
         if app.log_window is not None and app.log_window.winfo_exists():
             app.log_window.deiconify()
             app.log_window.lift()
@@ -274,7 +268,6 @@ class DialogManager:
         app.log_window.title("Historial de Logs")
         app.log_window.geometry("700x400")
 
-        # Aplicamos estilo sin bloqueo modal
         DialogManager.apply_popup_style(app, app.log_window, is_modal=False, owner=app)
         app.log_window.protocol("WM_DELETE_WINDOW", lambda: DialogManager.close_logs_dialog(app))
 
@@ -284,10 +277,8 @@ class DialogManager:
         app.log_textbox.insert("1.0", "\n".join(app.log_history))
         app.log_textbox.configure(state="disabled")
 
-        # Forzar el foco y traer al primer plano inmediato en Windows
         app.log_window.lift()
         app.log_window.attributes("-topmost", True)
-        # Desactivamos topmost tras 150ms para que no se quede bloqueada de forma molesta sobre otras Apps externas
         app.log_window.after(150, lambda: app.log_window.attributes("-topmost", False) if app.log_window and app.log_window.winfo_exists() else None)
         app.log_window.focus_force()
 
@@ -432,124 +423,181 @@ class DialogManager:
         refresh_listbox()
 
     @staticmethod
+    def _load_thumbnail_async(app, url, img_label, parent_win):
+        """Helper para la descarga asíncrona de miniaturas de carátulas."""
+        try:
+            headers = app.discogs_client._get_headers() if hasattr(app, 'discogs_client') else {}
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                raw_data = resp.read()
+
+            pil_img = Image.open(io.BytesIO(raw_data))
+            pil_img.thumbnail((200, 200), Image.Resampling.LANCZOS)
+            ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
+
+            def update_ui():
+                if parent_win.winfo_exists():
+                    img_label.configure(image=ctk_img, text="")
+                    img_label._image_ref = ctk_img
+
+            parent_win.after(0, update_ui)
+        except Exception:
+            def update_err():
+                if parent_win.winfo_exists():
+                    img_label.configure(text="Error al cargar")
+            parent_win.after(0, update_err)
+
+    @staticmethod
+    def process_pending_covers_dialog(app, items_to_review):
+        """
+        Muestra una única ventana modal persistente para seleccionar las carátulas
+        de una lista de elementos de forma secuencial.
+
+        :param items_to_review: Lista de dicts [{'row_id': ..., 'filename': ..., 'images': [...]}]
+        :return: Dict {row_id: chosen_cover_url}
+        """
+        if not items_to_review:
+            return {}
+
+        selected_covers = {}
+        current_index = [0]
+        total_items = len(items_to_review)
+
+        win = ctk.CTkToplevel(app)
+        win.title("Selección de Carátulas - Discogs")
+        win.geometry("820x650")
+        win.resizable(True, True)
+
+        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
+
+        main_frame = ctk.CTkFrame(win, fg_color="#1E1E1E")
+        main_frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        # Cabecera de progreso
+        hdr_frame = ctk.CTkFrame(main_frame, fg_color="#111827", corner_radius=8)
+        hdr_frame.pack(fill="x", pady=(0, 10), padx=2, ipady=6)
+
+        lbl_progress = ctk.CTkLabel(
+            hdr_frame,
+            text="",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=app.CORP_COLOR
+        )
+        lbl_progress.pack(anchor="w", padx=12, pady=(4, 0))
+
+        lbl_filename = ctk.CTkLabel(
+            hdr_frame,
+            text="",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#F3F4F6",
+            anchor="w"
+        )
+        lbl_filename.pack(anchor="w", padx=12, pady=(0, 4))
+
+        # Contenedor dinámico con scroll
+        scroll_frame = ctk.CTkScrollableFrame(main_frame, fg_color="#111827")
+        scroll_frame.pack(fill="both", expand=True, pady=(0, 10))
+        scroll_frame.grid_columnconfigure((0, 1, 2), weight=1, uniform="cover_grid")
+
+        def advance_next():
+            current_index[0] += 1
+            if current_index[0] < total_items:
+                render_current_item()
+            else:
+                win.destroy()
+
+        def select_and_next(row_id, url):
+            selected_covers[row_id] = url
+            advance_next()
+
+        def skip_current():
+            item = items_to_review[current_index[0]]
+            selected_covers[item["row_id"]] = None
+            advance_next()
+
+        def on_cancel_all():
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", on_cancel_all)
+
+        def render_current_item():
+            for widget in scroll_frame.winfo_children():
+                widget.destroy()
+
+            idx = current_index[0]
+            item = items_to_review[idx]
+            row_id = item["row_id"]
+            filename = item["filename"]
+            images = item["images"]
+
+            lbl_progress.configure(text=f"Archivo {idx + 1} de {total_items}")
+            lbl_filename.configure(text=f"Carátulas para: {filename}")
+
+            for img_idx, url in enumerate(images):
+                row = img_idx // 3
+                col = img_idx % 3
+
+                card = ctk.CTkFrame(scroll_frame, fg_color="#1F2937", corner_radius=8)
+                card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+
+                img_label = ctk.CTkLabel(
+                    card,
+                    text="Cargando...",
+                    width=200,
+                    height=200,
+                    fg_color="#111827",
+                    corner_radius=6
+                )
+                img_label.pack(padx=10, pady=(10, 5))
+
+                btn_select = ctk.CTkButton(
+                    card,
+                    text=f"Elegir #{img_idx + 1}",
+                    fg_color=app.CORP_COLOR,
+                    hover_color=app.CORP_HOVER,
+                    command=lambda u=url: select_and_next(row_id, u)
+                )
+                btn_select.pack(padx=10, pady=(5, 10), fill="x")
+
+                img_label.bind("<Button-1>", lambda e, u=url: select_and_next(row_id, u))
+                card.bind("<Button-1>", lambda e, u=url: select_and_next(row_id, u))
+
+                threading.Thread(
+                    target=DialogManager._load_thumbnail_async,
+                    args=(app, url, img_label, win),
+                    daemon=True
+                ).start()
+
+        # Botones de control inferiores
+        btn_bar = ctk.CTkFrame(main_frame, fg_color="transparent")
+        btn_bar.pack(fill="x", side="bottom")
+
+        ctk.CTkButton(
+            btn_bar, text="Omitir este archivo", fg_color="#374151", hover_color="#1F2937",
+            command=skip_current
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            btn_bar, text="Cancelar restante", fg_color="#B91C1C", hover_color="#991B1B",
+            command=on_cancel_all
+        ).pack(side="right")
+
+        render_current_item()
+        app.wait_window(win)
+        return selected_covers
+
+    @staticmethod
     def select_discogs_cover_dialog(app, image_urls):
-        """Muestra un diálogo con previsualización de imágenes mediante clics en miniaturas."""
+        """Método de compatibilidad para llamadas individuales a una sola pista."""
         if not image_urls:
             return None
-
-        # Si solo hay una imagen, no es necesario abrir el diálogo
         if len(image_urls) == 1:
             return image_urls[0]
 
-        selected_url = [None]  # Lista mutable para almacenar el resultado
-
-        win = ctk.CTkToplevel(app)
-        win.title("Seleccionar Carátula - Discogs")
-        # Cuadro de diálogo más grande
-        win.geometry("800x600")
-        win.resizable(True, True)
-
-        # Configuración de estilo y asignación del icono de la aplicación a la barra de título
-        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
-
-        frame = ctk.CTkFrame(win, fg_color="#1E1E1E")
-        frame.pack(fill="both", expand=True, padx=16, pady=16)
-
-        ctk.CTkLabel(
-            frame,
-            text=f"Se encontraron {len(image_urls)} carátulas. Haz clic sobre una para seleccionarla:",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            anchor="w"
-        ).pack(fill="x", pady=(0, 10))
-
-        # Marco con scroll dinámico para la cuadrícula de previsualizaciones
-        scroll_frame = ctk.CTkScrollableFrame(frame, fg_color="#111827")
-        scroll_frame.pack(fill="both", expand=True, pady=(0, 10))
-
-        # Configurar 3 columnas en la cuadrícula
-        scroll_frame.grid_columnconfigure((0, 1, 2), weight=1, uniform="cover_grid")
-
-        def select_and_close(url):
-            selected_url[0] = url
-            win.destroy()
-
-        def on_cancel():
-            selected_url[0] = None
-            win.destroy()
-
-        win.protocol("WM_DELETE_WINDOW", on_cancel)
-
-        # Función que descarga la miniatura en segundo plano para no bloquear la interfaz
-        def load_thumbnail_async(url, parent_button, img_label):
-            try:
-                headers = app.discogs_client._get_headers() if hasattr(app, 'discogs_client') else {}
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    raw_data = resp.read()
-
-                pil_img = Image.open(io.BytesIO(raw_data))
-                pil_img.thumbnail((200, 200), Image.Resampling.LANCZOS)
-
-                # Crear CTkImage compatible con customtkinter
-                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
-
-                # Actualizar la UI en el hilo principal
-                def update_ui():
-                    if win.winfo_exists():
-                        img_label.configure(image=ctk_img, text="")
-                        img_label._image_ref = ctk_img  # Evitar que el recolector de basura elimine la imagen
-
-                win.after(0, update_ui)
-            except Exception:
-                def update_err():
-                    if win.winfo_exists():
-                        img_label.configure(text="Error al cargar")
-                win.after(0, update_err)
-
-        # Generar las tarjetas de previsualización sin RadioButtons
-        for idx, url in enumerate(image_urls):
-            row = idx // 3
-            col = idx % 3
-
-            card = ctk.CTkFrame(scroll_frame, fg_color="#1F2937", corner_radius=8)
-            card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
-
-            # Etiqueta contenedora para la imagen/loader
-            img_label = ctk.CTkLabel(
-                card,
-                text="Cargando...",
-                width=200,
-                height=200,
-                fg_color="#111827",
-                corner_radius=6
-            )
-            img_label.pack(padx=10, pady=(10, 5))
-
-            # Botón de selección por clic directo
-            btn_select = ctk.CTkButton(
-                card,
-                text=f"Seleccionar #{idx + 1}",
-                fg_color=app.CORP_COLOR,
-                hover_color=app.CORP_HOVER,
-                command=lambda u=url: select_and_close(u)
-            )
-            btn_select.pack(padx=10, pady=(5, 10), fill="x")
-
-            # Hacer que hacer clic directamente sobre la imagen o la tarjeta también seleccione
-            img_label.bind("<Button-1>", lambda e, u=url: select_and_close(u))
-            card.bind("<Button-1>", lambda e, u=url: select_and_close(u))
-
-            # Lanzar descarga asíncrona de la imagen
-            threading.Thread(target=load_thumbnail_async, args=(url, btn_select, img_label), daemon=True).start()
-
-        # Botón inferior de cancelación
-        btns = ctk.CTkFrame(frame, fg_color="transparent")
-        btns.pack(fill="x", side="bottom")
-
-        ctk.CTkButton(
-            btns, text="Cancelar", fg_color="#374151", hover_color="#1F2937",
-            command=on_cancel
-        ).pack(side="right")
-
-        app.wait_window(win)
-        return selected_url[0]
+        mock_item = [{
+            "row_id": "single_select",
+            "filename": "Selección individual",
+            "images": image_urls
+        }]
+        result = DialogManager.process_pending_covers_dialog(app, mock_item)
+        return result.get("single_select")

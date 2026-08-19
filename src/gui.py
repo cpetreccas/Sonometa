@@ -18,6 +18,7 @@ from tool_panel import ToolPanel
 from search_manager import SearchManager
 from process_manager import ProcessManager
 from header_panel import HeaderPanel
+from undo_manager import UndoManager
 
 
 class App(ctk.CTk):
@@ -60,7 +61,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v0.06 - Audio Tag Suite")
+        self.title("Sonometa v0.07 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))
@@ -68,11 +69,11 @@ class App(ctk.CTk):
 
     def _init_services(self):
         self.logger = LogManager.setup_logger(self)
+        self.undo_manager = UndoManager(self)
         self.audio_manager = AudioManager()
         self.filename_formatter = FilenameFormatter()
 
         # 1. Primero cargamos el token desde el entorno
-        #self.discogs_token = os.getenv("DISCOGS_TOKEN", "").strip()
         self.discogs_token = os.getenv("DISCOGS_TOKEN", "RYvclJgMalquxdkpdHutNJEQqGjlaiqtuBvipCfq").strip()
 
         # 2. Inicializamos el gestor de catálogos y cargamos sus datos
@@ -86,7 +87,6 @@ class App(ctk.CTk):
 
     def _load_app_resources(self):
         self.app_icon_photo = None
-        # Desempaquetamos los 4 elementos
         self.logo_pil, self.header_logo_pil, self.broom_icon, self.process_icon = UiUtils.load_app_icons(self)
 
         # Crear el .ico temporal para Windows a partir de logo_relleno.png
@@ -169,6 +169,15 @@ class App(ctk.CTk):
         self.bind("<Control-f>", lambda e: self.search_manager.toggle_search_bar())
         self.bind("<Control-F>", lambda e: self.search_manager.toggle_search_bar())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
+
+        # Atajos de Deshacer / Rehacer
+        self.bind_all("<Control-z>", self.undo_manager.undo)
+        self.bind_all("<Control-Z>", self.undo_manager.undo)
+        self.bind_all("<Control-y>", self.undo_manager.redo)
+        self.bind_all("<Control-Y>", self.undo_manager.redo)
+        self.bind_all("<Command-z>", self.undo_manager.undo)
+        self.bind_all("<Command-Shift-z>", self.undo_manager.redo)
+
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _check_initial_status(self):

@@ -1,16 +1,7 @@
 FUNCIONALIDADES:
-Invertir las posiciones en el detail panel de año y album.
-
-Agente AI que genere el filename acorde al estilo de Sonometa.
-
-Format_filename.py debe sustituir guiones bajos por espacios.
 
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
-Al editar algo en el panel izquierdo, al hacer zoomout en el grid se aplican los cambios a la fila seleccionada nueva, no a la antigua
-
 Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
-
-Undo / Redo de cambios	Guardar un búfer de estados anteriores para revertir escrituras accidentales.
 
 Mejorar menús de gestión de catálogos

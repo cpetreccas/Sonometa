@@ -4,6 +4,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
+from undo_manager import HistoryAction
 
 
 class GridPanel:
@@ -12,9 +13,16 @@ class GridPanel:
         self.parent = parent
         self.logger = logger
 
+        # Pivote para selecciones con Shift estilo Excel
+        self._shift_pivot_row = None
+
         # Contenedor principal del grid
         self.frame_grid = ctk.CTkFrame(self.parent)
         self.frame_grid.pack(side="right", fill="both", expand=True, padx=(0, 0), pady=0)
+
+        # Configurar grid de 2x2 para Treeview y sus Scrollbars
+        self.frame_grid.grid_rowconfigure(0, weight=1)
+        self.frame_grid.grid_columnconfigure(0, weight=1)
 
         self._setup_styles()
         self._build_treeview()
@@ -132,14 +140,29 @@ class GridPanel:
         self.tree.bind(btn_right, self._show_tree_context_menu)
         self.tree.bind("<Delete>", self._on_tree_delete_press)
         self.tree.bind("<KP_Delete>", self._on_tree_delete_press)
+        self.tree.bind("<Home>", lambda e: self._handle_excel_navigation(e, move_to="home", select_range=False))
+        self.tree.bind("<End>", lambda e: self._handle_excel_navigation(e, move_to="end", select_range=False))
+        self.tree.bind("<Shift-Home>", lambda e: self._handle_excel_navigation(e, move_to="home", select_range=True))
+        self.tree.bind("<Shift-End>", lambda e: self._handle_excel_navigation(e, move_to="end", select_range=True))
+        self.tree.bind("<Up>", lambda e: self._handle_key_navigation(e, direction="up", select_range=False))
+        self.tree.bind("<Down>", lambda e: self._handle_key_navigation(e, direction="down", select_range=False))
+        self.tree.bind("<Shift-Up>", lambda e: self._handle_key_navigation(e, direction="up", select_range=True))
+        self.tree.bind("<Shift-Down>", lambda e: self._handle_key_navigation(e, direction="down", select_range=True))
+        self.tree.bind("<Prior>", lambda e: self._handle_page_navigation(e, direction="up", select_range=False))
+        self.tree.bind("<Next>", lambda e: self._handle_page_navigation(e, direction="down", select_range=False))
+        self.tree.bind("<Shift-Prior>", lambda e: self._handle_page_navigation(e, direction="up", select_range=True))
+        self.tree.bind("<Shift-Next>", lambda e: self._handle_page_navigation(e, direction="down", select_range=True))
 
+        # Crear Scrollbars
         self.vsb = ttk.Scrollbar(self.frame_grid, orient="vertical", command=self.tree.yview)
         self.hsb = ttk.Scrollbar(self.frame_grid, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=self._on_tree_y_scroll, xscrollcommand=self._on_tree_x_scroll)
 
-        self.tree.pack(fill="both", expand=True)
-        self.tree.bind("<Configure>", lambda _e: self._update_tree_scrollbars(), add="+")
-        self.app.after_idle(self._update_tree_scrollbars)
+        self.tree.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
+
+        # Ubicar elementos mediante grid
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.vsb.grid(row=0, column=1, sticky="ns")
+        self.hsb.grid(row=1, column=0, sticky="ew")
 
     def _setup_context_menu(self):
         self._tree_context_menu = tk.Menu(
@@ -173,26 +196,6 @@ class GridPanel:
             self._tree_context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self._tree_context_menu.grab_release()
-
-    def _on_tree_y_scroll(self, first, last):
-        self._update_scrollbar(self.vsb, first, last, side="right", fill="y")
-
-    def _on_tree_x_scroll(self, first, last):
-        self._update_scrollbar(self.hsb, first, last, side="bottom", fill="x")
-
-    def _update_scrollbar(self, scrollbar, first, last, side, fill):
-        scrollbar.set(first, last)
-        needs_scroll = float(first) > 0.0 or float(last) < 1.0
-        if needs_scroll and not scrollbar.winfo_ismapped():
-            scrollbar.pack(side=side, fill=fill)
-        elif not needs_scroll and scrollbar.winfo_ismapped():
-            scrollbar.pack_forget()
-
-    def _update_tree_scrollbars(self):
-        x_first, x_last = self.tree.xview()
-        y_first, y_last = self.tree.yview()
-        self._on_tree_x_scroll(x_first, x_last)
-        self._on_tree_y_scroll(y_first, y_last)
 
     @staticmethod
     def _remove_combobox_arrow_from_layout(layout):
@@ -400,13 +403,18 @@ class GridPanel:
                 self.app.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.app.catalog_manager.catalog_labels[col_name]}.", level="warning")
                 return False
 
+            # Registrar la acción en el UndoManager antes de aplicar el cambio
+            file_path = self.app.file_paths_map.get(row_id)
+            if hasattr(self.app, "undo_manager"):
+                action = HistoryAction(file_path, row_id, col_name, col_index, current_value_str, new_value)
+                self.app.undo_manager.record_action(action)
+
             values = list(self.tree.item(row_id, "values"))
             values[col_index] = new_value
             self.tree.item(row_id, values=values)
 
             self.app.detail_panel.on_row_select(None)
 
-            file_path = self.app.file_paths_map.get(row_id)
             file_path and self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
 
             return True
@@ -620,11 +628,9 @@ class GridPanel:
 
     def _on_tree_enter_press(self, event):
         """Al pulsar Intro sobre una fila seleccionada, inicia la edición de la columna Filename (índice 0)."""
-        # Si ya hay un editor flotante abierto, dejamos que su propio evento procese la tecla
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 
-        # Obtener la fila enfocada/seleccionada actualmente
         focused_row = self.tree.focus()
         if not focused_row:
             selected_rows = self.tree.selection()
@@ -632,17 +638,145 @@ class GridPanel:
                 focused_row = selected_rows[0]
 
         if focused_row:
-            # 0 representa la primera columna ('Filename')
             self._start_tree_cell_edit(focused_row, col_index=0)
-            return "break"  # Previene el comportamiento por defecto de Tkinter
+            return "break"
 
     def _on_tree_delete_press(self, event):
         """Al pulsar Suprimir sobre la tabla, ejecuta el mismo borrado de metadatos que el botón de la escoba."""
-        # Si la celda está en modo edición (caja de texto abierta), dejamos que Suprimir borre caracteres del texto
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 
-        # Si hay filas seleccionadas, ejecutamos el método de limpiado del process_manager
         if self.tree.selection():
             self.app.process_manager.clear_selected_metadata()
-            return "break"  # Previene propagación del evento
+            return "break"
+
+    def _handle_excel_navigation(self, event, move_to="home", select_range=False):
+        """Maneja la navegación y selección rápida estilo Excel (Inicio, Fin, Shift+Inicio, Shift+Fin)."""
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return
+
+        all_rows = self.tree.get_children()
+        if not all_rows:
+            return "break"
+
+        focused_row = self.tree.focus()
+        if not focused_row:
+            selected = self.tree.selection()
+            focused_row = selected[0] if selected else all_rows[0]
+
+        target_row = all_rows[0] if move_to == "home" else all_rows[-1]
+
+        if select_range:
+            if not self._shift_pivot_row or self._shift_pivot_row not in all_rows:
+                self._shift_pivot_row = focused_row
+
+            try:
+                start_idx = all_rows.index(self._shift_pivot_row)
+                end_idx = all_rows.index(target_row)
+
+                if start_idx <= end_idx:
+                    range_rows = all_rows[start_idx : end_idx + 1]
+                else:
+                    range_rows = all_rows[end_idx : start_idx + 1]
+
+                self.tree.selection_set(range_rows)
+            except ValueError:
+                self.tree.selection_set((focused_row, target_row))
+        else:
+            self._shift_pivot_row = None
+            self.tree.selection_set(target_row)
+
+        self.tree.focus(target_row)
+        self.tree.see(target_row)
+
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)
+
+        return "break"
+
+    def _handle_key_navigation(self, event, direction="down", select_range=False):
+        """Maneja la navegación con flechas arriba/abajo y selección con Shift."""
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return
+
+        all_rows = self.tree.get_children()
+        if not all_rows:
+            return "break"
+
+        focused_row = self.tree.focus()
+        if not focused_row:
+            selected = self.tree.selection()
+            focused_row = selected[0] if selected else all_rows[0]
+
+        try:
+            curr_idx = all_rows.index(focused_row)
+        except ValueError:
+            curr_idx = 0
+
+        next_idx = curr_idx - 1 if direction == "up" else curr_idx + 1
+        next_idx = max(0, min(len(all_rows) - 1, next_idx))
+        target_row = all_rows[next_idx]
+
+        self._update_tree_selection(target_row, focused_row, all_rows, select_range)
+        return "break"
+
+    def _handle_page_navigation(self, event, direction="down", select_range=False):
+        """Maneja Re Pág / Av Pág moviendo la vista, el foco y la selección real."""
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return
+
+        all_rows = self.tree.get_children()
+        if not all_rows:
+            return "break"
+
+        focused_row = self.tree.focus()
+        if not focused_row:
+            selected = self.tree.selection()
+            focused_row = selected[0] if selected else all_rows[0]
+
+        try:
+            curr_idx = all_rows.index(focused_row)
+        except ValueError:
+            curr_idx = 0
+
+        # Estimar el número de filas visibles por página según la altura del Treeview
+        tree_height = self.tree.winfo_height()
+        row_height = 28  # Coincide con rowheight=28 configurado en el estilo
+        page_step = max(1, tree_height // row_height)
+
+        next_idx = curr_idx - page_step if direction == "up" else curr_idx + page_step
+        next_idx = max(0, min(len(all_rows) - 1, next_idx))
+        target_row = all_rows[next_idx]
+
+        self._update_tree_selection(target_row, focused_row, all_rows, select_range)
+        return "break"
+
+    def _update_tree_selection(self, target_row, current_focused, all_rows, select_range):
+        """Aplica la selección (individual o rango con Shift) y sincroniza el foco y la vista."""
+        if select_range:
+            if not self._shift_pivot_row or self._shift_pivot_row not in all_rows:
+                self._shift_pivot_row = current_focused
+
+            try:
+                start_idx = all_rows.index(self._shift_pivot_row)
+                end_idx = all_rows.index(target_row)
+
+                if start_idx <= end_idx:
+                    range_rows = all_rows[start_idx : end_idx + 1]
+                else:
+                    range_rows = all_rows[end_idx : start_idx + 1]
+
+                self.tree.selection_set(range_rows)
+            except ValueError:
+                self.tree.selection_set((current_focused, target_row))
+        else:
+            self._shift_pivot_row = None
+            self.tree.selection_set(target_row)
+
+        # Sincronizar foco y asegurar visibilidad
+        self.tree.focus(target_row)
+        self.tree.see(target_row)
+
+        # Actualizar panel de detalles lateral
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)

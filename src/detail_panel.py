@@ -8,12 +8,11 @@ from io import BytesIO
 import customtkinter as ctk
 from ui_utils import UiUtils
 from PIL import Image, ImageGrab
-
-from ui_utils import UiUtils
+from undo_manager import HistoryAction
 
 
 class DetailPanel:
-    """Panel lateral de metadatos y caratula desacoplado de la ventana principal."""
+    """Panel lateral de metadatos y carátula desacoplado de la ventana principal."""
 
     def __init__(self, app, parent, logger, get_resource_path, fallback_process_icon=None):
         self.icono_procesar = self.load_process_icon()
@@ -23,6 +22,9 @@ class DetailPanel:
         self.logger = logger
         self.get_resource_path = get_resource_path
         self.fallback_process_icon = fallback_process_icon
+
+        # Guarda el ID de la fila que se estaba editando antes de cambiar de selección
+        self._editing_row_id = None
 
         self.panel_combo_fields = {
             "entry_album": "Album",
@@ -40,6 +42,14 @@ class DetailPanel:
         self.btn_clean = None
 
         self._setup_tag_panel()
+
+    def _track_editing_row(self, event=None):
+        """Memoriza la fila actualmente seleccionada cuando un campo recibe el foco."""
+        selected_rows = self.app.tree.selection()
+        if selected_rows and not self.app._multi_select_mode:
+            self._editing_row_id = selected_rows[0]
+        else:
+            self._editing_row_id = None
 
     def _setup_tag_panel(self):
         self.frame_sidebar = ctk.CTkFrame(self.parent, width=260)
@@ -79,6 +89,7 @@ class DetailPanel:
                     command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
                 )
                 widget.set("")
+                widget.bind("<FocusIn>", self._track_editing_row)
                 widget.bind("<Button-1>", lambda _e, _w=widget: self.on_panel_combo_click(_w))
                 widget.bind(
                     "<FocusOut>",
@@ -90,6 +101,7 @@ class DetailPanel:
                 )
             else:
                 widget = ctk.CTkEntry(field_frame, height=26, font=ctk.CTkFont(family="Inter", size=12))
+                widget.bind("<FocusIn>", self._track_editing_row)
                 widget.bind("<FocusOut>", lambda _e, _attr=attr_name: self.on_panel_text_field_commit(_attr))
                 widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
 
@@ -249,7 +261,6 @@ class DetailPanel:
                     v for v in self.app.catalog_manager.catalog_values.get(catalog_key, [])
                     if v and v != self.app.CLEAR_OPTION and v != self.app.KEEP_VALUE
                 ]
-                # ✅ AHORA INCLUYE <Mantener> Y <Limpiar> AL INICIO
                 options = [self.app.KEEP_VALUE, self.app.CLEAR_OPTION] + sorted(catalog_vals, key=lambda x: x.lower())
             else:
                 _, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
@@ -259,7 +270,6 @@ class DetailPanel:
                     if col_index < len(self.app.tree.item(r, "values"))
                        and self.app.tree.item(r, "values")[col_index]
                 })
-                # ✅ AHORA INCLUYE <Mantener> Y <Limpiar> AL INICIO
                 options = [self.app.KEEP_VALUE, self.app.CLEAR_OPTION] + [
                     v for v in distinct if v and v not in (self.app.KEEP_VALUE, self.app.CLEAR_OPTION)
                 ]
@@ -293,11 +303,9 @@ class DetailPanel:
 
         raw_value = multi_widget.get().strip()
 
-        # Si la opción es Mantener o está vacía, no realizamos cambios
         if raw_value == self.app.KEEP_VALUE or raw_value == "":
             return
 
-        # Si se selecciona <Limpiar>, asignamos cadena vacía "" tanto para catálogos como para campos de texto
         if raw_value == self.app.CLEAR_OPTION:
             new_value = ""
         elif attr_name in self.panel_combo_fields:
@@ -314,21 +322,34 @@ class DetailPanel:
         field_name, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
         selected_rows = self.app.tree.selection()
 
+        batch_actions = []
         updated = 0
+
         for row_id in selected_rows:
             values = list(self.app.tree.item(row_id, "values"))
             if col_index >= len(values):
                 continue
-            if str(values[col_index]).strip() == new_value:
+
+            current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
+            if current_value == new_value:
                 continue
+
+            file_path = self.app.file_paths_map.get(row_id)
+
+            # Crear registro de acción para Undo
+            batch_actions.append(
+                HistoryAction(file_path, row_id, field_name, col_index, current_value, new_value)
+            )
 
             values[col_index] = new_value
             self.app.tree.item(row_id, values=values)
 
-            file_path = self.app.file_paths_map.get(row_id)
             if file_path and os.path.exists(file_path):
                 self.app.audio_manager.save_single_tag(file_path, field_name, new_value)
                 updated += 1
+
+        if batch_actions:
+            self.app.undo_manager.record_action(batch_actions)
 
         if updated:
             self.logger.info(
@@ -412,25 +433,45 @@ class DetailPanel:
         widget.delete(0, "end")
         widget.insert(0, value_str)
 
-    def on_panel_catalog_selected(self, attr_name, catalog_key):
-        selected_rows = self.app.tree.selection()
-        if not selected_rows:
-            self.logger.info(
-                f"Selección de catálogo ignorada ({self.app.catalog_manager.catalog_labels.get(catalog_key, catalog_key)}): no hay fila seleccionada."
-            )
-            return
+    def _get_target_row_id(self):
+        """Obtiene la fila objetivo: la memorizada durante la edición o la actualmente seleccionada."""
+        if self._editing_row_id and self.app.tree.exists(self._editing_row_id):
+            target = self._editing_row_id
+            self._editing_row_id = None
+            return target
 
+        selected_rows = self.app.tree.selection()
+        return selected_rows[0] if selected_rows else None
+
+    def on_panel_catalog_selected(self, attr_name, catalog_key):
         if self.app._multi_select_mode:
             self.on_multi_panel_commit(attr_name)
             return
 
-        row_id = selected_rows[0]
+        row_id = self._get_target_row_id()
+        if not row_id:
+            self.logger.info(
+                f"Selección de catálogo ignorada ({self.app.catalog_manager.catalog_labels.get(catalog_key, catalog_key)}): no hay fila a actualizar."
+            )
+            return
+
         combo = self.tag_entries.get(attr_name)
         if not combo:
             return
 
         raw_value = combo.get().strip()
         new_value = "" if raw_value == self.app.CLEAR_OPTION else self.app.catalog_manager.normalize_catalog_text(raw_value)
+
+        # Registrar deshacer para catálogo
+        col_name, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
+        values = list(self.app.tree.item(row_id, "values"))
+        current_val = str(values[col_index]).strip() if col_index < len(values) and values[col_index] is not None else ""
+
+        if current_val != new_value:
+            file_path = self.app.file_paths_map.get(row_id)
+            action = HistoryAction(file_path, row_id, col_name, col_index, current_val, new_value)
+            self.app.undo_manager.record_action(action)
+
         self.app.catalog_manager.apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
 
     @staticmethod
@@ -463,15 +504,14 @@ class DetailPanel:
         if attr_name not in text_column_map:
             return
 
-        selected_rows = self.app.tree.selection()
-        if not selected_rows:
-            return
-
         if self.app._multi_select_mode:
             self.on_multi_panel_commit(attr_name)
             return
 
-        row_id = selected_rows[0]
+        row_id = self._get_target_row_id()
+        if not row_id:
+            return
+
         widget = self.tag_entries.get(attr_name)
         if not widget:
             return
@@ -486,16 +526,22 @@ class DetailPanel:
         if current_value == new_value:
             return
 
+        # Registro de acción para Undo
+        file_path = self.app.file_paths_map.get(row_id)
+        action = HistoryAction(file_path, row_id, col_name, col_index, current_value, new_value)
+        self.app.undo_manager.record_action(action)
+
+        # Aplicación de cambios
         values[col_index] = new_value
         self.app.tree.item(row_id, values=values)
 
-        file_path = self.app.file_paths_map.get(row_id)
-        if file_path:
+        if file_path and os.path.exists(file_path):
             self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
 
-        self.logger.info(f"Campo '{col_name}' actualizado desde panel izquierdo: '{current_value}' -> '{new_value}'")
+        self.logger.info(f"Campo '{col_name}' actualizado: '{current_value}' -> '{new_value}'")
 
     def clear_fields(self):
+        self._editing_row_id = None
         for widget in self.tag_entries.values():
             if isinstance(widget, ctk.CTkComboBox):
                 widget.set("")
@@ -578,13 +624,9 @@ class DetailPanel:
             file_path = self.app.file_paths_map.get(row_id)
 
             if file_path and os.path.exists(file_path):
-                # 1. Eliminar la carátula físicamente del archivo de audio
                 self.app.audio_manager.strip_cover_tags(file_path)
-
-                # 2. Actualizar el estado de la fila en la tabla a "No"
                 self.app.grid_panel.update_row_cover_status(row_id, "No")
 
-        # 3. Limpiar la vista previa del panel de detalles
         self.display_cover_art(None)
         self.logger.info("Carátula eliminada correctamente.")
 
