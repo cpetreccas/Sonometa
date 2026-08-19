@@ -1,4 +1,6 @@
 FUNCIONALIDADES:
+Invertir las posiciones en el detail panel de año y album.
+
 Agente AI que genere el filename acorde al estilo de Sonometa.
 
 Format_filename.py debe sustituir guiones bajos por espacios.
@@ -10,9 +12,5 @@ Al editar algo en el panel izquierdo, al hacer zoomout en el grid se aplican los
 Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
 
 Undo / Redo de cambios	Guardar un búfer de estados anteriores para revertir escrituras accidentales.
-
-Al navegar por el grid, al hacer ENTER no se actualiza el panel de detalle.
-
-Al presionar ESC se debe salir del modo edición en el GRID
 
 Mejorar menús de gestión de catálogos

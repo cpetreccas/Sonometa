@@ -165,6 +165,7 @@ class App(ctk.CTk):
         self.bind("<F5>", lambda e: self.refresh_folder())
         self.bind("<Control-q>", lambda e: self.on_close())
         self.bind("<Control-a>", lambda e: self.grid_panel.select_all_rows())
+        self.bind("<Control-A>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-f>", lambda e: self.search_manager.toggle_search_bar())
         self.bind("<Control-F>", lambda e: self.search_manager.toggle_search_bar())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))

@@ -127,7 +127,11 @@ class GridPanel:
         self.tree.bind("<<TreeviewSelect>>", lambda event: self.app.detail_panel.on_row_select(event))
         self.tree.bind("<Double-1>", self.on_cell_double_click)
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
+        self.tree.bind("<Return>", self._on_tree_enter_press)
+        self.tree.bind("<KP_Enter>", self._on_tree_enter_press)
         self.tree.bind(btn_right, self._show_tree_context_menu)
+        self.tree.bind("<Delete>", self._on_tree_delete_press)
+        self.tree.bind("<KP_Delete>", self._on_tree_delete_press)
 
         self.vsb = ttk.Scrollbar(self.frame_grid, orient="vertical", command=self.tree.yview)
         self.hsb = ttk.Scrollbar(self.frame_grid, orient="horizontal", command=self.tree.xview)
@@ -407,11 +411,33 @@ class GridPanel:
 
             return True
 
+        def cancel_edit(evt=None):
+            nonlocal finalized
+            if finalized:
+                return "break"
+            finalized = True
+            self._close_tree_combo_dropdown(entry)
+            entry.destroy()
+            self.cell_entry = None
+            self.tree.focus_set()
+            return "break"
+
         def navigate(direction):
             if save_edit():
                 next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
                 if next_target:
                     next_row_id, next_col_index = next_target
+
+                    # 1. Seleccionar y hacer foco sobre la nueva fila en el Treeview
+                    self.tree.selection_set(next_row_id)
+                    self.tree.focus(next_row_id)
+                    self.tree.see(next_row_id)
+
+                    # 2. Forzar la actualización del panel de detalles lateral
+                    if hasattr(self.app, "detail_panel"):
+                        self.app.detail_panel.on_row_select(None)
+
+                    # 3. Abrir la edición de la nueva celda
                     self.app.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
             return "break"
 
@@ -502,6 +528,7 @@ class GridPanel:
         entry.bind("<Shift-Return>", lambda _e: navigate("shift_enter"))
         entry.bind("<Tab>", lambda _e: navigate("tab"))
         entry.bind("<Shift-Tab>", lambda _e: navigate("shift_tab"))
+        entry.bind("<Escape>", cancel_edit)
         entry.bind("<ISO_Left_Tab>", lambda _e: navigate("shift_tab"))
         if col_name in managed_grid_fields:
             entry.bind("<<ComboboxSelected>>", commit_combo_selection)
@@ -590,3 +617,32 @@ class GridPanel:
             metadata["Cover"]
         ), tags=(tag,))
         return row_id
+
+    def _on_tree_enter_press(self, event):
+        """Al pulsar Intro sobre una fila seleccionada, inicia la edición de la columna Filename (índice 0)."""
+        # Si ya hay un editor flotante abierto, dejamos que su propio evento procese la tecla
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return
+
+        # Obtener la fila enfocada/seleccionada actualmente
+        focused_row = self.tree.focus()
+        if not focused_row:
+            selected_rows = self.tree.selection()
+            if selected_rows:
+                focused_row = selected_rows[0]
+
+        if focused_row:
+            # 0 representa la primera columna ('Filename')
+            self._start_tree_cell_edit(focused_row, col_index=0)
+            return "break"  # Previene el comportamiento por defecto de Tkinter
+
+    def _on_tree_delete_press(self, event):
+        """Al pulsar Suprimir sobre la tabla, ejecuta el mismo borrado de metadatos que el botón de la escoba."""
+        # Si la celda está en modo edición (caja de texto abierta), dejamos que Suprimir borre caracteres del texto
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return
+
+        # Si hay filas seleccionadas, ejecutamos el método de limpiado del process_manager
+        if self.tree.selection():
+            self.app.process_manager.clear_selected_metadata()
+            return "break"  # Previene propagación del evento

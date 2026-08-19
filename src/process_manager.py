@@ -228,56 +228,36 @@ class ProcessManager:
             metadata["Cover"]
         ))
 
-    def clear_metadata_for_rows(self, target_rows, scope_label="selección"):
-        target_rows = list(target_rows)
-        if not target_rows:
-            DialogManager.show_themed_dialog(
-                self.app,
-                "Sin archivos",
-                "No hay archivos disponibles para limpiar metadatos.",
-                level="warning"
-            )
-            return 0
+    def clear_metadata_for_rows(self, rows, scope_label="selección"):
+        """Limpia los metadatos de las filas especificadas directamente sin pedir confirmación."""
+        if not rows:
+            return
 
-        if len(target_rows) == 1:
-            row_id = target_rows[0]
+        for row_id in rows:
             file_path = self.app.file_paths_map.get(row_id)
-            file_name = os.path.basename(file_path) if file_path else "el archivo seleccionado"
-            message = f"¿Eliminar todos los metadatos de:\n{file_name}?"
-        else:
-            message = (
-                f"¿Eliminar todos los metadatos de {len(target_rows)} archivo(s) "
-                f"de la {scope_label}?"
-            )
+            if file_path:
+                # 1. Vaciar las etiquetas físicas en el archivo de audio
+                for col_name in ["Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year"]:
+                    self.app.audio_manager.save_single_tag(file_path, col_name, "")
 
-        if not DialogManager.show_themed_dialog(self.app, "Confirmar limpieza", message, level="warning", is_confirm=True):
-            return 0
+                # 1. Borrar carátulas
+                self.app.audio_manager.strip_cover_tags(file_path)
+                self.app.grid_panel.update_row_cover_status(row_id, "No")
 
-        cleaned_count = 0
-        failed_count = 0
+                # 3. Resetear visualmente la fila en la tabla sin llamar a métodos inexistentes
+                values = list(self.app.tree.item(row_id, "values"))
+                if values:
+                    filename = values[0]
+                    cover_status = values[8] if len(values) > 8 else "No"
+                    # Mantenemos Filename (0) y Cover (8), vaciando el resto de columnas
+                    new_values = [filename, "", "", "", "", "", "", "", cover_status]
+                    self.app.tree.item(row_id, values=new_values)
 
-        for row_id in target_rows:
-            file_path = self.app.file_paths_map.get(row_id)
-            if not file_path or not os.path.exists(file_path):
-                self.logger.warning("Se omite limpieza de metadatos: archivo no encontrado en disco.")
-                failed_count += 1
-                continue
-
-            if not self.app.audio_manager.clear_audio_file_metadata(file_path):
-                failed_count += 1
-                continue
-
-            self.update_row_from_file_metadata(row_id, file_path)
-            self.logger.info(f"Metadatos eliminados de: {os.path.basename(file_path)}")
-            cleaned_count += 1
-
-        if self.app.tree.selection():
+        # Refrescar la interfaz gráfica
+        if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)
 
-        self.logger.info(
-            f"Limpieza de metadatos completada ({scope_label}) -> OK: {cleaned_count}, Fallos: {failed_count}"
-        )
-        return cleaned_count
+        self.logger.info(f"Metadatos limpiados en {len(rows)} archivo(s).")
 
     def clear_selected_metadata(self):
         selected_rows = self.app.tree.selection()

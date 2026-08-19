@@ -50,8 +50,8 @@ class DetailPanel:
             ("Intérprete", "entry_artist"),
             ("Título", "entry_title"),
             ("Remix", "entry_mixartist"),
-            ("Álbum", "entry_album"),
             ("Año", "entry_year"),
+            ("Álbum", "entry_album"),
             ("Género", "entry_genre"),
             ("Etiqueta", "entry_publisher")
         ]
@@ -575,7 +575,6 @@ class DetailPanel:
             return
 
         for row_id in selected_rows:
-            # Obtener la ruta del archivo usando el ID de la fila en el diccionario map
             file_path = self.app.file_paths_map.get(row_id)
 
             if file_path and os.path.exists(file_path):
