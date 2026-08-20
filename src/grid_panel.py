@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
 from undo_manager import HistoryAction
+from log_handler import LogManager
 
 
 class GridPanel:
@@ -15,6 +16,7 @@ class GridPanel:
 
         # Pivote para selecciones con Shift estilo Excel
         self._shift_pivot_row = None
+        self._last_edited_col = 0  # Rastrear última columna editada
 
         # Contenedor principal del grid
         self.frame_grid = ctk.CTkFrame(self.parent)
@@ -137,29 +139,35 @@ class GridPanel:
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.tree.bind(btn_right, self._show_tree_context_menu)
 
-        self.app.bind("<Return>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
-        self.app.bind("<KP_Enter>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
+        # Teclas de acción vinculadas al Treeview para cortar la propagación de Tkinter
+        self.tree.bind("<Return>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
+        self.tree.bind("<KP_Enter>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
 
-        self.app.bind("<Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
-        self.app.bind("<KP_Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
+        self.tree.bind("<Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
+        self.tree.bind("<KP_Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
 
-        # Navegación
-        self.app.bind("<Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=False))
-        self.app.bind("<Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=False))
-        self.app.bind("<Shift-Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=True))
-        self.app.bind("<Shift-Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=True))
+        # Navegación con Tabulador sobre el Treeview
+        self.tree.bind("<Tab>", lambda e: self._safe_grid_action(e, self._on_tree_tab_press, reverse=False))
+        self.tree.bind("<Shift-Tab>", lambda e: self._safe_grid_action(e, self._on_tree_tab_press, reverse=True))
+        self.tree.bind("<ISO_Left_Tab>", lambda e: self._safe_grid_action(e, self._on_tree_tab_press, reverse=True))
 
-        # Navegación (Inicio / Fin y Selección con Shift)
-        self.app.bind("<Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=False))
-        self.app.bind("<End>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="end", select_range=False))
-        self.app.bind("<Shift-Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=True))
-        self.app.bind("<Shift-End>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="end", select_range=True))
+        # Navegación Arriba/Abajo
+        self.tree.bind("<Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=False))
+        self.tree.bind("<Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=False))
+        self.tree.bind("<Shift-Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=True))
+        self.tree.bind("<Shift-Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=True))
 
-        # Paginación (Re Pág / Av Pág y Selección con Shift)
-        self.app.bind("<Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=False))
-        self.app.bind("<Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=False))
-        self.app.bind("<Shift-Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=True))
-        self.app.bind("<Shift-Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=True))
+        # Navegación Inicio/Fin
+        self.tree.bind("<Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=False))
+        self.tree.bind("<End>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="end", select_range=False))
+        self.tree.bind("<Shift-Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=True))
+        self.tree.bind("<Shift-End>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="end", select_range=True))
+
+        # Paginación
+        self.tree.bind("<Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=False))
+        self.tree.bind("<Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=False))
+        self.tree.bind("<Shift-Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=True))
+        self.tree.bind("<Shift-Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=True))
 
         # Crear Scrollbars
         self.vsb = ttk.Scrollbar(self.frame_grid, orient="vertical", command=self.tree.yview)
@@ -290,6 +298,8 @@ class GridPanel:
         if col_name == "Cover":
             return
 
+        self._last_edited_col = col_index
+
         if self.cell_entry:
             self.cell_entry.destroy()
             self.cell_entry = None
@@ -343,7 +353,9 @@ class GridPanel:
         else:
             entry = ttk.Entry(self.tree)
 
-        current_value_str = str(current_value).strip()
+        entry._is_cell_editing = True
+
+        current_value_str = str(current_value).strip() if current_value is not None else ""
         if col_name == "Filename":
             current_stem, _ = os.path.splitext(current_value_str)
             entry.insert(0, current_stem)
@@ -380,8 +392,19 @@ class GridPanel:
             finalized = True
             self._close_tree_combo_dropdown(entry)
             new_value = entry.get().strip()
+
+            if hasattr(entry, "_is_cell_editing"):
+                del entry._is_cell_editing
+
             entry.destroy()
             self.cell_entry = None
+
+            # Forzar el foco de inmediato en el Treeview
+            self.tree.focus_set()
+            if row_id and self.tree.exists(row_id):
+                self.tree.selection_set(row_id)
+                self.tree.focus(row_id)
+                self.tree.see(row_id)
 
             if col_name in managed_grid_fields:
                 if new_value == self.app.CLEAR_OPTION:
@@ -427,7 +450,15 @@ class GridPanel:
                     values[col_index] = final_filename
                     self.tree.item(row_id, values=values)
                     self.app.detail_panel.on_row_select(None)
-                    self.logger.info(f"Renombrado manual: '{original_filename}' -> '{final_filename}'")
+
+                    log_msg = LogManager.format_tree_log(
+                        context="GRID",
+                        action="Renombrado",
+                        filename=final_filename,
+                        prev_vals={"Filename": original_filename},
+                        new_vals={"Filename": final_filename}
+                    )
+                    self.logger.info(log_msg)
                 except Exception as e:
                     self.logger.error(f"No se pudo renombrar el archivo '{original_filename}': {str(e)}")
                     self.app.show_themed_dialog("Error al renombrar", f"No se pudo renombrar el archivo:\n{str(e)}", level="error")
@@ -495,6 +526,15 @@ class GridPanel:
 
             if file_path:
                 self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
+                filename = os.path.basename(file_path)
+                log_msg = LogManager.format_tree_log(
+                    context="GRID",
+                    action="Modificado",
+                    filename=filename,
+                    prev_vals={col_name: current_value_str if current_value_str else None},
+                    new_vals={col_name: new_value if new_value else None}
+                )
+                self.logger.info(log_msg)
 
             return True
 
@@ -504,6 +544,10 @@ class GridPanel:
                 return "break"
             finalized = True
             self._close_tree_combo_dropdown(entry)
+
+            if hasattr(entry, "_is_cell_editing"):
+                del entry._is_cell_editing
+
             entry.destroy()
             self.cell_entry = None
             self.tree.focus_set()
@@ -523,10 +567,6 @@ class GridPanel:
                         self.app.detail_panel.on_row_select(None)
 
                     self.app.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
-            return "break"
-
-        def commit_combo_selection(evt=None):
-            entry.after_idle(save_edit)
             return "break"
 
         combo_type_state = {"buffer": "", "last_ts": 0.0, "matches": [], "match_idx": 0}
@@ -608,14 +648,16 @@ class GridPanel:
 
             entry.after(120, commit_if_closed)
 
+        # Mapeos directos de navegación en el widget de entrada (evita fugas al detail panel)
         entry.bind("<Return>", lambda _e: navigate("enter"))
+        entry.bind("<KP_Enter>", lambda _e: navigate("enter"))
         entry.bind("<Shift-Return>", lambda _e: navigate("shift_enter"))
         entry.bind("<Tab>", lambda _e: navigate("tab"))
         entry.bind("<Shift-Tab>", lambda _e: navigate("shift_tab"))
-        entry.bind("<Escape>", cancel_edit)
         entry.bind("<ISO_Left_Tab>", lambda _e: navigate("shift_tab"))
+        entry.bind("<Escape>", cancel_edit)
+
         if col_name in managed_grid_fields:
-            entry.bind("<<ComboboxSelected>>", commit_combo_selection)
             entry.bind("<KeyPress>", on_combo_type_search)
             entry.bind("<space>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
             entry.bind("<Down>", lambda _e: on_combo_cycle(forward=True))
@@ -623,6 +665,7 @@ class GridPanel:
             entry.bind("<Delete>", clear_combo_value)
             entry.bind("<KP_Delete>", clear_combo_value)
             entry.bind("<BackSpace>", clear_combo_value)
+
         entry.bind("<FocusOut>", on_focus_out)
         self.cell_entry = entry
 
@@ -880,6 +923,7 @@ class GridPanel:
             self._shift_pivot_row = None
             self.tree.selection_set(target_row)
 
+        self.tree.focus_set()  # Asegura el foco activo en el widget
         self.tree.focus(target_row)
         self.tree.see(target_row)
 
@@ -887,13 +931,68 @@ class GridPanel:
             self.app.detail_panel.on_row_select(None)
 
     def _safe_grid_action(self, event, action_func, **kwargs):
-        """Verifica si el foco está en un campo de texto antes de ejecutar acciones del grid."""
+        """Verifica si el foco está en un campo de texto; si no lo está, enfoca el Treeview
+        y ejecuta la navegación sin dobles saltos."""
         try:
             widget_class = event.widget.winfo_class()
         except AttributeError:
             widget_class = ""
 
+        # Si el usuario está interactuando con un control de texto, no interferimos
         if widget_class in ("Entry", "TCombobox", "Text"):
             return
 
-        return action_func(event, **kwargs)
+        # Forzar que el Treeview reciba el foco del teclado de la app
+        self.tree.focus_set()
+
+        res = action_func(event, **kwargs)
+        return "break" if res is None else res
+
+    def _on_tree_tab_press(self, event, reverse=False):
+        """Permite reanudar la edición en la siguiente columna al pulsar Tab sobre la tabla."""
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return
+
+        focused_row = self.tree.focus()
+        if not focused_row:
+            selected_rows = self.tree.selection()
+            if selected_rows:
+                focused_row = selected_rows[0]
+
+        if not focused_row:
+            return "break"
+
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+        last_col = getattr(self, "_last_edited_col", None)
+
+        if reverse:
+            if last_col is not None and last_col in editable_cols:
+                col_pos = editable_cols.index(last_col)
+                target_col = editable_cols[max(0, col_pos - 1)]
+            else:
+                target_col = editable_cols[-1]
+        else:
+            if last_col is not None and last_col in editable_cols:
+                col_pos = editable_cols.index(last_col)
+                if col_pos < len(editable_cols) - 1:
+                    target_col = editable_cols[col_pos + 1]
+                else:
+                    rows = list(self.tree.get_children())
+                    try:
+                        row_pos = rows.index(focused_row)
+                        if row_pos < len(rows) - 1:
+                            next_row = rows[row_pos + 1]
+                            self.tree.selection_set(next_row)
+                            self.tree.focus(next_row)
+                            self.tree.see(next_row)
+                            focused_row = next_row
+                            target_col = editable_cols[0]
+                        else:
+                            target_col = editable_cols[-1]
+                    except ValueError:
+                        target_col = editable_cols[0]
+            else:
+                target_col = editable_cols[0]
+
+        self._start_tree_cell_edit(focused_row, target_col, open_dropdown=False)
+        return "break"

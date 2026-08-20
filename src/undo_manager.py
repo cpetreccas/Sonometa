@@ -1,4 +1,7 @@
 import os
+import logging
+
+logger = logging.getLogger("Sonometa")
 
 
 class HistoryAction:
@@ -37,7 +40,7 @@ class UndoManager:
 
     def undo(self, event=None):
         if not self.undo_stack:
-            self.app.logger.info("Undo: No hay cambios para deshacer.")
+            logger.info("[UNDO] No hay cambios para deshacer")
             return "break"
 
         batch_actions = self.undo_stack.pop()
@@ -45,12 +48,21 @@ class UndoManager:
             self._apply_state(action, use_old_value=True)
 
         self.redo_stack.append(batch_actions)
-        self.app.logger.info(f"Undo: Deshecha(s) {len(batch_actions)} modificación(es).")
+
+        # Formato de log estructurado por acción
+        for action in reversed(batch_actions):
+            filename = os.path.basename(action.file_path) if action.file_path else "Archivo"
+            logger.info(
+                f"[UNDO] Deshecha modificación en '{filename}'\n"
+                f"  ├── Campo restaurado : {action.field_name}\n"
+                f"  ├── Valor revertido  : {action.old_value if action.old_value is not None else 'null'}\n"
+                f"  └── Valor descartado : {action.new_value if action.new_value is not None else 'null'}"
+            )
         return "break"
 
     def redo(self, event=None):
         if not self.redo_stack:
-            self.app.logger.info("Redo: No hay cambios para rehacer.")
+            logger.info("[REDO] No hay cambios para rehacer")
             return "break"
 
         batch_actions = self.redo_stack.pop()
@@ -58,7 +70,16 @@ class UndoManager:
             self._apply_state(action, use_old_value=False)
 
         self.undo_stack.append(batch_actions)
-        self.app.logger.info(f"Redo: Rehecha(s) {len(batch_actions)} modificación(es).")
+
+        # Formato de log estructurado por acción
+        for action in batch_actions:
+            filename = os.path.basename(action.file_path) if action.file_path else "Archivo"
+            logger.info(
+                f"[REDO] Rehecha modificación en '{filename}'\n"
+                f"  ├── Campo reaplicado : {action.field_name}\n"
+                f"  ├── Valores previos  : {action.old_value if action.old_value is not None else 'null'}\n"
+                f"  └── Nuevo valor      : {action.new_value if action.new_value is not None else 'null'}"
+            )
         return "break"
 
     def _apply_state(self, action: HistoryAction, use_old_value: bool):

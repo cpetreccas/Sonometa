@@ -28,11 +28,55 @@ class LogManager(logging.Handler):
         """Actualiza la barra de estado y el cuadro de texto del diálogo si existen."""
         if hasattr(self.app_instance, "label_status") and self.app_instance.label_status:
             try:
-                self.app_instance.label_status.configure(text=status_msg)
+                # Si es un log multilínea con árbol, tomamos solo la primera línea para la barra de estado
+                first_line = status_msg.split('\n')[0]
+                self.app_instance.label_status.configure(text=first_line)
             except Exception:
                 pass
 
         LogManager.append_log_to_dialog(self.app_instance, full_msg)
+
+    @staticmethod
+    def _format_dict_value(val):
+        """Formatea los valores individuales estilo JSON/Python estandarizado para logs."""
+        if val is None:
+            return "null"
+        if isinstance(val, str):
+            return f"'{val}'"
+        return str(val)
+
+    @staticmethod
+    def dict_to_str(d):
+        """Convierte un diccionario a string con formato {Key: 'Value', Key2: null}."""
+        if not d:
+            return "{}"
+        items = [f"{k}: {LogManager._format_dict_value(v)}" for k, v in d.items()]
+        return "{" + ", ".join(items) + "}"
+
+    @staticmethod
+    def format_tree_log(context, action, filename, prev_vals=None, new_vals=None, error_cause=None):
+        """
+        Construye el mensaje multilínea con estructura de árbol ASCII.
+
+        Ejemplos de salidas generadas:
+        [DETAIL] Modificado 'pista.mp3'
+          ├── Valores previos : {Year: 1995}
+          └── Valores nuevos  : {Year: 1996}
+        """
+        header = f"[{context.upper()}] {action} '{filename}'"
+
+        if error_cause:
+            tree = f"  └── Causa : {error_cause}"
+            return f"{header}\n{tree}"
+
+        str_prev = LogManager.dict_to_str(prev_vals or {})
+        str_new = LogManager.dict_to_str(new_vals or {})
+
+        tree = (
+            f"  ├── Valores previos : {str_prev}\n"
+            f"  └── Valores nuevos  : {str_new}"
+        )
+        return f"{header}\n{tree}"
 
     @staticmethod
     def setup_logger(app_instance, name="Sonometa", level=logging.INFO):

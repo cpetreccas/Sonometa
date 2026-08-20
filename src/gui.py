@@ -171,6 +171,15 @@ class App(ctk.CTk):
         self.bind_all("<Command-z>", self.undo_manager.undo)
         self.bind_all("<Command-Shift-z>", self.undo_manager.redo)
 
+        # Captura universal de navegación (simples y con Shift)
+        nav_keys = [
+            "<Up>", "<Down>", "<Prior>", "<Next>", "<Home>", "<End>",
+            "<Shift-Up>", "<Shift-Down>", "<Shift-Prior>", "<Shift-Next>",
+            "<Shift-Home>", "<Shift-End>"
+        ]
+        for key in nav_keys:
+            self.bind_all(key, self._on_global_key)
+
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _check_initial_status(self):
@@ -179,6 +188,10 @@ class App(ctk.CTk):
             self.logger.info("Token de Discogs activo ✓")
         else:
             self.logger.warning("No hay token de Discogs configurado. Ve a Archivo → ⚙ Configuración.")
+
+    def show_themed_dialog(self, title, message, level="info"):
+        """Delega la presentación de diálogos emergentes a DialogManager."""
+        DialogManager.show_themed_dialog(self, title, message, level)
 
     # --- Acciones Principales ---
 
@@ -281,6 +294,52 @@ class App(ctk.CTk):
             only_unanalyzed=only_unanalyzed,
             cues_under_2=cues_under_2
         )
+
+    def _on_global_key(self, event):
+        """Redirige las teclas de navegación/selección al Treeview salvo si se edita un campo de texto."""
+        if getattr(self, "_is_redirecting_key", False):
+            return
+
+        # Si el grid tiene un editor de celda activo, ignorar la captura global
+        if hasattr(self, "grid_panel") and self.grid_panel.cell_entry:
+            return
+
+        try:
+            focused_widget = self.focus_get()
+        except (KeyError, AttributeError):
+            # Ocurre cuando el popdown del Combobox se cierra o destruye
+            return
+
+        if focused_widget is not None:
+            widget_class = focused_widget.winfo_class().lower()
+
+            # Ignorar si el foco está en un control de entrada
+            if any(k in widget_class for k in ["entry", "text", "spinbox", "combobox"]):
+                return
+
+            if getattr(focused_widget, "_is_cell_editing", False):
+                return
+
+        tree = self.grid_panel.tree
+        if not tree.get_children(""):
+            return
+
+        if focused_widget == tree:
+            return
+
+        try:
+            self._is_redirecting_key = True
+            tree.focus_set()
+            tree.event_generate(
+                f"<{event.type.name}>",
+                keysym=event.keysym,
+                keycode=event.keycode,
+                state=event.state
+            )
+        finally:
+            self._is_redirecting_key = False
+
+        return "break"
 
 
 if __name__ == "__main__":

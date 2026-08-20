@@ -3,6 +3,7 @@ import os
 import logging
 import xml.etree.ElementTree as ET
 
+# Logger unificado de Sonometa
 logger = logging.getLogger("Sonometa")
 
 
@@ -94,8 +95,8 @@ class AudioManager:
                 if covers:
                     return bytes(covers[0])
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Error al leer bytes de portada en {os.path.basename(file_path)}: {str(e)}")
 
         return None
 
@@ -130,7 +131,8 @@ class AudioManager:
 
             return {"analizado": True, "num_cues": 0}
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Error al analizar información de Traktor en {os.path.basename(file_path)}: {str(e)}")
             return {"analizado": False, "num_cues": 0}
 
     # ------------------------------------------------------------------
@@ -179,6 +181,7 @@ class AudioManager:
 
                 frame_cls = frame_map.get(field_name)
                 if not frame_cls:
+                    logger.warning(f"Campo no soportado para guardar: {field_name}")
                     return
 
                 if new_value:
@@ -207,10 +210,12 @@ class AudioManager:
 
                 mutagen_key = tag_map.get(field_name)
                 if not mutagen_key:
+                    logger.warning(f"Campo no soportado para guardar: {field_name}")
                     return
 
                 audio = MutagenFile(file_path, easy=True)
                 if audio is None:
+                    logger.error(f"No se pudo cargar el archivo para modificar tags: {file_path}")
                     return
 
                 if audio.tags is None:
@@ -223,10 +228,8 @@ class AudioManager:
 
                 audio.save()
 
-            logger.info(f"Guardado '{field_name}' en: {os.path.basename(file_path)}")
-
         except Exception as e:
-            logger.error(f"Error al guardar etiqueta '{field_name}': {str(e)}")
+            logger.error(f"Error al guardar etiqueta '{field_name}' en {os.path.basename(file_path)}: {str(e)}")
 
         finally:
             if app and hasattr(app, "detail_panel") and app.detail_panel.audio_player:
@@ -343,37 +346,43 @@ class AudioManager:
 
         ext = os.path.splitext(file_path)[1].lower()
 
-        if ext == ".mp3":
-            try:
-                tags = ID3(file_path)
-            except ID3NoHeaderError:
-                return
-            tags.delall("APIC")
-            tags.save(file_path)
+        try:
+            if ext == ".mp3":
+                try:
+                    tags = ID3(file_path)
+                except ID3NoHeaderError:
+                    return
+                tags.delall("APIC")
+                tags.save(file_path)
 
-        elif ext == ".wav":
-            audio = WAVE(file_path)
-            if audio.tags:
-                audio.tags.delall("APIC")
+            elif ext == ".wav":
+                audio = WAVE(file_path)
+                if audio.tags:
+                    audio.tags.delall("APIC")
+                    audio.save()
+
+            elif ext == ".flac":
+                audio = FLAC(file_path)
+                audio.clear_pictures()
                 audio.save()
 
-        elif ext == ".flac":
-            audio = FLAC(file_path)
-            audio.clear_pictures()
-            audio.save()
-
-        elif ext in (".m4a", ".aac", ".mp4"):
-            audio = MP4(file_path)
-            audio.pop("covr", None)
-            audio.save()
-
-        else:
-            audio = MutagenFile(file_path)
-            if audio and hasattr(audio, "tags") and audio.tags is not None:
-                for key in list(audio.tags.keys()):
-                    if "APIC" in key or "covr" in key or "PIC" in key:
-                        del audio.tags[key]
+            elif ext in (".m4a", ".aac", ".mp4"):
+                audio = MP4(file_path)
+                audio.pop("covr", None)
                 audio.save()
+
+            else:
+                audio = MutagenFile(file_path)
+                if audio and hasattr(audio, "tags") and audio.tags is not None:
+                    for key in list(audio.tags.keys()):
+                        if "APIC" in key or "covr" in key or "PIC" in key:
+                            del audio.tags[key]
+                    audio.save()
+
+            logger.info(f"Carátula eliminada con éxito de: {os.path.basename(file_path)}")
+
+        except Exception as e:
+            logger.error(f"Error al eliminar carátula de {os.path.basename(file_path)}: {str(e)}")
 
     # ------------------------------------------------------------------
     # Eliminación completa de metadatos
@@ -481,5 +490,6 @@ class AudioManager:
             output = io.BytesIO()
             image.save(output, format="JPEG", quality=95, optimize=True)
             return output.getvalue()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Error normalizando imagen (se devuelven bytes originales): {str(e)}")
             return image_bytes

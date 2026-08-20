@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dialogs import DialogManager
 from catalog_manager import CatalogManager
 from audio_manager import AudioManager
+from log_handler import LogManager
+
 
 class ProcessManager:
     def __init__(self, app):
@@ -78,6 +80,18 @@ class ProcessManager:
             if not file_path or not os.path.exists(file_path) or not values:
                 return
 
+            prev_vals = {
+                "Filename": str(values[0]) if len(values) > 0 else "",
+                "Artist": str(values[1]) if len(values) > 1 else "",
+                "Title": str(values[2]) if len(values) > 2 else "",
+                "MixArtist": str(values[3]) if len(values) > 3 else "",
+                "Album": str(values[4]) if len(values) > 4 else "",
+                "Genre": str(values[5]) if len(values) > 5 else "",
+                "Publisher": str(values[6]) if len(values) > 6 else "",
+                "Year": str(values[7]) if len(values) > 7 else "",
+                "Cover": str(values[8]) if len(values) > 8 else "No"
+            }
+
             # 1. Validación de campos de catálogo
             catalog_fields = (("Album", 4), ("Genre", 5), ("Publisher", 6))
             invalid_catalog_fields = []
@@ -100,10 +114,16 @@ class ProcessManager:
                     invalid_catalog_fields.append(field_name)
 
             if invalid_catalog_fields:
-                self.logger.info(
-                    f"Se limpiaron campos fuera de catálogo en '{os.path.basename(file_path)}': "
-                    f"{', '.join(invalid_catalog_fields)}"
+                clean_prev = {k: prev_vals[k] for k in invalid_catalog_fields}
+                clean_new = {k: "" for k in invalid_catalog_fields}
+                log_msg = LogManager.format_tree_log(
+                    context="PROCESS",
+                    action="Limpieza de Catálogo",
+                    filename=os.path.basename(file_path),
+                    prev_vals=clean_prev,
+                    new_vals=clean_new
                 )
+                self.logger.info(log_msg)
 
             # 2. Parseo y Normalización Local
             old_filename = os.path.basename(file_path)
@@ -153,7 +173,14 @@ class ProcessManager:
                         self.app.file_paths_map[row_id] = new_file_path
                     file_path = new_file_path
                     values[0] = new_filename
-                    self.logger.info(f"Renombrado archivo: '{old_filename}' -> '{new_filename}'")
+                    log_msg = LogManager.format_tree_log(
+                        context="PROCESS",
+                        action="Renombrado",
+                        filename=new_filename,
+                        prev_vals={"Filename": old_filename},
+                        new_vals={"Filename": new_filename}
+                    )
+                    self.logger.info(log_msg)
                 except Exception as e:
                     self.logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
 
@@ -174,7 +201,12 @@ class ProcessManager:
 
             # Modificación de metadatos mediante Discogs
             if already_has_cover and has_year:
-                self.logger.info(f"Omitida consulta a Discogs para '{new_filename}': ya dispone de Año y Carátula.")
+                log_msg = LogManager.format_tree_log(
+                    context="PROCESS",
+                    action="Omitida consulta Discogs",
+                    filename=new_filename
+                )
+                self.logger.info(log_msg)
                 values[8] = "Sí"
             else:
                 query_term = f"{artist_parsed} {title_parsed}".strip()
@@ -215,10 +247,36 @@ class ProcessManager:
                                 "filename": new_filename,
                                 "file_path": file_path,
                                 "images": all_images,
-                                "values": values
+                                "values": values,
+                                "prev_vals": prev_vals
                             })
                     else:
                         values[8] = "No"
+
+            new_vals = {
+                "Filename": str(values[0]) if len(values) > 0 else "",
+                "Artist": str(values[1]) if len(values) > 1 else "",
+                "Title": str(values[2]) if len(values) > 2 else "",
+                "MixArtist": str(values[3]) if len(values) > 3 else "",
+                "Album": str(values[4]) if len(values) > 4 else "",
+                "Genre": str(values[5]) if len(values) > 5 else "",
+                "Publisher": str(values[6]) if len(values) > 6 else "",
+                "Year": str(values[7]) if len(values) > 7 else "",
+                "Cover": str(values[8]) if len(values) > 8 else "No"
+            }
+
+            diff_prev = {k: v for k, v in prev_vals.items() if prev_vals[k] != new_vals[k]}
+            diff_new = {k: v for k, v in new_vals.items() if prev_vals[k] != new_vals[k]}
+
+            if diff_new and not (len(all_images) > 1 and getattr(self.app.catalog_manager, "manual_cover_selection", True)):
+                log_msg = LogManager.format_tree_log(
+                    context="PROCESS",
+                    action="Procesado",
+                    filename=new_filename,
+                    prev_vals=diff_prev,
+                    new_vals=diff_new
+                )
+                self.logger.info(log_msg)
 
             def _update_ui():
                 if self.app.tree.exists(row_id):
@@ -245,6 +303,7 @@ class ProcessManager:
                     row_id = item["row_id"]
                     file_path = item["file_path"]
                     values = item["values"]
+                    prev_vals = item.get("prev_vals", {})
                     chosen_url = selections.get(row_id)
 
                     if chosen_url and chosen_url != "__NO_COVER__":
@@ -263,6 +322,31 @@ class ProcessManager:
                     self.app.tree.item(row_id, values=values)
                     self.app.grid_panel.update_row_cover_status(row_id, values[8])
 
+                    new_vals = {
+                        "Filename": str(values[0]) if len(values) > 0 else "",
+                        "Artist": str(values[1]) if len(values) > 1 else "",
+                        "Title": str(values[2]) if len(values) > 2 else "",
+                        "MixArtist": str(values[3]) if len(values) > 3 else "",
+                        "Album": str(values[4]) if len(values) > 4 else "",
+                        "Genre": str(values[5]) if len(values) > 5 else "",
+                        "Publisher": str(values[6]) if len(values) > 6 else "",
+                        "Year": str(values[7]) if len(values) > 7 else "",
+                        "Cover": str(values[8]) if len(values) > 8 else "No"
+                    }
+
+                    diff_prev = {k: v for k, v in prev_vals.items() if prev_vals.get(k) != new_vals[k]}
+                    diff_new = {k: v for k, v in new_vals.items() if prev_vals.get(k) != new_vals[k]}
+
+                    if diff_new:
+                        log_msg = LogManager.format_tree_log(
+                            context="PROCESS",
+                            action="Procesado con Carátula",
+                            filename=os.path.basename(file_path),
+                            prev_vals=diff_prev,
+                            new_vals=diff_new
+                        )
+                        self.logger.info(log_msg)
+
             if hasattr(self.app, 'detail_panel') and hasattr(self.app.detail_panel, 'btn_process'):
                 self.app.detail_panel.btn_process.configure(state="normal", text="Procesar")
             if hasattr(self.app, 'detail_panel'):
@@ -275,16 +359,24 @@ class ProcessManager:
     def _apply_default_cover(self, file_path):
         """Lee la imagen por defecto, la incrusta físicamente en el archivo de audio y devuelve el estado."""
         default_bytes = self._get_default_cover_bytes()
+        filename = os.path.basename(file_path)
         if default_bytes:
             try:
                 normalized_bytes = AudioManager.normalize_cover_image_bytes(default_bytes)
                 if self.app.audio_manager.embed_cover_art_verified(file_path, normalized_bytes):
-                    self.logger.info(f"Aplicada e incrustada carátula por defecto para '{os.path.basename(file_path)}'")
+                    log_msg = LogManager.format_tree_log(
+                        context="PROCESS",
+                        action="Carátula por defecto aplicada",
+                        filename=filename,
+                        prev_vals={"Cover": "No"},
+                        new_vals={"Cover": "Sí"}
+                    )
+                    self.logger.info(log_msg)
                     return "Sí"
                 else:
-                    self.logger.error(f"Error al verificar la incrustación de la carátula por defecto en '{os.path.basename(file_path)}'")
+                    self.logger.error(f"Error al verificar la incrustación de la carátula por defecto en '{filename}'")
             except Exception as e:
-                self.logger.error(f"Excepción al procesar la carátula por defecto para '{os.path.basename(file_path)}': {e}")
+                self.logger.error(f"Excepción al procesar la carátula por defecto para '{filename}': {e}")
         else:
             self.logger.warning("No se pudo aplicar la carátula por defecto porque los bytes están vacíos.")
 
@@ -317,18 +409,48 @@ class ProcessManager:
             file_path = self.app.file_paths_map.get(row_id)
             if file_path and os.path.exists(file_path):
                 filename = os.path.basename(file_path)
+                values = list(self.app.tree.item(row_id, "values"))
+
+                prev_vals = {}
+                if values:
+                    prev_vals = {
+                        "Artist": str(values[1]) if len(values) > 1 else "",
+                        "Title": str(values[2]) if len(values) > 2 else "",
+                        "MixArtist": str(values[3]) if len(values) > 3 else "",
+                        "Album": str(values[4]) if len(values) > 4 else "",
+                        "Genre": str(values[5]) if len(values) > 5 else "",
+                        "Publisher": str(values[6]) if len(values) > 6 else "",
+                        "Year": str(values[7]) if len(values) > 7 else "",
+                        "Cover": str(values[8]) if len(values) > 8 else "No"
+                    }
 
                 # Limpieza total directa para evitar múltiples llamadas e inundación del log
                 self.app.audio_manager.clear_audio_file_metadata(file_path)
                 self.app.grid_panel.update_row_cover_status(row_id, "No")
 
-                values = list(self.app.tree.item(row_id, "values"))
                 if values:
                     new_values = [values[0], "", "", "", "", "", "", "", "No"]
                     self.app.tree.item(row_id, values=new_values)
 
-                # Un solo log limpio por cada archivo procesado
-                self.logger.info(f"Metadatos limpiados en: {filename}")
+                new_vals = {
+                    "Artist": "",
+                    "Title": "",
+                    "MixArtist": "",
+                    "Album": "",
+                    "Genre": "",
+                    "Publisher": "",
+                    "Year": "",
+                    "Cover": "No"
+                }
+
+                log_msg = LogManager.format_tree_log(
+                    context="PROCESS",
+                    action="Limpiar",
+                    filename=filename,
+                    prev_vals=prev_vals,
+                    new_vals=new_vals
+                )
+                self.logger.info(log_msg)
 
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)

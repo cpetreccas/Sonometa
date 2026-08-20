@@ -2,6 +2,7 @@ import json
 import logging
 import urllib.parse
 import urllib.request
+from http import HTTPStatus
 
 logger = logging.getLogger("Sonometa")
 
@@ -9,97 +10,86 @@ logger = logging.getLogger("Sonometa")
 class DiscogsClient:
 
     def __init__(self, token_getter):
-        """
-        :param token_getter: Función/callback que devuelve el token de Discogs actual.
-        """
         self._get_token = token_getter
 
     def _get_headers(self):
         headers = {
-            "User-Agent":
-                "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)"
+            "User-Agent": "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)"
         }
         token = self._get_token()
-        if token:
+        if token and not token.startswith("NO_TOKEN"):
             headers["Authorization"] = f"Discogs token={token}"
-        else:
-            logger.warning(
-                "No hay token de Discogs configurado. Las carátulas pueden no estar disponibles."
-            )
         return headers
 
     def search_release(self, query):
-        """Busca un lanzamiento de tipo 'Vinyl' en la API de Discogs por término de búsqueda.
-
-        Devuelve una tupla (artist, title, year, cover_url).
-        """
+        """Busca un lanzamiento en Discogs y devuelve (artist, title, year, cover_url)."""
         try:
             encoded_query = urllib.parse.quote(query)
             url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release"
             req = urllib.request.Request(url, headers=self._get_headers())
 
-            logger.info("--- [DISCOGS REQUEST (VINYL FILTER)] ---")
-            logger.info(f"URL: {url}")
-
             with urllib.request.urlopen(req, timeout=5) as response:
                 status_code = response.status
-                raw_response = response.read().decode("utf-8")
-                data = json.loads(raw_response)
+                status_phrase = HTTPStatus(status_code).phrase
 
-                logger.info(
-                    f"--- [DISCOGS RESPONSE] (Status Code: {status_code}) ---")
-
+                data = json.loads(response.read().decode("utf-8"))
                 results = data.get("results", [])
+
                 if results:
                     first_result = results[0]
                     title_full = first_result.get("title", "")
-                    cover_url = (first_result.get("cover_image")
-                                 or first_result.get("thumb") or "")
-                    year = first_result.get("year", "")
+                    cover_url = first_result.get("cover_image") or first_result.get("thumb") or ""
+                    year = first_result.get("year", "N/A")
 
-                    logger.info(
-                        f"Discogs encontró {len(results)} resultado(s). "
-                        f"Primero: '{title_full}' ({year}) | cover_url: '{cover_url}'"
-                    )
-
-                    artist = ""
-                    title = title_full
+                    artist, title = "", title_full
                     if " - " in title_full:
                         parts = title_full.split(" - ", 1)
-                        artist = parts[0].strip()
-                        title = parts[1].strip()
+                        artist, title = parts[0].strip(), parts[1].strip()
 
-                    return artist, title, year, cover_url
-                else:
-                    logger.warning(
-                        "Discogs no devolvió resultados para la búsqueda.")
+                    # Contamos cuántos resultados válidos traen imagen
+                    covers_count = sum(1 for r in results if r.get("cover_image") or r.get("thumb"))
+
+                    logger.info(
+                        f"[DISCOGS] [{status_code} {status_phrase}] '{query}' | "
+                        f"Año: {year} | Covers: {covers_count}"
+                    )
+                    return artist, title, str(year), cover_url
+
+                logger.warning(
+                    f"[DISCOGS] [{status_code} {status_phrase}] '{query}' | "
+                    f"Año: N/A | Covers: 0"
+                )
 
         except urllib.error.HTTPError as e:
-            logger.error(f"HTTPError Discogs API [{e.code}]: {e.reason}")
-        except urllib.error.URLError as e:
-            logger.error(f"URLError Discogs API: {e.reason}")
+            try:
+                phrase = HTTPStatus(e.code).phrase
+            except ValueError:
+                phrase = e.reason
+            logger.error(
+                f"[DISCOGS] [{e.code} {phrase}] '{query}' | "
+                f"Año: N/A | Covers: 0"
+            )
         except Exception as e:
-            logger.error(f"Error consultando la API de Discogs: {str(e)}")
+            logger.error(
+                f"[DISCOGS] [ERR {e.__class__.__name__}] '{query}' | "
+                f"Año: N/A | Covers: 0"
+            )
 
         return "", "", "", ""
 
     def download_image_bytes(self, image_url):
-        """Descarga una imagen de la URL especificada usando las cabeceras autenticadas."""
+        """Descarga los bytes de una imagen utilizando las cabeceras autenticadas."""
         try:
-            req = urllib.request.Request(
-                image_url, headers=self._get_headers())
+            req = urllib.request.Request(image_url, headers=self._get_headers())
             with urllib.request.urlopen(req, timeout=10) as response:
                 if response.status == 200:
-                    payload = response.read()
-                    return payload
+                    return response.read()
         except Exception as e:
-            logger.error(
-                f"Error descargando imagen de carátula ({image_url}): {str(e)}"
-            )
+            logger.error(f"[DISCOGS] Error descargando imagen ({image_url}): {str(e)}")
         return None
 
     def get_release_images(self, query, max_images=8):
-        """Busca un lanzamiento en Discogs y devuelve una lista limitada con las URLs de las carátulas disponibles."""
+        """Devuelve una lista con las URLs de las carátulas disponibles."""
         try:
             encoded_query = urllib.parse.quote(query)
             url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release&per_page={max_images}"
@@ -118,6 +108,6 @@ class DiscogsClient:
                             break
                     return images
         except Exception as e:
-            logger.error(f"Error obteniendo lista de imágenes de Discogs: {str(e)}")
+            logger.error(f"[DISCOGS] Error obteniendo lista de imágenes: {str(e)}")
 
         return []

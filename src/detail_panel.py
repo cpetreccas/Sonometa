@@ -10,6 +10,7 @@ from ui_utils import UiUtils
 from PIL import Image, ImageGrab
 from undo_manager import HistoryAction
 from audio_player import AudioPlayer
+from log_handler import LogManager
 
 
 class DetailPanel:
@@ -542,15 +543,19 @@ class DetailPanel:
 
             if file_path and os.path.exists(file_path):
                 self.app.audio_manager.save_single_tag(file_path, field_name, new_value, app=self.app)
+                filename = os.path.basename(file_path)
+                log_msg = LogManager.format_tree_log(
+                    context="DETAIL",
+                    action=f"Modificado campo multi '{field_name}' en",
+                    filename=filename,
+                    prev_vals={field_name: current_value},
+                    new_vals={field_name: new_value}
+                )
+                self.logger.info(log_msg)
                 updated += 1
 
         if batch_actions:
             self.app.undo_manager.record_action(batch_actions)
-
-        if updated:
-            self.logger.info(
-                f"Campo '{field_name}' aplicado a {updated} archivo(s) seleccionado(s): '{new_value}'"
-            )
 
     def display_multi_cover_placeholder(self, selected_rows=None):
         selected_rows = list(selected_rows or self.app.tree.selection())
@@ -692,6 +697,17 @@ class DetailPanel:
                 action = HistoryAction(file_path, row_id, col_name, col_index, current_val, new_value)
                 self.app.undo_manager.record_action(action)
 
+                if file_path:
+                    filename = os.path.basename(file_path)
+                    log_msg = LogManager.format_tree_log(
+                        context="DETAIL",
+                        action=f"Modificado catalogo '{col_name}' en",
+                        filename=filename,
+                        prev_vals={col_name: current_val},
+                        new_vals={col_name: new_value}
+                    )
+                    self.logger.info(log_msg)
+
             self.app.catalog_manager.apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
 
         self.refresh_catalog_comboboxes()
@@ -748,8 +764,15 @@ class DetailPanel:
 
         if file_path and os.path.exists(file_path):
             self.app.audio_manager.save_single_tag(file_path, col_name, new_value, app=self.app)
-
-        self.logger.info(f"Campo '{col_name}' actualizado: '{current_value}' -> '{new_value}'")
+            filename = os.path.basename(file_path)
+            log_msg = LogManager.format_tree_log(
+                context="DETAIL",
+                action=f"Modificado campo '{col_name}' en",
+                filename=filename,
+                prev_vals={col_name: current_value},
+                new_vals={col_name: new_value}
+            )
+            self.logger.info(log_msg)
 
     def clear_fields(self):
         if self.audio_player:
@@ -827,6 +850,15 @@ class DetailPanel:
                     if file_path:
                         self.app.audio_manager.embed_cover_art(file_path, image_bytes)
                         self.app.grid_panel.update_row_cover_status(item_id, "Sí")
+                        filename = os.path.basename(file_path)
+                        log_msg = LogManager.format_tree_log(
+                            context="DETAIL",
+                            action="Carátula pegada desde portapapeles en",
+                            filename=filename,
+                            prev_vals={"Cover": "Original"},
+                            new_vals={"Cover": "Clipboard"}
+                        )
+                        self.logger.info(log_msg)
 
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo pegar la imagen: {e}")
@@ -849,11 +881,18 @@ class DetailPanel:
             if file_path and os.path.exists(file_path):
                 self.app.audio_manager.embed_cover_art(file_path, generic_bytes)
                 self.app.grid_panel.update_row_cover_status(item_id, "Sí")
+                filename = os.path.basename(file_path)
+                log_msg = LogManager.format_tree_log(
+                    context="DETAIL",
+                    action="Aplicada carátula genérica a",
+                    filename=filename,
+                    prev_vals={"Cover": "Anterior"},
+                    new_vals={"Cover": "Genérica"}
+                )
+                self.logger.info(log_msg)
 
         if selected_items:
             self.display_cover_art(generic_bytes)
-
-        self.logger.info(f"Carátula genérica aplicada a {len(selected_items)} archivo(s).")
 
     def remove_cover_art(self):
         selected_rows = self.app.tree.selection()
@@ -870,9 +909,17 @@ class DetailPanel:
             if file_path and os.path.exists(file_path):
                 self.app.audio_manager.strip_cover_tags(file_path)
                 self.app.grid_panel.update_row_cover_status(row_id, "No")
+                filename = os.path.basename(file_path)
+                log_msg = LogManager.format_tree_log(
+                    context="DETAIL",
+                    action="Eliminada carátula de",
+                    filename=filename,
+                    prev_vals={"Cover": "Existente"},
+                    new_vals={"Cover": None}
+                )
+                self.logger.info(log_msg)
 
         self.display_cover_art(None)
-        self.logger.info("Carátula eliminada correctamente.")
 
     def load_process_icon(self):
         ruta_logo = UiUtils.get_resource_path("assets/logo_blanco.png")

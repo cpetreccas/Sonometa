@@ -1,5 +1,7 @@
 FUNCIONALIDADES:
 
+Generar botones corporativos con una guia de estilo unificada.
+
 Aumentar zoom (o tamaño de fuente) en el grid panel. Al hacer zoom se podría ajustar el ancho de las columnas?
 
 Repasar logs, hay demasiados.

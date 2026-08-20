@@ -351,6 +351,7 @@ class DialogManager:
 
     @staticmethod
     def show_themed_dialog(app, title, message, level="info", is_confirm=False, parent=None):
+        """Muestra un diálogo modal y devuelve forzosamente el foco a la app principal al cerrarse."""
         host = parent if parent is not None else app
         dialog = ctk.CTkToplevel(host)
         dialog.title(title)
@@ -404,12 +405,20 @@ class DialogManager:
                 fg_color="#374151", hover_color="#1F2937"
             ).pack(side="right", padx=(6, 0))
 
-        ctk.CTkButton(
+        btn_ok = ctk.CTkButton(
             btns, text="Aceptar", command=accept,
             fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER
-        ).pack(side="right")
+        )
+        btn_ok.pack(side="right")
+        btn_ok.focus()
 
+        # Espera a que el usuario cierre la ventana modal
         dialog.wait_window()
+
+        # Devuelve el foco a la app principal para reactivar los eventos de teclado
+        if app and app.winfo_exists():
+            app.focus_force()
+
         return result["value"]
 
     @staticmethod
@@ -417,7 +426,7 @@ class DialogManager:
         DialogManager.show_themed_dialog(
             app,
             "Acerca de Sonometa",
-            "Sonometa v0.08 - Audio Tag Suite\n\n"
+            "Sonometa v0.07 - Audio Tag Suite\n\n"
             "Herramienta avanzada para la automatización y gestión de metadatos de audio.\n"
             "Integración con API Discogs para vinilos y soporte nativo de ID3, FLAC y MP4.",
             level="info"
@@ -571,9 +580,6 @@ class DialogManager:
 
     @staticmethod
     def open_unified_catalog_manager(app):
-        """Abre el Gestor Unificado de Catálogos con soporte para múltiples selecciones, edición modal y relaciones."""
-        app.logger.info("Abriendo gestión unificada de catálogos con relaciones.")
-
         win = ctk.CTkToplevel(app)
         win.title("Gestor Unificado de Catálogos")
         win.geometry("820x600")
