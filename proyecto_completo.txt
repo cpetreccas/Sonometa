@@ -1892,7 +1892,7 @@ class DialogManager:
         DialogManager.show_themed_dialog(
             app,
             "Acerca de Sonometa",
-            "Sonometa v0.07 - Audio Tag Suite\n\n"
+            "Sonometa v0.08 - Audio Tag Suite\n\n"
             "Herramienta avanzada para la automatizaciÃ³n y gestiÃ³n de metadatos de audio.\n"
             "IntegraciÃ³n con API Discogs para vinilos y soporte nativo de ID3, FLAC y MP4.",
             level="info"
@@ -3673,7 +3673,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v0.07 - Audio Tag Suite")
+        self.title("Sonometa v0.08 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))

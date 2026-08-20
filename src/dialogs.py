@@ -417,7 +417,7 @@ class DialogManager:
         DialogManager.show_themed_dialog(
             app,
             "Acerca de Sonometa",
-            "Sonometa v0.07 - Audio Tag Suite\n\n"
+            "Sonometa v0.08 - Audio Tag Suite\n\n"
             "Herramienta avanzada para la automatización y gestión de metadatos de audio.\n"
             "Integración con API Discogs para vinilos y soporte nativo de ID3, FLAC y MP4.",
             level="info"
