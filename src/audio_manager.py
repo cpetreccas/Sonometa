@@ -102,13 +102,18 @@ class AudioManager:
     # Escritura de etiquetas de texto
     # ------------------------------------------------------------------
 
-    def save_single_tag(self, file_path, field_name, new_value):
+    def save_single_tag(self, file_path, field_name, new_value, app=None):
         """Guarda (o elimina) una única etiqueta de texto en el archivo de audio."""
         from mutagen.id3 import (
             ID3, TIT2, TPE1, TPE4, TALB, TCON, TPUB, TDRC, ID3NoHeaderError,
         )
         from mutagen.wave import WAVE
         from mutagen import File as MutagenFile
+
+        # Asegurar la liberación de recursos de audio antes de escribir con mutagen
+        was_playing, saved_pos = False, 0.0
+        if app and hasattr(app, "detail_panel") and app.detail_panel.audio_player:
+            was_playing, saved_pos = app.detail_panel.audio_player.prepare_for_file_write()
 
         ext = os.path.splitext(file_path)[1].lower()
 
@@ -150,7 +155,6 @@ class AudioManager:
                 if ext == ".wav" and audio_wav is not None:
                     audio_wav.save()
                 else:
-                    # v2_version=4 es crítico para escribir correctamente los tags
                     if is_new_id3:
                         audio_tags.save(file_path, v2_version=4)
                     else:
@@ -189,6 +193,10 @@ class AudioManager:
 
         except Exception as e:
             logger.error(f"Error al guardar etiqueta '{field_name}': {str(e)}")
+
+        finally:
+            if app and hasattr(app, "detail_panel") and app.detail_panel.audio_player:
+                app.detail_panel.audio_player.resume_after_file_write(file_path, was_playing, saved_pos)
 
     # ------------------------------------------------------------------
     # Carátulas (escritura / eliminación)
@@ -336,7 +344,6 @@ class AudioManager:
     # ------------------------------------------------------------------
     # Eliminación completa de metadatos
     # ------------------------------------------------------------------
-
 
     def scan_audio_files(self, folder):
         """Escanea recursivamente una carpeta y devuelve una lista de diccionarios con

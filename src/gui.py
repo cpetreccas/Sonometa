@@ -223,6 +223,8 @@ class App(ctk.CTk):
         self.logger.info("Lista y estado limpiados.")
 
     def on_close(self):
+        if hasattr(self, "detail_panel") and self.detail_panel.audio_player:
+            self.detail_panel.audio_player.stop_and_unload()
         self.catalog_manager.save_catalog_values()
         self.destroy()
 

@@ -9,6 +9,7 @@ import customtkinter as ctk
 from ui_utils import UiUtils
 from PIL import Image, ImageGrab
 from undo_manager import HistoryAction
+from audio_player import AudioPlayer
 
 
 class DetailPanel:
@@ -41,7 +42,15 @@ class DetailPanel:
         self.btn_process = None
         self.btn_clean = None
 
+        # Componentes del Reproductor de Audio
+        self.frame_player = None
+        self.btn_play = None
+        self.slider_audio = None
+        self.lbl_audio_time = None
+        self.audio_player = None
+
         self._setup_tag_panel()
+        self.audio_player = AudioPlayer(self)
 
     def _track_editing_row(self, event=None):
         """Memoriza la fila actualmente seleccionada cuando un campo recibe el foco."""
@@ -206,10 +215,10 @@ class DetailPanel:
                 anchor="w",
                 font=ctk.CTkFont(family="Inter", size=11, weight="bold")
             )
-            lbl.pack(fill="x", padx=10, pady=(8, 2))
+            lbl.pack(fill="x", padx=10, pady=(6, 2))
 
             field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-            field_frame.pack(fill="x", padx=10, pady=(0, 4))
+            field_frame.pack(fill="x", padx=10, pady=(0, 2))
 
             if attr_name in self.panel_combo_fields:
                 catalog_key = self.panel_combo_fields[attr_name]
@@ -267,7 +276,6 @@ class DetailPanel:
             multi_widget.bind("<FocusIn>", lambda _e, _w=multi_widget: self._on_widget_focus_in(_w))
 
             if not is_catalog:
-                # Si es un campo de texto en multiedición, guardar valor al perder foco o pulsar Enter
                 multi_widget.bind(
                     "<FocusOut>",
                     lambda _e, _w=multi_widget, _a=attr_name: (
@@ -294,24 +302,64 @@ class DetailPanel:
             anchor="w",
             font=ctk.CTkFont(size=11, weight="bold")
         )
-        lbl_cover_title.pack(fill="x", padx=5, pady=(8, 2))
+        lbl_cover_title.pack(fill="x", padx=10, pady=(6, 2))
 
         self.label_cover = ctk.CTkLabel(
             self.frame_sidebar,
             text="Sin carátula",
-            width=180,
-            height=180,
+            width=160,
+            height=160,
             fg_color="transparent",
             text_color="gray",
             border_color="#6B7280",
             border_width=1,
             cursor="hand2"
         )
-        self.label_cover.pack(padx=5, pady=5)
+        self.label_cover.pack(padx=5, pady=2)
         UiUtils(self.label_cover, "Clic derecho para opciones de carátula")
 
         # Menús contextuales de carátula
         self._setup_cover_context_menus()
+
+        # --- SECCIÓN MINI REPRODUCTOR DE AUDIO ---
+        self.frame_player = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
+        self.frame_player.pack(fill="x", padx=10, pady=(12, 6))
+
+        player_top = ctk.CTkFrame(self.frame_player, fg_color="transparent")
+        player_top.pack(fill="x")
+
+        self.btn_play = ctk.CTkButton(
+            player_top,
+            text="▶",
+            width=32,
+            height=28,
+            fg_color=self.app.CORP_COLOR,
+            hover_color="#581C87",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=lambda: self.audio_player.toggle_play_pause() if self.audio_player else None
+        )
+        self.btn_play.pack(side="left", padx=(0, 5))
+
+        self.slider_audio = ctk.CTkSlider(
+            player_top,
+            from_=0,
+            to=1,
+            height=14,
+            progress_color=self.app.CORP_COLOR,
+            button_color="#FFFFFF",
+            button_hover_color="#E0E0E0",
+            command=lambda val: self.audio_player.on_seek_end(val) if self.audio_player else None
+        )
+        self.slider_audio.set(0)
+        self.slider_audio.pack(side="left", fill="x", expand=True)
+
+        self.lbl_audio_time = ctk.CTkLabel(
+            self.frame_player,
+            text="00:00 / 00:00",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        )
+        self.lbl_audio_time.pack(fill="x", pady=(2, 0))
 
         # --- BOTONES DE ACCIÓN ---
         self.btn_process = ctk.CTkButton(
@@ -320,14 +368,14 @@ class DetailPanel:
             image=self.app.process_icon,
             compound="left",
             fg_color=self.app.CORP_COLOR,
-            hover_color="#6D28D9",  # Color más claro para visualizar hover
+            hover_color="#6D28D9",
             border_width=2,
             border_color=self.app.CORP_COLOR,
             font=ctk.CTkFont(size=13, weight="bold"),
-            height=34,
+            height=32,
             command=self.app.process_manager.process_discogs_data
         )
-        self.btn_process.pack(fill="x", padx=5, pady=(6, 10))
+        self.btn_process.pack(fill="x", padx=10, pady=(4, 6))
         UiUtils(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
 
         # Efectos hover y ejecución por teclado en btn_process
@@ -348,13 +396,12 @@ class DetailPanel:
             hover_color=("#FEE2E2", "#450A0A"),
             corner_radius=8,
             font=ctk.CTkFont(size=13, weight="bold"),
-            height=34,
+            height=32,
             command=lambda: self.app.process_manager.clear_selected_metadata()
         )
-        self.btn_clean.pack(fill="x", padx=5, pady=(0, 10))
+        self.btn_clean.pack(fill="x", padx=10, pady=(0, 6))
         UiUtils(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
 
-        # Ejecución por teclado en btn_clean
         self.btn_clean.bind("<Return>", lambda _e: self.app.process_manager.clear_selected_metadata())
         self.btn_clean.bind("<space>", lambda _e: self.app.process_manager.clear_selected_metadata())
 
@@ -381,6 +428,12 @@ class DetailPanel:
         return result
 
     def enter_multi_mode(self, selected_rows):
+        if self.audio_player:
+            self.audio_player.stop_and_unload()
+            self.btn_play.configure(state="disabled", fg_color="gray")
+            self.slider_audio.configure(state="disabled")
+            self.lbl_audio_time.configure(text="Multiedición activa")
+
         if not self.multi_entries:
             return
 
@@ -421,6 +474,11 @@ class DetailPanel:
         self.display_multi_cover_placeholder(selected_rows=selected_rows)
 
     def exit_multi_mode(self):
+        if self.btn_play:
+            self.btn_play.configure(state="normal", fg_color=self.app.CORP_COLOR)
+            self.slider_audio.configure(state="normal")
+            self.lbl_audio_time.configure(text="00:00 / 00:00")
+
         if not self.multi_entries:
             return
 
@@ -483,7 +541,7 @@ class DetailPanel:
             self.app.tree.item(row_id, values=values)
 
             if file_path and os.path.exists(file_path):
-                self.app.audio_manager.save_single_tag(file_path, field_name, new_value)
+                self.app.audio_manager.save_single_tag(file_path, field_name, new_value, app=self.app)
                 updated += 1
 
         if batch_actions:
@@ -523,9 +581,9 @@ class DetailPanel:
                 if img.mode not in ("RGB", "RGBA"):
                     img = img.convert("RGB")
 
-                img = img.resize((180, 180), Image.Resampling.LANCZOS)
+                img = img.resize((160, 160), Image.Resampling.LANCZOS)
 
-                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(180, 180))
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(160, 160))
                 self.label_cover.configure(image=ctk_img, text="")
                 self.label_cover.image = ctk_img
                 return
@@ -543,7 +601,6 @@ class DetailPanel:
             menu.grab_release()
 
     def refresh_catalog_comboboxes(self):
-        """Actualiza las opciones permitidas en cascada (Álbum -> Género -> Etiqueta) y fuerza la limpieza en cadena."""
         clear_opt = getattr(self.app, "CLEAR_OPTION", "--- Vaciar ---")
         row_id = self._get_target_row_id()
 
@@ -604,7 +661,6 @@ class DetailPanel:
         widget.insert(0, value_str)
 
     def _get_target_row_id(self):
-        """Obtiene la fila objetivo: la memorizada durante la edición o la actualmente seleccionada."""
         if self._editing_row_id and self.app.tree.exists(self._editing_row_id):
             target = self._editing_row_id
             self._editing_row_id = None
@@ -691,11 +747,14 @@ class DetailPanel:
         self.app.tree.item(row_id, values=values)
 
         if file_path and os.path.exists(file_path):
-            self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
+            self.app.audio_manager.save_single_tag(file_path, col_name, new_value, app=self.app)
 
         self.logger.info(f"Campo '{col_name}' actualizado: '{current_value}' -> '{new_value}'")
 
     def clear_fields(self):
+        if self.audio_player:
+            self.audio_player.stop_and_unload()
+
         self._editing_row_id = None
         for widget in self.tag_entries.values():
             if isinstance(widget, ctk.CTkComboBox):
@@ -718,6 +777,8 @@ class DetailPanel:
             self.exit_multi_mode()
 
         if not selected:
+            if self.audio_player:
+                self.audio_player.stop_and_unload()
             return
 
         item_id = selected[0]
@@ -740,6 +801,8 @@ class DetailPanel:
         file_path = self.app.file_paths_map.get(item_id)
         if file_path:
             self.display_cover_art(file_path)
+            if self.audio_player:
+                self.audio_player.load_track(file_path)
 
     def paste_cover_from_clipboard(self, event=None):
         try:

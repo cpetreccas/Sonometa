@@ -1,5 +1,11 @@
 FUNCIONALIDADES:
 
+Preescucha de audios en detail panel
+
+Aumentar zoom (o tamaño de fuente) en el grid panel.
+
+Leer metadatos de Traktor (Analizado Si/No - Número de Cues)
+
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
 Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
