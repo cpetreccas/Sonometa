@@ -317,27 +317,42 @@ class GridPanel:
 
         managed_grid_fields = {"Album", "Genre", "Publisher"}
 
+        # Estilo oscuro para el Combobox nativo
+        style = ttk.Style()
+        style.configure(
+            "DarkGrid.TCombobox",
+            fieldbackground="#2B2B2B",
+            background="#3A3A3A",
+            foreground="#FFFFFF",
+            darkcolor="#2B2B2B",
+            lightcolor="#2B2B2B",
+            arrowcolor="#FFFFFF",
+            insertcolor="#FFFFFF"
+        )
+        style.map(
+            "DarkGrid.TCombobox",
+            fieldbackground=[("readonly", "#2B2B2B")],
+            selectbackground=[("readonly", "#7B2CBF")],
+            selectforeground=[("readonly", "#FFFFFF")]
+        )
+
         if col_name in managed_grid_fields:
             if col_name == "Publisher":
                 current_genre = str(row_values[5]).strip() if len(row_values) > 5 else ""
-
                 if hasattr(self.app.catalog_manager, "get_allowed_publishers_for_genre") and current_genre:
                     base_values = self.app.catalog_manager.get_allowed_publishers_for_genre(current_genre)
                 elif hasattr(self.app.catalog_manager, "get_publishers_by_genre") and current_genre:
                     base_values = self.app.catalog_manager.get_publishers_by_genre(current_genre)
                 else:
                     base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
-
             elif col_name == "Genre":
                 current_album = str(row_values[4]).strip() if len(row_values) > 4 else ""
-
                 if hasattr(self.app.catalog_manager, "get_allowed_genres_for_album") and current_album:
                     base_values = self.app.catalog_manager.get_allowed_genres_for_album(current_album)
                 elif hasattr(self.app.catalog_manager, "get_genres_by_album") and current_album:
                     base_values = self.app.catalog_manager.get_genres_by_album(current_album)
                 else:
                     base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
-
             else:
                 base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
 
@@ -347,11 +362,27 @@ class GridPanel:
                 self.tree,
                 state="readonly",
                 values=combo_values,
-                style=self.tree_edit_combo_style,
+                style="DarkGrid.TCombobox",
                 exportselection=False
             )
+
+            # Personalizar colores de la lista flotante
+            self.app.option_add("*TCombobox*Listbox.background", "#2B2B2B")
+            self.app.option_add("*TCombobox*Listbox.foreground", "#FFFFFF")
+            self.app.option_add("*TCombobox*Listbox.selectBackground", "#7B2CBF")
+            self.app.option_add("*TCombobox*Listbox.selectForeground", "#FFFFFF")
         else:
-            entry = ttk.Entry(self.tree)
+            entry = tk.Entry(
+                self.tree,
+                bg="#2B2B2B",
+                fg="#FFFFFF",
+                insertbackground="#FFFFFF",
+                relief="solid",
+                borderwidth=1,
+                highlightthickness=1,
+                highlightbackground="#7B2CBF",
+                highlightcolor="#7B2CBF"
+            )
 
         entry._is_cell_editing = True
 
@@ -377,11 +408,13 @@ class GridPanel:
 
         if col_name not in managed_grid_fields:
             entry.select_range(0, "end")
+
         entry.focus_set()
         entry.place(x=x, y=y, width=w, height=h)
-        if col_name in managed_grid_fields:
-            if open_dropdown:
-                entry.after(50, lambda w=entry: self._open_tree_combo_dropdown(w) if w.winfo_exists() else None)
+
+        # Usar el método seguro de apertura
+        if col_name in managed_grid_fields and open_dropdown:
+            entry.after(50, lambda: self._open_tree_combo_dropdown(entry) if entry.winfo_exists() else None)
 
         finalized = False
 
@@ -390,6 +423,7 @@ class GridPanel:
             if finalized:
                 return True
             finalized = True
+
             self._close_tree_combo_dropdown(entry)
             new_value = entry.get().strip()
 
@@ -399,7 +433,7 @@ class GridPanel:
             entry.destroy()
             self.cell_entry = None
 
-            # Forzar el foco de inmediato en el Treeview
+            # Garantizar que el foco regrese al Treeview
             self.tree.focus_set()
             if row_id and self.tree.exists(row_id):
                 self.tree.selection_set(row_id)
@@ -543,6 +577,7 @@ class GridPanel:
             if finalized:
                 return "break"
             finalized = True
+
             self._close_tree_combo_dropdown(entry)
 
             if hasattr(entry, "_is_cell_editing"):
@@ -569,86 +604,20 @@ class GridPanel:
                     self.app.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
             return "break"
 
-        combo_type_state = {"buffer": "", "last_ts": 0.0, "matches": [], "match_idx": 0}
-
-        def on_combo_type_search(evt=None):
-            if col_name not in managed_grid_fields or evt is None:
-                return
-
-            if evt.keysym in {"Return", "KP_Enter", "Tab", "ISO_Left_Tab", "Up", "Down", "Left", "Right", "Escape"}:
-                return
-
-            values = [str(v) for v in entry.cget("values") if str(v) != self.app.CLEAR_OPTION]
-            if not values:
-                return "break"
-
-            now = time.monotonic()
-            if now - combo_type_state["last_ts"] > 1.0:
-                combo_type_state["buffer"] = ""
-            combo_type_state["last_ts"] = now
-
-            if evt.keysym == "BackSpace":
-                combo_type_state["buffer"] = combo_type_state["buffer"][:-1]
-            else:
-                char = evt.char or ""
-                if not char.isprintable() or char.isspace():
-                    return "break"
-                combo_type_state["buffer"] += char.lower()
-
-            if not combo_type_state["buffer"]:
-                return "break"
-
-            buffer = combo_type_state["buffer"]
-            matches = [v for v in values if v.lower().startswith(buffer)] or [v for v in values if buffer in v.lower()]
-            combo_type_state["matches"] = matches
-            combo_type_state["match_idx"] = 0
-            if matches:
-                match = matches[0]
-                try:
-                    idx = list(entry.cget("values")).index(match)
-                    entry.current(idx)
-                except Exception:
-                    entry.set(match)
-
-            return "break"
-
-        def on_combo_cycle(forward=True):
-            matches = combo_type_state.get("matches", [])
-            if not matches:
-                if forward:
-                    self._open_tree_combo_dropdown(entry)
-                return "break"
-
-            idx = combo_type_state["match_idx"]
-            idx = (idx + 1) % len(matches) if forward else (idx - 1) % len(matches)
-            combo_type_state["match_idx"] = idx
-            match = matches[idx]
-            try:
-                all_values = list(entry.cget("values"))
-                entry.current(all_values.index(match))
-            except Exception:
-                entry.set(match)
-            return "break"
-
-        def clear_combo_value(evt=None):
-            if col_name not in managed_grid_fields:
-                return
-            combo_type_state["buffer"] = ""
-            combo_type_state["matches"] = []
-            combo_type_state["match_idx"] = 0
-            entry.set("")
-            save_edit()
-            return "break"
-
         def on_focus_out(evt=None):
             def commit_if_closed():
+                if not entry.winfo_exists():
+                    return
+                # Ignorar el FocusOut si la lista desplegable flotante está abierta
                 if col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry):
                     return
                 save_edit()
 
-            entry.after(120, commit_if_closed)
+            entry.after(150, commit_if_closed)
 
-        # Mapeos directos de navegación en el widget de entrada (evita fugas al detail panel)
+        if col_name in managed_grid_fields:
+            entry.bind("<<ComboboxSelected>>", lambda _e: save_edit())
+
         entry.bind("<Return>", lambda _e: navigate("enter"))
         entry.bind("<KP_Enter>", lambda _e: navigate("enter"))
         entry.bind("<Shift-Return>", lambda _e: navigate("shift_enter"))
@@ -656,17 +625,8 @@ class GridPanel:
         entry.bind("<Shift-Tab>", lambda _e: navigate("shift_tab"))
         entry.bind("<ISO_Left_Tab>", lambda _e: navigate("shift_tab"))
         entry.bind("<Escape>", cancel_edit)
-
-        if col_name in managed_grid_fields:
-            entry.bind("<KeyPress>", on_combo_type_search)
-            entry.bind("<space>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
-            entry.bind("<Down>", lambda _e: on_combo_cycle(forward=True))
-            entry.bind("<Up>", lambda _e: on_combo_cycle(forward=False))
-            entry.bind("<Delete>", clear_combo_value)
-            entry.bind("<KP_Delete>", clear_combo_value)
-            entry.bind("<BackSpace>", clear_combo_value)
-
         entry.bind("<FocusOut>", on_focus_out)
+
         self.cell_entry = entry
 
     def filter_rows_by_traktor(self, only_unanalyzed=False, cues_under_2=False):
