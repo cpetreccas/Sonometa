@@ -135,23 +135,25 @@ class GridPanel:
         self.tree.bind("<<TreeviewSelect>>", lambda event: self.app.detail_panel.on_row_select(event))
         self.tree.bind("<Double-1>", self.on_cell_double_click)
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
-        self.tree.bind("<Return>", self._on_tree_enter_press)
-        self.tree.bind("<KP_Enter>", self._on_tree_enter_press)
-        self.tree.bind(btn_right, self._show_tree_context_menu)
-        self.tree.bind("<Delete>", self._on_tree_delete_press)
-        self.tree.bind("<KP_Delete>", self._on_tree_delete_press)
-        self.tree.bind("<Home>", lambda e: self._handle_excel_navigation(e, move_to="home", select_range=False))
-        self.tree.bind("<End>", lambda e: self._handle_excel_navigation(e, move_to="end", select_range=False))
-        self.tree.bind("<Shift-Home>", lambda e: self._handle_excel_navigation(e, move_to="home", select_range=True))
-        self.tree.bind("<Shift-End>", lambda e: self._handle_excel_navigation(e, move_to="end", select_range=True))
-        self.tree.bind("<Up>", lambda e: self._handle_key_navigation(e, direction="up", select_range=False))
-        self.tree.bind("<Down>", lambda e: self._handle_key_navigation(e, direction="down", select_range=False))
-        self.tree.bind("<Shift-Up>", lambda e: self._handle_key_navigation(e, direction="up", select_range=True))
-        self.tree.bind("<Shift-Down>", lambda e: self._handle_key_navigation(e, direction="down", select_range=True))
-        self.tree.bind("<Prior>", lambda e: self._handle_page_navigation(e, direction="up", select_range=False))
-        self.tree.bind("<Next>", lambda e: self._handle_page_navigation(e, direction="down", select_range=False))
-        self.tree.bind("<Shift-Prior>", lambda e: self._handle_page_navigation(e, direction="up", select_range=True))
-        self.tree.bind("<Shift-Next>", lambda e: self._handle_page_navigation(e, direction="down", select_range=True))
+        
+        self.app.bind("<Return>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
+        self.app.bind("<KP_Enter>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
+
+        self.app.bind("<Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
+        self.app.bind("<KP_Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
+
+        # Navegación
+        self.app.bind("<Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=False))
+        self.app.bind("<Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=False))
+        self.app.bind("<Shift-Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=True))
+        self.app.bind("<Shift-Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=True))
+
+        self.app.bind("<Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=False))
+        self.app.bind("<End>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="end", select_range=False))
+
+        # Paginación
+        self.app.bind("<Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=False))
+        self.app.bind("<Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=False))
 
         # Crear Scrollbars
         self.vsb = ttk.Scrollbar(self.frame_grid, orient="vertical", command=self.tree.yview)
@@ -861,3 +863,20 @@ class GridPanel:
         # Actualizar panel de detalles lateral
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)
+
+    def _safe_grid_action(self, event, action_func, **kwargs):
+        """
+        Verifica si el foco está en un campo de texto antes de ejecutar acciones del grid.
+        """
+        # Identificar qué tipo de widget tiene el foco actualmente
+        try:
+            widget_class = event.widget.winfo_class()
+        except AttributeError:
+            widget_class = ""
+
+        # Si el usuario está escribiendo en un Entry o Combobox, no interceptar el atajo
+        if widget_class in ("Entry", "TCombobox", "Text"):
+            return
+
+        # Si no está en un campo de texto, ejecutar la acción de navegación/borrado
+        return action_func(event, **kwargs)

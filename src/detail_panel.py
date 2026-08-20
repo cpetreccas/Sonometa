@@ -51,106 +51,85 @@ class DetailPanel:
         else:
             self._editing_row_id = None
 
-    def _setup_tag_panel(self):
-        self.frame_sidebar = ctk.CTkFrame(self.parent, width=260)
-        self.frame_sidebar.pack(side="left", fill="y", padx=(0, 5), pady=0)
-        self.frame_sidebar.pack_propagate(False)
+    def _on_widget_focus_in(self, widget, event=None):
+        """Aplica el borde morado corporativo al recibir el foco."""
+        self._track_editing_row(event)
+        try:
+            widget.configure(border_color=self.app.CORP_COLOR, border_width=2)
+        except Exception:
+            pass
 
-        fields = [
-            ("Intérprete", "entry_artist"),
-            ("Título", "entry_title"),
-            ("Remix", "entry_mixartist"),
-            ("Año", "entry_year"),
-            ("Álbum", "entry_album"),
-            ("Género", "entry_genre"),
-            ("Etiqueta", "entry_publisher")
-        ]
-
-        for label_text, attr_name in fields:
-            lbl = ctk.CTkLabel(
-                self.frame_sidebar,
-                text=label_text,
-                anchor="w",
-                font=ctk.CTkFont(family="Inter", size=11, weight="bold")
-            )
-            lbl.pack(fill="x", padx=10, pady=(8, 2))
-
-            field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-            field_frame.pack(fill="x", padx=10, pady=(0, 4))
-
-            if attr_name in self.panel_combo_fields:
-                catalog_key = self.panel_combo_fields[attr_name]
-                widget = ctk.CTkComboBox(
-                    field_frame,
-                    values=self.app.catalog_manager.get_catalog_combo_values(catalog_key),
-                    state="readonly",
-                    height=26,
-                    font=ctk.CTkFont(family="Inter", size=12),
-                    command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
-                )
-                widget.set("")
-                widget.bind("<FocusIn>", self._track_editing_row)
-                widget.bind("<Button-1>", lambda _e, _w=widget: self.on_panel_combo_click(_w))
-                widget.bind(
-                    "<FocusOut>",
-                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_focus_out(_attr, _cat)
-                )
-                widget.bind(
-                    "<Return>",
-                    lambda _e, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_enter(_attr, _cat)
-                )
+    def _on_widget_focus_out(self, widget, attr_name=None, is_combo=False, event=None):
+        """Restaura el borde original al perder el foco y procesa cambios."""
+        try:
+            if widget == self.btn_clean:
+                widget.configure(border_color="#DC2626", border_width=1)
+            elif widget == self.btn_process:
+                widget.configure(border_color=self.app.CORP_COLOR, border_width=1)
             else:
-                widget = ctk.CTkEntry(field_frame, height=26, font=ctk.CTkFont(family="Inter", size=12))
-                widget.bind("<FocusIn>", self._track_editing_row)
-                widget.bind("<FocusOut>", lambda _e, _attr=attr_name: self.on_panel_text_field_commit(_attr))
-                widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
+                widget.configure(border_color="#565B5E", border_width=1)
+        except Exception:
+            pass
 
-            widget.pack(fill="x")
-            self.tag_entries[attr_name] = widget
+        if attr_name:
+            if is_combo:
+                catalog_key = self.panel_combo_fields.get(attr_name)
+                self.on_panel_catalog_focus_out(attr_name, catalog_key)
+            else:
+                self.on_panel_text_field_commit(attr_name)
 
-            is_catalog = attr_name in self.panel_combo_fields
-            multi_state = "readonly" if is_catalog else "normal"
-            multi_widget = ctk.CTkComboBox(
-                field_frame,
-                values=[self.app.KEEP_VALUE],
-                state=multi_state,
-                height=26,
-                font=ctk.CTkFont(size=12),
-                command=lambda _value, _a=attr_name: self.on_multi_panel_commit(_a)
-            )
-            if not is_catalog:
-                multi_widget.bind(
-                    "<Return>",
-                    lambda _e, _a=attr_name: self.on_multi_panel_commit(_a) or "break"
-                )
-                multi_widget.bind(
-                    "<FocusOut>",
-                    lambda _e, _a=attr_name: self.app.after(80, lambda: self.on_multi_panel_commit(_a))
-                )
-            self.multi_entries[attr_name] = multi_widget
+    def _toggle_combo_dropdown(self, combo_widget):
+        """Abre o cierra el menú desplegable del CTkComboBox."""
+        try:
+            combo_widget.focus_set()
+            if hasattr(combo_widget, "_dropdown_menu") and combo_widget._dropdown_menu.winfo_ismapped():
+                combo_widget._dropdown_menu.withdraw()
+            else:
+                combo_widget._open_dropdown_menu()
+        except Exception:
+            pass
+        return "break"
 
-        lbl_cover_title = ctk.CTkLabel(
-            self.frame_sidebar,
-            text="Carátula",
-            anchor="w",
-            font=ctk.CTkFont(size=11, weight="bold")
-        )
-        lbl_cover_title.pack(fill="x", padx=5, pady=(8, 2))
+    def _on_combo_return(self, combo_widget, attr_name, catalog_key, event=None):
+        """Cierra el menú desplegable, confirma el valor y mantiene el foco en el combo."""
+        try:
+            if hasattr(combo_widget, "_dropdown_menu") and combo_widget._dropdown_menu.winfo_ismapped():
+                combo_widget._dropdown_menu.withdraw()
+        except Exception:
+            pass
 
-        self.label_cover = ctk.CTkLabel(
-            self.frame_sidebar,
-            text="Sin carátula",
-            width=180,
-            height=180,
-            fg_color="transparent",
-            text_color="gray",
-            border_color="#6B7280",
-            border_width=1,
-            cursor="hand2"
-        )
-        self.label_cover.pack(padx=5, pady=5)
-        UiUtils(self.label_cover, "Clic derecho para opciones de carátula")
+        self.on_panel_catalog_selected(attr_name, catalog_key)
+        combo_widget.focus_set()
+        return "break"
 
+    def _focus_next_widget(self, current_widget, event=None):
+        """Salto limpio al siguiente campo ignorando submódulos internos."""
+        focused = current_widget.focus_get()
+        if focused is None:
+            focused = current_widget
+        next_w = focused.tk_focusNext()
+
+        if hasattr(current_widget, "_entry") and (next_w == current_widget or next_w == current_widget._entry):
+            next_w = next_w.tk_focusNext()
+
+        next_w.focus_set()
+        return "break"
+
+    def _focus_prev_widget(self, current_widget, event=None):
+        """Salto limpio al campo anterior ignorando submódulos internos."""
+        focused = current_widget.focus_get()
+        if focused is None:
+            focused = current_widget
+        prev_w = focused.tk_focusPrev()
+
+        if hasattr(current_widget, "_entry") and (prev_w == current_widget or prev_w == current_widget._entry):
+            prev_w = prev_w.tk_focusPrev()
+
+        prev_w.focus_set()
+        return "break"
+
+    def _setup_cover_context_menus(self):
+        """Inicializa los menús contextuales de la carátula para modo individual y múltiple."""
         self._cover_context_menu = tk.Menu(
             self.app,
             tearoff=0,
@@ -205,19 +184,157 @@ class DetailPanel:
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.label_cover.bind(btn_right, self.show_cover_context_menu)
 
+    def _setup_tag_panel(self):
+        self.frame_sidebar = ctk.CTkFrame(self.parent, width=260)
+        self.frame_sidebar.pack(side="left", fill="y", padx=(0, 5), pady=0)
+        self.frame_sidebar.pack_propagate(False)
+
+        fields = [
+            ("Intérprete", "entry_artist"),
+            ("Título", "entry_title"),
+            ("Remix", "entry_mixartist"),
+            ("Año", "entry_year"),
+            ("Álbum", "entry_album"),
+            ("Género", "entry_genre"),
+            ("Etiqueta", "entry_publisher")
+        ]
+
+        for label_text, attr_name in fields:
+            lbl = ctk.CTkLabel(
+                self.frame_sidebar,
+                text=label_text,
+                anchor="w",
+                font=ctk.CTkFont(family="Inter", size=11, weight="bold")
+            )
+            lbl.pack(fill="x", padx=10, pady=(8, 2))
+
+            field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
+            field_frame.pack(fill="x", padx=10, pady=(0, 4))
+
+            if attr_name in self.panel_combo_fields:
+                catalog_key = self.panel_combo_fields[attr_name]
+                widget = ctk.CTkComboBox(
+                    field_frame,
+                    values=self.app.catalog_manager.get_catalog_combo_values(catalog_key),
+                    state="readonly",
+                    height=26,
+                    border_width=1,
+                    border_color="#565B5E",
+                    font=ctk.CTkFont(family="Inter", size=12),
+                    command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
+                )
+                widget.set("")
+
+                widget.bind("<FocusIn>", lambda _e, _w=widget: self._on_widget_focus_in(_w))
+                widget.bind("<FocusOut>", lambda _e, _w=widget, _a=attr_name: self._on_widget_focus_out(_w, _a, is_combo=True))
+
+                widget.bind("<Up>", lambda _e, _w=widget: self._toggle_combo_dropdown(_w))
+                widget.bind("<Down>", lambda _e, _w=widget: self._toggle_combo_dropdown(_w))
+                widget.bind("<Button-1>", lambda _e, _w=widget: self._toggle_combo_dropdown(_w))
+                widget.bind("<space>", lambda _e, _w=widget: self._toggle_combo_dropdown(_w))
+                widget.bind(
+                    "<Return>",
+                    lambda _e, _w=widget, _a=attr_name, _c=catalog_key: self._on_combo_return(_w, _a, _c)
+                )
+            else:
+                widget = ctk.CTkEntry(
+                    field_frame,
+                    height=26,
+                    border_width=1,
+                    border_color="#565B5E",
+                    font=ctk.CTkFont(family="Inter", size=12)
+                )
+                widget.bind("<FocusIn>", lambda _e, _w=widget: self._on_widget_focus_in(_w))
+                widget.bind("<FocusOut>", lambda _e, _w=widget, _a=attr_name: self._on_widget_focus_out(_w, _a, is_combo=False))
+                widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
+
+            widget.pack(fill="x")
+            self.tag_entries[attr_name] = widget
+
+            is_catalog = attr_name in self.panel_combo_fields
+            multi_state = "readonly" if is_catalog else "normal"
+            multi_widget = ctk.CTkComboBox(
+                field_frame,
+                values=[self.app.KEEP_VALUE],
+                state=multi_state,
+                height=26,
+                border_width=1,
+                border_color="#565B5E",
+                font=ctk.CTkFont(size=12),
+                command=lambda _value, _a=attr_name: self.on_multi_panel_commit(_a)
+            )
+
+            multi_widget.bind("<FocusIn>", lambda _e, _w=multi_widget: self._on_widget_focus_in(_w))
+
+            if not is_catalog:
+                # Si es un campo de texto en multiedición, guardar valor al perder foco o pulsar Enter
+                multi_widget.bind(
+                    "<FocusOut>",
+                    lambda _e, _w=multi_widget, _a=attr_name: (
+                        self._on_widget_focus_out(_w),
+                        self.on_multi_panel_commit(_a)
+                    )
+                )
+                multi_widget.bind(
+                    "<Return>",
+                    lambda _e, _a=attr_name: self.on_multi_panel_commit(_a) or "break"
+                )
+            else:
+                multi_widget.bind("<FocusOut>", lambda _e, _w=multi_widget: self._on_widget_focus_out(_w))
+                multi_widget.bind("<Up>", lambda _e, _w=multi_widget: self._toggle_combo_dropdown(_w))
+                multi_widget.bind("<Down>", lambda _e, _w=multi_widget: self._toggle_combo_dropdown(_w))
+                multi_widget.bind("<space>", lambda _e, _w=multi_widget: self._toggle_combo_dropdown(_w))
+
+            self.multi_entries[attr_name] = multi_widget
+
+        # --- SECCIÓN CARÁTULA ---
+        lbl_cover_title = ctk.CTkLabel(
+            self.frame_sidebar,
+            text="Carátula",
+            anchor="w",
+            font=ctk.CTkFont(size=11, weight="bold")
+        )
+        lbl_cover_title.pack(fill="x", padx=5, pady=(8, 2))
+
+        self.label_cover = ctk.CTkLabel(
+            self.frame_sidebar,
+            text="Sin carátula",
+            width=180,
+            height=180,
+            fg_color="transparent",
+            text_color="gray",
+            border_color="#6B7280",
+            border_width=1,
+            cursor="hand2"
+        )
+        self.label_cover.pack(padx=5, pady=5)
+        UiUtils(self.label_cover, "Clic derecho para opciones de carátula")
+
+        # Menús contextuales de carátula
+        self._setup_cover_context_menus()
+
+        # --- BOTONES DE ACCIÓN ---
         self.btn_process = ctk.CTkButton(
             self.frame_sidebar,
             text="Procesar",
             image=self.app.process_icon,
             compound="left",
             fg_color=self.app.CORP_COLOR,
-            hover_color=self.app.CORP_HOVER,
+            hover_color="#6D28D9",  # Color más claro para visualizar hover
+            border_width=2,
+            border_color=self.app.CORP_COLOR,
             font=ctk.CTkFont(size=13, weight="bold"),
             height=34,
             command=self.app.process_manager.process_discogs_data
         )
         self.btn_process.pack(fill="x", padx=5, pady=(6, 10))
         UiUtils(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
+
+        # Efectos hover y ejecución por teclado en btn_process
+        self.btn_process.bind("<Enter>", lambda _e: self._set_btn_hover(self.btn_process, True))
+        self.btn_process.bind("<Leave>", lambda _e: self._set_btn_hover(self.btn_process, False))
+        self.btn_process.bind("<Return>", lambda _e: self.app.process_manager.process_discogs_data())
+        self.btn_process.bind("<space>", lambda _e: self.app.process_manager.process_discogs_data())
 
         self.btn_clean = ctk.CTkButton(
             self.frame_sidebar,
@@ -236,6 +353,20 @@ class DetailPanel:
         )
         self.btn_clean.pack(fill="x", padx=5, pady=(0, 10))
         UiUtils(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
+
+        # Ejecución por teclado en btn_clean
+        self.btn_clean.bind("<Return>", lambda _e: self.app.process_manager.clear_selected_metadata())
+        self.btn_clean.bind("<space>", lambda _e: self.app.process_manager.clear_selected_metadata())
+
+        # --- ENCADENAMIENTO EXPLÍCITO DE TABULACIÓN ---
+        self._bind_custom_tab_order()
+
+    def _set_btn_hover(self, btn, is_hover):
+        """Aplica visualmente el borde blanco al pasar el ratón por encima."""
+        if is_hover:
+            btn.configure(border_color="#FFFFFF", border_width=2)
+        else:
+            btn.configure(border_color=self.app.CORP_COLOR, border_width=2)
 
     def compute_common_panel_values(self, selected_rows):
         result = {}
@@ -436,7 +567,6 @@ class DetailPanel:
             combo_genres = allowed_genres + [clear_opt] if allowed_genres else [clear_opt]
             genre_combo.configure(values=combo_genres)
 
-            # Si hay un género seleccionado pero no es válido para el álbum actual
             if current_genre and current_genre not in combo_genres:
                 genre_combo.set("")
                 current_genre = ""
@@ -452,7 +582,6 @@ class DetailPanel:
             combo_publishers = allowed_publishers + [clear_opt] if allowed_publishers else [clear_opt]
             publisher_combo.configure(values=combo_publishers)
 
-            # Limpiar si la etiqueta no es compatible O si el género previo acaba de ser borrado
             if current_publisher and (genre_was_cleared or not current_genre or current_publisher not in combo_publishers):
                 publisher_combo.set("")
                 if row_id:
@@ -509,17 +638,7 @@ class DetailPanel:
 
             self.app.catalog_manager.apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
 
-        # Actualiza las opciones dependientes en cascada
         self.refresh_catalog_comboboxes()
-
-    @staticmethod
-    def on_panel_combo_click(combo_widget):
-        try:
-            combo_widget.focus_set()
-            combo_widget._open_dropdown_menu()
-        except Exception:
-            pass
-        return "break"
 
     def on_panel_catalog_enter(self, attr_name, catalog_key):
         self.on_panel_catalog_selected(attr_name, catalog_key)
@@ -616,7 +735,6 @@ class DetailPanel:
         self.set_panel_widget_value("entry_publisher", values[6])
         self.set_panel_widget_value("entry_year", values[7])
 
-        # Actualizar opciones desplegables según la selección actual
         self.refresh_catalog_comboboxes()
 
         file_path = self.app.file_paths_map.get(item_id)
@@ -702,3 +820,68 @@ class DetailPanel:
             except Exception:
                 return None
         return None
+
+    def _focus_target(self, widget):
+        """Fuerza el foco al widget indicado cancelando la propagación por defecto."""
+        widget.focus_set()
+        return "break"
+
+    def _bind_custom_tab_order(self):
+        """Establece la secuencia exacta de tabulación entre campos y botones."""
+        ordered_attrs = [
+            "entry_artist",
+            "entry_title",
+            "entry_mixartist",
+            "entry_year",
+            "entry_album",
+            "entry_genre",
+            "entry_publisher"
+        ]
+
+        for i in range(len(ordered_attrs)):
+            curr_attr = ordered_attrs[i]
+            prev_attr = ordered_attrs[i - 1] if i > 0 else None
+            next_attr = ordered_attrs[i + 1] if i < len(ordered_attrs) - 1 else None
+
+            curr_w = self.tag_entries[curr_attr]
+            curr_multi_w = self.multi_entries[curr_attr]
+
+            if prev_attr:
+                prev_w = self.tag_entries[prev_attr]
+                prev_multi_w = self.multi_entries[prev_attr]
+
+                curr_w.bind("<Shift-Tab>", lambda _e, w=prev_w: self._focus_target(w))
+                curr_multi_w.bind("<Shift-Tab>", lambda _e, w=prev_multi_w: self._focus_target(w))
+                if hasattr(curr_w, "_entry"):
+                    curr_w._entry.bind("<Shift-Tab>", lambda _e, w=prev_w: self._focus_target(w))
+            else:
+                curr_w.bind("<Shift-Tab>", lambda _e: self._focus_target(self.btn_clean))
+                if hasattr(curr_w, "_entry"):
+                    curr_w._entry.bind("<Shift-Tab>", lambda _e: self._focus_target(self.btn_clean))
+
+            if next_attr:
+                next_w = self.tag_entries[next_attr]
+                next_multi_w = self.multi_entries[next_attr]
+
+                curr_w.bind("<Tab>", lambda _e, w=next_w: self._focus_target(w))
+                curr_multi_w.bind("<Tab>", lambda _e, w=next_multi_w: self._focus_target(w))
+                if hasattr(curr_w, "_entry"):
+                    curr_w._entry.bind("<Tab>", lambda _e, w=next_w: self._focus_target(w))
+
+        last_w = self.tag_entries["entry_publisher"]
+        last_multi_w = self.multi_entries["entry_publisher"]
+
+        last_w.bind("<Tab>", lambda _e: self._focus_target(self.btn_process))
+        last_multi_w.bind("<Tab>", lambda _e: self._focus_target(self.btn_process))
+        if hasattr(last_w, "_entry"):
+            last_w._entry.bind("<Tab>", lambda _e: self._focus_target(self.btn_process))
+
+        self.btn_process.bind("<Tab>", lambda _e: self._focus_target(self.btn_clean))
+        self.btn_process.bind("<Shift-Tab>", lambda _e: self._focus_target(self.tag_entries["entry_publisher"]))
+        self.btn_process.bind("<FocusIn>", lambda _e, w=self.btn_process: self._on_widget_focus_in(w))
+        self.btn_process.bind("<FocusOut>", lambda _e, w=self.btn_process: self._on_widget_focus_out(w))
+
+        self.btn_clean.bind("<Tab>", lambda _e: self._focus_target(self.tag_entries["entry_artist"]))
+        self.btn_clean.bind("<Shift-Tab>", lambda _e: self._focus_target(self.btn_process))
+        self.btn_clean.bind("<FocusIn>", lambda _e, w=self.btn_clean: self._on_widget_focus_in(w))
+        self.btn_clean.bind("<FocusOut>", lambda _e, w=self.btn_clean: self._on_widget_focus_out(w))
