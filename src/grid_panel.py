@@ -412,20 +412,23 @@ class GridPanel:
         entry.focus_set()
         entry.place(x=x, y=y, width=w, height=h)
 
-        # Usar el método seguro de apertura
         if col_name in managed_grid_fields and open_dropdown:
             entry.after(50, lambda: self._open_tree_combo_dropdown(entry) if entry.winfo_exists() else None)
 
         finalized = False
 
-        def save_edit(evt=None):
+        def save_edit(evt=None, commit_value=True):
             nonlocal finalized
             if finalized:
                 return True
             finalized = True
 
             self._close_tree_combo_dropdown(entry)
-            new_value = entry.get().strip()
+
+            if not commit_value:
+                new_value = current_value_str
+            else:
+                new_value = entry.get().strip()
 
             if hasattr(entry, "_is_cell_editing"):
                 del entry._is_cell_editing
@@ -433,12 +436,18 @@ class GridPanel:
             entry.destroy()
             self.cell_entry = None
 
-            # Garantizar que el foco regrese al Treeview
+            # Forzar el foco de vuelta explícitamente al Treeview
             self.tree.focus_set()
-            if row_id and self.tree.exists(row_id):
-                self.tree.selection_set(row_id)
-                self.tree.focus(row_id)
-                self.tree.see(row_id)
+
+            active_selection = self.tree.selection()
+            if not active_selection:
+                if row_id and self.tree.exists(row_id):
+                    self.tree.selection_set(row_id)
+                    self.tree.focus(row_id)
+                    self.tree.see(row_id)
+
+            if not commit_value:
+                return True
 
             if col_name in managed_grid_fields:
                 if new_value == self.app.CLEAR_OPTION:
@@ -588,12 +597,19 @@ class GridPanel:
             self.tree.focus_set()
             return "break"
 
-        def navigate(direction):
-            if save_edit():
+        def execute_navigation(direction):
+            is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
+            commit = not (is_open and "tab" in direction)
+
+            if is_open:
+                if "tab" in direction:
+                    entry.set(current_value_str)
+                self._close_tree_combo_dropdown(entry)
+
+            if save_edit(commit_value=commit):
                 next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
                 if next_target:
                     next_row_id, next_col_index = next_target
-
                     self.tree.selection_set(next_row_id)
                     self.tree.focus(next_row_id)
                     self.tree.see(next_row_id)
@@ -601,29 +617,50 @@ class GridPanel:
                     if hasattr(self.app, "detail_panel"):
                         self.app.detail_panel.on_row_select(None)
 
-                    self.app.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
+                    # Iniciar la edición de la siguiente celda asegurando el foco
+                    self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
+
+        def navigate(direction, evt=None):
+            # Programar la navegación tras el ciclo actual para evitar que Tkinter pierda el foco
+            self.app.after_idle(lambda: execute_navigation(direction))
             return "break"
 
         def on_focus_out(evt=None):
             def commit_if_closed():
                 if not entry.winfo_exists():
                     return
-                # Ignorar el FocusOut si la lista desplegable flotante está abierta
                 if col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry):
                     return
                 save_edit()
 
             entry.after(150, commit_if_closed)
 
+        # Interceptamos en la lista flotante
         if col_name in managed_grid_fields:
             entry.bind("<<ComboboxSelected>>", lambda _e: save_edit())
 
-        entry.bind("<Return>", lambda _e: navigate("enter"))
-        entry.bind("<KP_Enter>", lambda _e: navigate("enter"))
-        entry.bind("<Shift-Return>", lambda _e: navigate("shift_enter"))
-        entry.bind("<Tab>", lambda _e: navigate("tab"))
-        entry.bind("<Shift-Tab>", lambda _e: navigate("shift_tab"))
-        entry.bind("<ISO_Left_Tab>", lambda _e: navigate("shift_tab"))
+            def bind_popdown_events(evt=None):
+                try:
+                    popdown = entry.tk.eval(f"ttk::combobox::PopdownWindow {entry}")
+                    listbox = entry.nametowidget(f"{popdown}.f.l")
+
+                    listbox.bind("<Tab>", lambda e: navigate("tab", e))
+                    listbox.bind("<Shift-Tab>", lambda e: navigate("shift_tab", e))
+                    listbox.bind("<ISO_Left_Tab>", lambda e: navigate("shift_tab", e))
+                    listbox.bind("<Return>", lambda e: navigate("enter", e))
+                    listbox.bind("<KP_Enter>", lambda e: navigate("enter", e))
+                except Exception:
+                    pass
+
+            entry.bind("<Map>", bind_popdown_events)
+
+        # Interceptamos en el cuadro de edición estándar
+        entry.bind("<Tab>", lambda e: navigate("tab", e))
+        entry.bind("<Shift-Tab>", lambda e: navigate("shift_tab", e))
+        entry.bind("<ISO_Left_Tab>", lambda e: navigate("shift_tab", e))
+        entry.bind("<Return>", lambda e: navigate("enter", e))
+        entry.bind("<KP_Enter>", lambda e: navigate("enter", e))
+        entry.bind("<Shift-Return>", lambda e: navigate("shift_enter", e))
         entry.bind("<Escape>", cancel_edit)
         entry.bind("<FocusOut>", on_focus_out)
 
