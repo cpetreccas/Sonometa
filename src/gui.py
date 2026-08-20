@@ -1,5 +1,6 @@
 import os
 import ctypes
+import threading
 from collections import deque
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -48,6 +49,7 @@ class App(ctk.CTk):
         self.folder_path = ""
         self.sort_directions = {}
         self.file_paths_map = {}
+        self.traktor_cache = {}
         self.log_history = deque(maxlen=5000)
         self._multi_select_mode = False
         self.log_window = None
@@ -73,19 +75,15 @@ class App(ctk.CTk):
         self.audio_manager = AudioManager()
         self.filename_formatter = FilenameFormatter()
 
-        # Ruta global de la carátula por defecto
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.DEFAULT_COVER_PATH = os.path.join(base_dir, "assets", "no_cover_art.jpg")
 
-        # 1. Primero cargamos el token desde el entorno
         self.discogs_token = os.getenv("DISCOGS_TOKEN", "RYvclJgMalquxdkpdHutNJEQqGjlaiqtuBvipCfq").strip()
 
-        # 2. Inicializamos el gestor de catálogos y cargamos sus datos
         self.catalog_manager = CatalogManager(self)
         self.catalog_manager.load_catalog_values()
         self.catalog_manager.load_settings()
 
-        # 3. Inicializamos los clientes y procesadores
         self.discogs_client = DiscogsClient(token_getter=lambda: self.discogs_token)
         self.process_manager = ProcessManager(self)
 
@@ -93,7 +91,6 @@ class App(ctk.CTk):
         self.app_icon_photo = None
         self.logo_pil, self.header_logo_pil, self.broom_icon, self.process_icon = UiUtils.load_app_icons(self)
 
-        # Crear el .ico temporal para Windows a partir de logo_relleno.png
         if self.logo_pil:
             try:
                 icon_path = UiUtils.get_resource_path("app_icon_temp.ico")
@@ -106,14 +103,11 @@ class App(ctk.CTk):
                 self.logger.warning(f"No se pudo establecer el icono de la app: {e}")
 
     def _setup_ui(self):
-        # 0. Menú Superior
         self.tool_panel = ToolPanel(self)
         self.tool_panel.pack(side="top", fill="x")
 
-        # 1. Header / Selección de carpeta
         self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.header_logo_pil)
 
-        # 2. Panel Central (Edición lateral + Tabla)
         self.frame_main = ctk.CTkFrame(self)
         self.frame_main.pack(fill="both", expand=True, padx=15, pady=5)
 
@@ -125,10 +119,8 @@ class App(ctk.CTk):
         )
         self.grid_panel = GridPanel(app=self, parent=self.frame_main, logger=self.logger)
 
-        # 3. Pie de página
         self._setup_footer()
 
-        # 4. Buscador
         self.search_manager = SearchManager(
             app=self,
             tree=self.grid_panel.tree,
@@ -156,12 +148,10 @@ class App(ctk.CTk):
 
     @property
     def tree(self):
-        """Property para mantener compatibilidad sin duplicar variables."""
         return self.grid_panel.tree
 
     @property
     def catalog_values(self):
-        """Expone los valores del catálogo desde catalog_manager para process_manager."""
         return self.catalog_manager.catalog_values
 
     def _bind_shortcuts(self):
@@ -174,7 +164,6 @@ class App(ctk.CTk):
         self.bind("<Control-F>", lambda e: self.search_manager.toggle_search_bar())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
 
-        # Atajos de Deshacer / Rehacer
         self.bind_all("<Control-z>", self.undo_manager.undo)
         self.bind_all("<Control-Z>", self.undo_manager.undo)
         self.bind_all("<Control-y>", self.undo_manager.redo)
@@ -213,6 +202,9 @@ class App(ctk.CTk):
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
+        self.traktor_cache.clear()
+        self.header_panel.reset_switches()
+        self.header_panel.set_switches_state("disabled")
         self.search_manager.reset_all_tree_items()
 
         self.detail_panel.clear_fields()
@@ -232,6 +224,9 @@ class App(ctk.CTk):
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
+        self.traktor_cache.clear()
+        self.header_panel.reset_switches()
+        self.header_panel.set_switches_state("disabled")
         self.search_manager.reset_all_tree_items()
 
         self.logger.info(f"Escaneando carpeta: {folder}")
@@ -253,7 +248,39 @@ class App(ctk.CTk):
         self.search_manager.sync_all_tree_items()
         if self.search_manager.is_visible:
             self.search_manager.apply_search_filter()
+
         self.logger.info(f"Se encontraron {len(items)} archivo(s) de audio compatibles.")
+
+        # Lanzar la lectura de metadatos de Traktor en segundo plano
+        if items:
+            threading.Thread(target=self._load_traktor_data_bg, daemon=True).start()
+
+    def _load_traktor_data_bg(self):
+        """Hilo secundario que analiza las etiquetas PRIV:TRAKTOR4 de cada archivo."""
+        self.label_status.configure(text="Procesando datos de Traktor...")
+        paths = list(self.file_paths_map.values())
+
+        for path in paths:
+            info = self.audio_manager.get_traktor_info(path)
+            self.traktor_cache[path] = info
+
+        # Regresar al hilo principal para habilitar la interfaz
+        self.after(0, self._on_traktor_data_loaded)
+
+    def _on_traktor_data_loaded(self):
+        self.header_panel.set_switches_state("normal")
+        self.label_status.configure(text=f"Listo ({len(self.file_paths_map)} canciones)")
+        self.logger.info("Información de Traktor Pro cargada en caché.")
+
+    def apply_traktor_filters(self):
+        """Filtra el grid según el estado de los switches."""
+        only_unanalyzed = bool(self.header_panel.switch_unanalyzed.get())
+        cues_under_2 = bool(self.header_panel.switch_cues.get())
+
+        self.grid_panel.filter_rows_by_traktor(
+            only_unanalyzed=only_unanalyzed,
+            cues_under_2=cues_under_2
+        )
 
 
 if __name__ == "__main__":

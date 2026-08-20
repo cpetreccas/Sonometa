@@ -135,7 +135,8 @@ class GridPanel:
         self.tree.bind("<<TreeviewSelect>>", lambda event: self.app.detail_panel.on_row_select(event))
         self.tree.bind("<Double-1>", self.on_cell_double_click)
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
-        
+        self.tree.bind(btn_right, self._show_tree_context_menu)
+
         self.app.bind("<Return>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
         self.app.bind("<KP_Enter>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
 
@@ -147,7 +148,6 @@ class GridPanel:
         self.app.bind("<Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=False))
         self.app.bind("<Shift-Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=True))
         self.app.bind("<Shift-Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=True))
-
 
         # Navegación (Inicio / Fin y Selección con Shift)
         self.app.bind("<Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=False))
@@ -307,10 +307,8 @@ class GridPanel:
 
         managed_grid_fields = {"Album", "Genre", "Publisher"}
 
-        # 1. Obtener la lista base filtrada según la columna seleccionada
         if col_name in managed_grid_fields:
             if col_name == "Publisher":
-                # La columna 'Genre' está en el índice 5 de self.columns
                 current_genre = str(row_values[5]).strip() if len(row_values) > 5 else ""
 
                 if hasattr(self.app.catalog_manager, "get_allowed_publishers_for_genre") and current_genre:
@@ -321,7 +319,6 @@ class GridPanel:
                     base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
 
             elif col_name == "Genre":
-                # La columna 'Album' está en el índice 4 de self.columns
                 current_album = str(row_values[4]).strip() if len(row_values) > 4 else ""
 
                 if hasattr(self.app.catalog_manager, "get_allowed_genres_for_album") and current_album:
@@ -354,12 +351,10 @@ class GridPanel:
             if col_name in managed_grid_fields:
                 current_options = [str(v) for v in entry.cget("values")]
 
-                # Preservar el valor actual si ya existía para no perder metadatos
                 if current_value_str and current_value_str not in current_options and current_value_str != self.app.CLEAR_OPTION:
                     current_options.append(current_value_str)
                     current_options.sort(key=lambda x: x.lower())
 
-                # Añadir opción de limpieza al final si no existe
                 if self.app.CLEAR_OPTION not in current_options:
                     current_options.append(self.app.CLEAR_OPTION)
 
@@ -447,7 +442,6 @@ class GridPanel:
                 self.app.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.app.catalog_manager.catalog_labels[col_name]}.", level="warning")
                 return False
 
-            # Registrar la acción en el UndoManager antes de aplicar el cambio
             file_path = self.app.file_paths_map.get(row_id)
             if hasattr(self.app, "undo_manager"):
                 action = HistoryAction(file_path, row_id, col_name, col_index, current_value_str, new_value)
@@ -456,7 +450,6 @@ class GridPanel:
             values = list(self.tree.item(row_id, "values"))
             values[col_index] = new_value
 
-            # --- Lógica de cascada / Validación de compatibilidad ---
             album_idx, genre_idx, pub_idx = 4, 5, 6
 
             if col_name == "Album":
@@ -474,7 +467,6 @@ class GridPanel:
                         if file_path:
                             self.app.audio_manager.save_single_tag(file_path, "Genre", "")
 
-                        # Al limpiar Genre, re-evaluar la compatibilidad del Publisher actual
                         current_pub = str(values[pub_idx]).strip() if len(values) > pub_idx else ""
                         if current_pub:
                             values[pub_idx] = ""
@@ -496,14 +488,11 @@ class GridPanel:
                         if file_path:
                             self.app.audio_manager.save_single_tag(file_path, "Publisher", "")
 
-            # Actualizar valores en el Treeview
             self.tree.item(row_id, values=values)
 
-            # Refrescar el panel de detalles lateral para que refleje las celdas vaciadas
             if hasattr(self.app, "detail_panel"):
                 self.app.detail_panel.on_row_select(None)
 
-            # Guardar en el archivo físico la etiqueta modificada
             if file_path:
                 self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
 
@@ -526,16 +515,13 @@ class GridPanel:
                 if next_target:
                     next_row_id, next_col_index = next_target
 
-                    # 1. Seleccionar y hacer foco sobre la nueva fila en el Treeview
                     self.tree.selection_set(next_row_id)
                     self.tree.focus(next_row_id)
                     self.tree.see(next_row_id)
 
-                    # 2. Forzar la actualización del panel de detalles lateral
                     if hasattr(self.app, "detail_panel"):
                         self.app.detail_panel.on_row_select(None)
 
-                    # 3. Abrir la edición de la nueva celda
                     self.app.after_idle(lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
             return "break"
 
@@ -639,6 +625,39 @@ class GridPanel:
             entry.bind("<BackSpace>", clear_combo_value)
         entry.bind("<FocusOut>", on_focus_out)
         self.cell_entry = entry
+
+    def filter_rows_by_traktor(self, only_unanalyzed=False, cues_under_2=False):
+        """Muestra u oculta filas en función de los estados de Traktor Pro guardados en memoria."""
+        visible_count = 0
+        total_count = len(self.app.file_paths_map)
+
+        for row_id, file_path in self.app.file_paths_map.items():
+            traktor_data = self.app.traktor_cache.get(file_path, {"analizado": False, "num_cues": 0})
+            is_analyzed = traktor_data.get("analizado", False)
+            num_cues = traktor_data.get("num_cues", 0)
+
+            show = True
+
+            if only_unanalyzed and is_analyzed:
+                show = False
+
+            if cues_under_2 and num_cues >= 2:
+                show = False
+
+            if show:
+                self.tree.reattach(row_id, "", "end")
+                tag = "even" if visible_count % 2 == 0 else "odd"
+                self.tree.item(row_id, tags=(tag,))
+                visible_count += 1
+            else:
+                self.tree.detach(row_id)
+
+        if only_unanalyzed or cues_under_2:
+            self.app.label_status.configure(
+                text=f"Filtrado: mostrando {visible_count} de {total_count} canciones"
+            )
+        else:
+            self.app.label_status.configure(text=f"Listo ({total_count} canciones)")
 
     def on_cell_double_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
@@ -828,9 +847,8 @@ class GridPanel:
         except ValueError:
             curr_idx = 0
 
-        # Estimar el número de filas visibles por página según la altura del Treeview
         tree_height = self.tree.winfo_height()
-        row_height = 28  # Coincide con rowheight=28 configurado en el estilo
+        row_height = 28
         page_step = max(1, tree_height // row_height)
 
         next_idx = curr_idx - page_step if direction == "up" else curr_idx + page_step
@@ -862,27 +880,20 @@ class GridPanel:
             self._shift_pivot_row = None
             self.tree.selection_set(target_row)
 
-        # Sincronizar foco y asegurar visibilidad
         self.tree.focus(target_row)
         self.tree.see(target_row)
 
-        # Actualizar panel de detalles lateral
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)
 
     def _safe_grid_action(self, event, action_func, **kwargs):
-        """
-        Verifica si el foco está en un campo de texto antes de ejecutar acciones del grid.
-        """
-        # Identificar qué tipo de widget tiene el foco actualmente
+        """Verifica si el foco está en un campo de texto antes de ejecutar acciones del grid."""
         try:
             widget_class = event.widget.winfo_class()
         except AttributeError:
             widget_class = ""
 
-        # Si el usuario está escribiendo en un Entry o Combobox, no interceptar el atajo
         if widget_class in ("Entry", "TCombobox", "Text"):
             return
 
-        # Si no está en un campo de texto, ejecutar la acción de navegación/borrado
         return action_func(event, **kwargs)

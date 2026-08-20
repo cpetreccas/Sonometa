@@ -1,10 +1,14 @@
 FUNCIONALIDADES:
 
-Preescucha de audios en detail panel
+Aumentar zoom (o tamaño de fuente) en el grid panel. Al hacer zoom se podría ajustar el ancho de las columnas?
 
-Aumentar zoom (o tamaño de fuente) en el grid panel.
+Repasar logs, hay demasiados.
 
-Leer metadatos de Traktor (Analizado Si/No - Número de Cues)
+La barra inferior de estado está mostrando logs. Debe ser más del estilo 'Procesando...' y 'Listo' (con iconos). El resto de los logs deben ir a un archivo de log.
+
+Leer metadatos de Traktor (Analizado Si/No - Número de Cues) (Revisar funcionalidad)
+
+Rehacer el Header: El logo debe contrastar más con el fondo y el texto debe ser más legible, seleccionar carpeta y actualizar deben desaparecer. Incorporar buscador de texto, mantener ruta actual. Incluir iconos (no botones) para actualizar, para filtrar por traktor o por cues (hacer los toggle modados corporativo), añadir icono para gestionar catálogos.
 
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 

@@ -1,6 +1,7 @@
 import io
 import os
 import logging
+import xml.etree.ElementTree as ET
 
 logger = logging.getLogger("Sonometa")
 
@@ -59,7 +60,7 @@ class AudioManager:
                     data["Artist"]    = get_tag("artist")
                     data["MixArtist"] = get_tag("mixartist")
                     data["Album"]     = get_tag("album")
-                    data["Genre"]     = get_tag("genre")
+                    data["Genre"]     = get_tag("organization") or get_tag("publisher")
                     data["Publisher"] = get_tag("organization") or get_tag("publisher")
                     data["Year"]      = get_tag("date") or get_tag("year")
 
@@ -98,6 +99,40 @@ class AudioManager:
 
         return None
 
+    def get_traktor_info(self, file_path):
+        """
+        Analiza el archivo en busca de etiquetas de Traktor Pro (PRIV:TRAKTOR4).
+        Returns:
+            dict: {"analizado": bool, "num_cues": int}
+        """
+        from mutagen.id3 import ID3
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in (".mp3", ".wav"):
+            return {"analizado": False, "num_cues": 0}
+
+        try:
+            audio = ID3(file_path)
+            traktor_frame = audio.get("PRIV:TRAKTOR4")
+
+            if not traktor_frame:
+                return {"analizado": False, "num_cues": 0}
+
+            xml_data = traktor_frame.data.decode("utf-8", errors="ignore")
+            xml_start = xml_data.find("<NML>")
+            xml_end = xml_data.rfind("</NML>")
+
+            if xml_start != -1 and xml_end != -1:
+                clean_xml = xml_data[xml_start : xml_end + 6]
+                root = ET.fromstring(clean_xml)
+                cues = root.findall(".//CUE")
+                return {"analizado": True, "num_cues": len(cues)}
+
+            return {"analizado": True, "num_cues": 0}
+
+        except Exception:
+            return {"analizado": False, "num_cues": 0}
+
     # ------------------------------------------------------------------
     # Escritura de etiquetas de texto
     # ------------------------------------------------------------------
@@ -110,7 +145,6 @@ class AudioManager:
         from mutagen.wave import WAVE
         from mutagen import File as MutagenFile
 
-        # Asegurar la liberación de recursos de audio antes de escribir con mutagen
         was_playing, saved_pos = False, 0.0
         if app and hasattr(app, "detail_panel") and app.detail_panel.audio_player:
             was_playing, saved_pos = app.detail_panel.audio_player.prepare_for_file_write()
