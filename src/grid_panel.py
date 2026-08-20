@@ -298,28 +298,64 @@ class GridPanel:
         current_value = row_values[col_index]
 
         managed_grid_fields = {"Album", "Genre", "Publisher"}
+
+        # 1. Obtener la lista base filtrada según la columna seleccionada
         if col_name in managed_grid_fields:
+            if col_name == "Publisher":
+                # La columna 'Genre' está en el índice 5 de self.columns
+                current_genre = str(row_values[5]).strip() if len(row_values) > 5 else ""
+
+                if hasattr(self.app.catalog_manager, "get_allowed_publishers_for_genre") and current_genre:
+                    base_values = self.app.catalog_manager.get_allowed_publishers_for_genre(current_genre)
+                elif hasattr(self.app.catalog_manager, "get_publishers_by_genre") and current_genre:
+                    base_values = self.app.catalog_manager.get_publishers_by_genre(current_genre)
+                else:
+                    base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
+
+            elif col_name == "Genre":
+                # La columna 'Album' está en el índice 4 de self.columns
+                current_album = str(row_values[4]).strip() if len(row_values) > 4 else ""
+
+                if hasattr(self.app.catalog_manager, "get_allowed_genres_for_album") and current_album:
+                    base_values = self.app.catalog_manager.get_allowed_genres_for_album(current_album)
+                elif hasattr(self.app.catalog_manager, "get_genres_by_album") and current_album:
+                    base_values = self.app.catalog_manager.get_genres_by_album(current_album)
+                else:
+                    base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
+
+            else:
+                base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
+
+            combo_values = list(base_values) if base_values else []
+
             entry = ttk.Combobox(
                 self.tree,
                 state="readonly",
-                values=self.app.catalog_manager.get_catalog_combo_values(col_name),
+                values=combo_values,
                 style=self.tree_edit_combo_style,
                 exportselection=False
             )
         else:
             entry = ttk.Entry(self.tree)
 
-        current_value_str = str(current_value)
+        current_value_str = str(current_value).strip()
         if col_name == "Filename":
             current_stem, _ = os.path.splitext(current_value_str)
             entry.insert(0, current_stem)
         else:
             if col_name in managed_grid_fields:
-                current_options = list(self.app.catalog_manager.catalog_values.get(col_name, []))
-                if current_value_str and current_value_str not in current_options:
+                current_options = [str(v) for v in entry.cget("values")]
+
+                # Preservar el valor actual si ya existía para no perder metadatos
+                if current_value_str and current_value_str not in current_options and current_value_str != self.app.CLEAR_OPTION:
                     current_options.append(current_value_str)
                     current_options.sort(key=lambda x: x.lower())
-                entry.configure(values=current_options + [self.app.CLEAR_OPTION])
+
+                # Añadir opción de limpieza al final si no existe
+                if self.app.CLEAR_OPTION not in current_options:
+                    current_options.append(self.app.CLEAR_OPTION)
+
+                entry.configure(values=current_options)
                 entry.set(current_value_str)
             else:
                 entry.insert(0, current_value_str)
@@ -361,7 +397,7 @@ class GridPanel:
                     self.app.show_themed_dialog("Nombre no válido", "El nombre del archivo no es válido.", level="warning")
                     return False
 
-                original_filename = current_value_str.strip()
+                original_filename = current_value_str
                 _, original_ext = os.path.splitext(original_filename)
                 final_filename = f"{safe_name}{original_ext}"
 
@@ -396,7 +432,7 @@ class GridPanel:
 
                 return True
 
-            if new_value == current_value_str.strip():
+            if new_value == current_value_str:
                 return True
 
             if col_name in managed_grid_fields and new_value and new_value not in self.app.catalog_manager.catalog_values.get(col_name, []):
@@ -411,11 +447,57 @@ class GridPanel:
 
             values = list(self.tree.item(row_id, "values"))
             values[col_index] = new_value
+
+            # --- Lógica de cascada / Validación de compatibilidad ---
+            album_idx, genre_idx, pub_idx = 4, 5, 6
+
+            if col_name == "Album":
+                current_genre = str(values[genre_idx]).strip() if len(values) > genre_idx else ""
+                if new_value and current_genre:
+                    if hasattr(self.app.catalog_manager, "get_allowed_genres_for_album"):
+                        allowed_genres = self.app.catalog_manager.get_allowed_genres_for_album(new_value)
+                    elif hasattr(self.app.catalog_manager, "get_genres_by_album"):
+                        allowed_genres = self.app.catalog_manager.get_genres_by_album(new_value)
+                    else:
+                        allowed_genres = []
+
+                    if allowed_genres and current_genre not in allowed_genres:
+                        values[genre_idx] = ""
+                        if file_path:
+                            self.app.audio_manager.save_single_tag(file_path, "Genre", "")
+
+                        # Al limpiar Genre, re-evaluar la compatibilidad del Publisher actual
+                        current_pub = str(values[pub_idx]).strip() if len(values) > pub_idx else ""
+                        if current_pub:
+                            values[pub_idx] = ""
+                            if file_path:
+                                self.app.audio_manager.save_single_tag(file_path, "Publisher", "")
+
+            elif col_name == "Genre":
+                current_pub = str(values[pub_idx]).strip() if len(values) > pub_idx else ""
+                if new_value and current_pub:
+                    if hasattr(self.app.catalog_manager, "get_allowed_publishers_for_genre"):
+                        allowed_pubs = self.app.catalog_manager.get_allowed_publishers_for_genre(new_value)
+                    elif hasattr(self.app.catalog_manager, "get_publishers_by_genre"):
+                        allowed_pubs = self.app.catalog_manager.get_publishers_by_genre(new_value)
+                    else:
+                        allowed_pubs = []
+
+                    if allowed_pubs and current_pub not in allowed_pubs:
+                        values[pub_idx] = ""
+                        if file_path:
+                            self.app.audio_manager.save_single_tag(file_path, "Publisher", "")
+
+            # Actualizar valores en el Treeview
             self.tree.item(row_id, values=values)
 
-            self.app.detail_panel.on_row_select(None)
+            # Refrescar el panel de detalles lateral para que refleje las celdas vaciadas
+            if hasattr(self.app, "detail_panel"):
+                self.app.detail_panel.on_row_select(None)
 
-            file_path and self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
+            # Guardar en el archivo físico la etiqueta modificada
+            if file_path:
+                self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
 
             return True
 
@@ -541,7 +623,6 @@ class GridPanel:
         if col_name in managed_grid_fields:
             entry.bind("<<ComboboxSelected>>", commit_combo_selection)
             entry.bind("<KeyPress>", on_combo_type_search)
-            entry.bind("<Down>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
             entry.bind("<space>", lambda _e: self._open_tree_combo_dropdown(entry) or "break")
             entry.bind("<Down>", lambda _e: on_combo_cycle(forward=True))
             entry.bind("<Up>", lambda _e: on_combo_cycle(forward=False))

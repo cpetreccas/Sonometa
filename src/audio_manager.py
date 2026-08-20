@@ -277,10 +277,6 @@ class AudioManager:
         try:
             persisted = self.extract_cover_bytes(file_path)
             if persisted:
-                logger.info(
-                    f"Verificación post-guardado OK en {os.path.basename(file_path)} "
-                    f"({len(persisted)} bytes leídos desde disco)"
-                )
                 return True
 
             logger.error(

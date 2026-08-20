@@ -47,18 +47,19 @@ class ToolPanel(ctk.CTkFrame):
         )
         self.menu_acciones.add_separator()
         self.menu_acciones.add_command(
-    label="Limpiar todo",
-    command=lambda: app.process_manager.clear_all_loaded_metadata()
-)
+            label="Limpiar todo",
+            command=lambda: app.process_manager.clear_all_loaded_metadata()
+        )
 
         self.menu_gestionar = tk.Menu(
             app, tearoff=0, bg="#252526", fg="#FFFFFF",
             activebackground=app.CORP_COLOR, activeforeground="#FFFFFF",
             bd=1, relief="flat", font=('Segoe UI', 10)
         )
-        self.menu_gestionar.add_command(label="Géneros", command=lambda: DialogManager.open_catalog_manager(app, "Genre"))
-        self.menu_gestionar.add_command(label="Álbumes", command=lambda: DialogManager.open_catalog_manager(app, "Album"))
-        self.menu_gestionar.add_command(label="Etiquetas", command=lambda: DialogManager.open_catalog_manager(app, "Publisher"))
+        self.menu_gestionar.add_command(
+            label="🗂 Gestor de Catálogos",
+            command=lambda: DialogManager.open_unified_catalog_manager(app)
+        )
 
         self.menu_ayuda = tk.Menu(
             app, tearoff=0, bg="#252526", fg="#FFFFFF",

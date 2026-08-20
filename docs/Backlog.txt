@@ -1,11 +1,11 @@
 FUNCIONALIDADES:
 
-Corregir las mayusculas en el nombre del titulo de la canción
-
-Eliminar logs del estilo 'Bytes descargados de carátula'
+El cuadro de gestión de catalogos presenta algunos problemas:
+    - Si se seleccionan varios albumes y se modifica una relación, solo aplica al primer album.
+    - Al seleccionar un album, si deselecciono todos los generos y guardo la relación, se guarda como si hubiera aceptado todos los generos.
+    - El botón eliminar debe tener la apariencia del botón limpiar del detail panel (transparente con borde rojo)
+    - Si se modifica un album, o genero para unificarlo con un valor existente, se deben fusionar los valores permitidos para ese recurso nuevo.
 
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
 Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
-
-Mejorar menús de gestión de catálogos

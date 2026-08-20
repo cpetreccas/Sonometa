@@ -91,8 +91,6 @@ class DiscogsClient:
             with urllib.request.urlopen(req, timeout=10) as response:
                 if response.status == 200:
                     payload = response.read()
-                    logger.info(
-                        f"Bytes descargados de carátula: {len(payload)}")
                     return payload
         except Exception as e:
             logger.error(
@@ -100,11 +98,11 @@ class DiscogsClient:
             )
         return None
 
-    def get_release_images(self, query):
-        """Busca un lanzamiento en Discogs y devuelve una lista con las URLs de todas las imágenes o resultados disponibles."""
+    def get_release_images(self, query, max_images=8):
+        """Busca un lanzamiento en Discogs y devuelve una lista limitada con las URLs de las carátulas disponibles."""
         try:
             encoded_query = urllib.parse.quote(query)
-            url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release"
+            url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release&per_page={max_images}"
             req = urllib.request.Request(url, headers=self._get_headers())
 
             with urllib.request.urlopen(req, timeout=5) as response:
@@ -116,6 +114,8 @@ class DiscogsClient:
                         img = res.get("cover_image") or res.get("thumb")
                         if img and img not in images:
                             images.append(img)
+                        if len(images) >= max_images:
+                            break
                     return images
         except Exception as e:
             logger.error(f"Error obteniendo lista de imágenes de Discogs: {str(e)}")

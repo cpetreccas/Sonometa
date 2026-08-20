@@ -12,11 +12,18 @@ class CatalogManager:
         self.manual_cover_selection = True
         self.catalog_fields = ("Genre", "Album", "Publisher")
         self.catalog_labels = {
-            "Genre": "Géneros",
             "Album": "Álbumes",
+            "Genre": "Géneros",
             "Publisher": "Etiquetas",
         }
         self.catalog_values = {field: [] for field in self.catalog_fields}
+
+        # Diccionarios para almacenar las relaciones en cascada
+        # album_genres: { "NombreAlbum": ["Genero1", "Genero2"] }
+        # genre_publishers: { "NombreGenero": ["Etiqueta1", "Etiqueta2"] }
+        self.album_genres = {}
+        self.genre_publishers = {}
+
         self.catalog_file_path = self.get_catalog_file_path()
         self.settings_file_path = self.get_settings_file_path()
         self.load_catalog_values()
@@ -46,6 +53,7 @@ class CatalogManager:
         try:
             with open(self.catalog_file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
             for field in self.catalog_fields:
                 raw_values = data.get(field, [])
                 if isinstance(raw_values, list):
@@ -55,6 +63,20 @@ class CatalogManager:
                         if value_str and value_str not in cleaned:
                             cleaned.append(value_str)
                     self.catalog_values[field] = cleaned
+
+            # Carga de relaciones jerárquicas
+            raw_ag = data.get("album_genres", {})
+            self.album_genres = {
+                self.normalize_catalog_text(k): [self.normalize_catalog_text(v) for v in vals if v]
+                for k, vals in raw_ag.items() if k
+            }
+
+            raw_gp = data.get("genre_publishers", {})
+            self.genre_publishers = {
+                self.normalize_catalog_text(k): [self.normalize_catalog_text(v) for v in vals if v]
+                for k, vals in raw_gp.items() if k
+            }
+
         except Exception as e:
             logger.warning(
                 f"No se pudieron cargar catálogos persistidos: {str(e)}"
@@ -62,8 +84,15 @@ class CatalogManager:
 
     def save_catalog_values(self):
         try:
+            data = {
+                "Genre": self.catalog_values.get("Genre", []),
+                "Album": self.catalog_values.get("Album", []),
+                "Publisher": self.catalog_values.get("Publisher", []),
+                "album_genres": self.album_genres,
+                "genre_publishers": self.genre_publishers
+            }
             with open(self.catalog_file_path, "w", encoding="utf-8") as f:
-                json.dump(self.catalog_values, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"No se pudieron guardar los catálogos: {str(e)}")
 
@@ -87,7 +116,6 @@ class CatalogManager:
 
     def save_settings(self, token=""):
         try:
-            # Si se le pasa un token explícito, lo usa; si no, preserva el que tenga la app o deja cadena vacía
             current_token = token if token else getattr(self.app, "discogs_token", "")
             data = {
                 "discogs_token": current_token,
@@ -99,16 +127,19 @@ class CatalogManager:
             logger.error(f"No se pudo guardar la configuración: {str(e)}")
 
     def refresh_ui_comboboxes(self):
-        """Método auxiliar seguro para refrescar los comboboxes en el panel de detalles."""
         if hasattr(self.app, "detail_panel") and hasattr(self.app.detail_panel, "refresh_catalog_comboboxes"):
             self.app.detail_panel.refresh_catalog_comboboxes()
 
-    def add_catalog_value(self, field_name, value, persist=False):
+    def add_catalog_value(self, field_name, value, persist=False, is_user_action=False):
+        if not is_user_action and not persist:
+            return False
+
         value_str = self.normalize_catalog_text(value)
         if field_name not in self.catalog_fields or not value_str:
             return False
         if value_str in self.catalog_values[field_name]:
             return False
+
         self.catalog_values[field_name].append(value_str)
         self.catalog_values[field_name].sort(key=lambda x: x.lower())
 
@@ -127,6 +158,35 @@ class CatalogManager:
         ]
         values = sorted(dict.fromkeys(values), key=lambda x: x.lower())
         return values + [clear_opt]
+
+    # --- Consultas de Relaciones Jerárquicas ---
+    def get_allowed_genres_for_album(self, album_name):
+        album_norm = self.normalize_catalog_text(album_name)
+        if album_norm in self.album_genres and self.album_genres[album_norm]:
+            allowed = self.album_genres[album_norm]
+            return sorted([g for g in allowed if g in self.catalog_values["Genre"]], key=lambda x: x.lower())
+        return self.catalog_values.get("Genre", [])
+
+    def get_allowed_publishers_for_genre(self, genre_name):
+        genre_norm = self.normalize_catalog_text(genre_name)
+        if genre_norm in self.genre_publishers and self.genre_publishers[genre_norm]:
+            allowed = self.genre_publishers[genre_norm]
+            return sorted([p for p in allowed if p in self.catalog_values["Publisher"]], key=lambda x: x.lower())
+        return self.catalog_values.get("Publisher", [])
+
+    def set_album_genres(self, album_name, genres_list):
+        album_norm = self.normalize_catalog_text(album_name)
+        if not album_norm:
+            return
+        self.album_genres[album_norm] = [self.normalize_catalog_text(g) for g in genres_list]
+        self.save_catalog_values()
+
+    def set_genre_publishers(self, genre_name, publishers_list):
+        genre_norm = self.normalize_catalog_text(genre_name)
+        if not genre_norm:
+            return
+        self.genre_publishers[genre_norm] = [self.normalize_catalog_text(p) for p in publishers_list]
+        self.save_catalog_values()
 
     @staticmethod
     def get_catalog_column_info(catalog_key):
@@ -191,6 +251,24 @@ class CatalogManager:
             values.append(new_value)
         values.sort(key=lambda x: x.lower())
 
+        # Actualizar claves en diccionarios de relaciones
+        if catalog_key == "Album" and old_value in self.album_genres:
+            self.album_genres[new_value] = self.album_genres.pop(old_value)
+        elif catalog_key == "Genre":
+            if old_value in self.genre_publishers:
+                self.genre_publishers[new_value] = self.genre_publishers.pop(old_value)
+            for alb, g_list in self.album_genres.items():
+                if old_value in g_list:
+                    g_list.remove(old_value)
+                    if new_value not in g_list:
+                        g_list.append(new_value)
+        elif catalog_key == "Publisher":
+            for gen, p_list in self.genre_publishers.items():
+                if old_value in p_list:
+                    p_list.remove(old_value)
+                    if new_value not in p_list:
+                        p_list.append(new_value)
+
         self.refresh_ui_comboboxes()
         self.save_catalog_values()
 
@@ -200,7 +278,6 @@ class CatalogManager:
         return updated_count, merged
 
     def apply_catalog_selection_to_row(self, row_id, attr_name, catalog_key, new_value):
-        """Aplica un valor del catálogo a una fila seleccionada en la tabla y guarda los cambios."""
         column_map = {
             "entry_album": CatalogManager.get_catalog_column_info("Album"),
             "entry_genre": CatalogManager.get_catalog_column_info("Genre"),
@@ -223,7 +300,7 @@ class CatalogManager:
         if file_path and hasattr(self.app, "audio_manager"):
             self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
 
-        self.add_catalog_value(catalog_key, new_value, persist=True)
+        self.add_catalog_value(catalog_key, new_value, persist=True, is_user_action=True)
 
         col_header = self.app.columns[col_index] if hasattr(self.app, "columns") and len(self.app.columns) > col_index else col_name
         logger.info(

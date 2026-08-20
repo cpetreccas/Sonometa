@@ -167,6 +167,10 @@ class DetailPanel:
             label="📋  Pegar imagen desde el portapapeles",
             command=self.paste_cover_from_clipboard
         )
+        self._cover_context_menu.add_command(
+            label="🖼  Aplicar carátula genérica",
+            command=self.apply_generic_cover
+        )
         self._cover_context_menu.add_separator()
         self._cover_context_menu.add_command(
             label="🗑  Eliminar carátula",
@@ -187,6 +191,10 @@ class DetailPanel:
         self._cover_context_menu_multi.add_command(
             label="📋  Pegar imagen a todos los seleccionados",
             command=self.paste_cover_from_clipboard
+        )
+        self._cover_context_menu_multi.add_command(
+            label="🖼  Aplicar carátula genérica a todos los seleccionados",
+            command=self.apply_generic_cover
         )
         self._cover_context_menu_multi.add_separator()
         self._cover_context_menu_multi.add_command(
@@ -336,7 +344,6 @@ class DetailPanel:
 
             file_path = self.app.file_paths_map.get(row_id)
 
-            # Crear registro de acción para Undo
             batch_actions.append(
                 HistoryAction(file_path, row_id, field_name, col_index, current_value, new_value)
             )
@@ -405,17 +412,51 @@ class DetailPanel:
             menu.grab_release()
 
     def refresh_catalog_comboboxes(self):
-        for attr_name, catalog_key in self.panel_combo_fields.items():
-            combo = self.tag_entries.get(attr_name)
-            if not combo:
-                continue
-            current_value = combo.get().strip()
-            allowed_values = self.app.catalog_manager.get_catalog_combo_values(catalog_key)
-            combo.configure(values=allowed_values)
-            if current_value in allowed_values:
-                combo.set(current_value)
-            else:
-                combo.set("")
+        """Actualiza las opciones permitidas en cascada (Álbum -> Género -> Etiqueta) y fuerza la limpieza en cadena."""
+        clear_opt = getattr(self.app, "CLEAR_OPTION", "--- Vaciar ---")
+        row_id = self._get_target_row_id()
+
+        # 1. Álbumes
+        album_combo = self.tag_entries.get("entry_album")
+        if album_combo:
+            current_album = album_combo.get().strip()
+            allowed_albums = self.app.catalog_manager.get_catalog_combo_values("Album")
+            album_combo.configure(values=allowed_albums)
+            if current_album not in allowed_albums:
+                album_combo.set("")
+
+        # 2. Géneros (filtrados por Álbum)
+        genre_combo = self.tag_entries.get("entry_genre")
+        current_album = album_combo.get().strip() if album_combo else ""
+        genre_was_cleared = False
+
+        if genre_combo:
+            current_genre = genre_combo.get().strip()
+            allowed_genres = self.app.catalog_manager.get_allowed_genres_for_album(current_album)
+            combo_genres = allowed_genres + [clear_opt] if allowed_genres else [clear_opt]
+            genre_combo.configure(values=combo_genres)
+
+            # Si hay un género seleccionado pero no es válido para el álbum actual
+            if current_genre and current_genre not in combo_genres:
+                genre_combo.set("")
+                current_genre = ""
+                genre_was_cleared = True
+                if row_id:
+                    self.app.catalog_manager.apply_catalog_selection_to_row(row_id, "entry_genre", "Genre", "")
+
+        # 3. Etiquetas (filtradas por Género)
+        publisher_combo = self.tag_entries.get("entry_publisher")
+        if publisher_combo:
+            current_publisher = publisher_combo.get().strip()
+            allowed_publishers = self.app.catalog_manager.get_allowed_publishers_for_genre(current_genre)
+            combo_publishers = allowed_publishers + [clear_opt] if allowed_publishers else [clear_opt]
+            publisher_combo.configure(values=combo_publishers)
+
+            # Limpiar si la etiqueta no es compatible O si el género previo acaba de ser borrado
+            if current_publisher and (genre_was_cleared or not current_genre or current_publisher not in combo_publishers):
+                publisher_combo.set("")
+                if row_id:
+                    self.app.catalog_manager.apply_catalog_selection_to_row(row_id, "entry_publisher", "Publisher", "")
 
     def set_panel_widget_value(self, attr_name, value):
         widget = self.tag_entries.get(attr_name)
@@ -449,12 +490,6 @@ class DetailPanel:
             return
 
         row_id = self._get_target_row_id()
-        if not row_id:
-            self.logger.info(
-                f"Selección de catálogo ignorada ({self.app.catalog_manager.catalog_labels.get(catalog_key, catalog_key)}): no hay fila a actualizar."
-            )
-            return
-
         combo = self.tag_entries.get(attr_name)
         if not combo:
             return
@@ -462,17 +497,20 @@ class DetailPanel:
         raw_value = combo.get().strip()
         new_value = "" if raw_value == self.app.CLEAR_OPTION else self.app.catalog_manager.normalize_catalog_text(raw_value)
 
-        # Registrar deshacer para catálogo
-        col_name, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
-        values = list(self.app.tree.item(row_id, "values"))
-        current_val = str(values[col_index]).strip() if col_index < len(values) and values[col_index] is not None else ""
+        if row_id:
+            col_name, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
+            values = list(self.app.tree.item(row_id, "values"))
+            current_val = str(values[col_index]).strip() if col_index < len(values) and values[col_index] is not None else ""
 
-        if current_val != new_value:
-            file_path = self.app.file_paths_map.get(row_id)
-            action = HistoryAction(file_path, row_id, col_name, col_index, current_val, new_value)
-            self.app.undo_manager.record_action(action)
+            if current_val != new_value:
+                file_path = self.app.file_paths_map.get(row_id)
+                action = HistoryAction(file_path, row_id, col_name, col_index, current_val, new_value)
+                self.app.undo_manager.record_action(action)
 
-        self.app.catalog_manager.apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
+            self.app.catalog_manager.apply_catalog_selection_to_row(row_id, attr_name, catalog_key, new_value)
+
+        # Actualiza las opciones dependientes en cascada
+        self.refresh_catalog_comboboxes()
 
     @staticmethod
     def on_panel_combo_click(combo_widget):
@@ -526,12 +564,10 @@ class DetailPanel:
         if current_value == new_value:
             return
 
-        # Registro de acción para Undo
         file_path = self.app.file_paths_map.get(row_id)
         action = HistoryAction(file_path, row_id, col_name, col_index, current_value, new_value)
         self.app.undo_manager.record_action(action)
 
-        # Aplicación de cambios
         values[col_index] = new_value
         self.app.tree.item(row_id, values=values)
 
@@ -580,6 +616,9 @@ class DetailPanel:
         self.set_panel_widget_value("entry_publisher", values[6])
         self.set_panel_widget_value("entry_year", values[7])
 
+        # Actualizar opciones desplegables según la selección actual
+        self.refresh_catalog_comboboxes()
+
         file_path = self.app.file_paths_map.get(item_id)
         if file_path:
             self.display_cover_art(file_path)
@@ -611,6 +650,30 @@ class DetailPanel:
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo pegar la imagen: {e}")
 
+    def apply_generic_cover(self, event=None):
+        generic_bytes = self.app.process_manager._get_default_cover_bytes()
+        if not generic_bytes:
+            messagebox.showerror("Error", "No se encontró la imagen de carátula por defecto.")
+            return
+
+        selected_items = self.app.tree.selection()
+        if not selected_items:
+            selected_items = self.app.tree.get_children()
+
+        if not selected_items:
+            return
+
+        for item_id in selected_items:
+            file_path = self.app.file_paths_map.get(item_id)
+            if file_path and os.path.exists(file_path):
+                self.app.audio_manager.embed_cover_art(file_path, generic_bytes)
+                self.app.grid_panel.update_row_cover_status(item_id, "Sí")
+
+        if selected_items:
+            self.display_cover_art(generic_bytes)
+
+        self.logger.info(f"Carátula genérica aplicada a {len(selected_items)} archivo(s).")
+
     def remove_cover_art(self):
         selected_rows = self.app.tree.selection()
 
@@ -631,7 +694,6 @@ class DetailPanel:
         self.logger.info("Carátula eliminada correctamente.")
 
     def load_process_icon(self):
-        """Carga el icono para el botón de procesar si el recurso existe."""
         ruta_logo = UiUtils.get_resource_path("assets/logo_blanco.png")
         if os.path.exists(ruta_logo):
             try:

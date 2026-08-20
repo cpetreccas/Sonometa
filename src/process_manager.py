@@ -205,9 +205,9 @@ class ProcessManager:
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
                                 values[8] = "Sí"
                             else:
-                                values[8] = self._apply_default_cover(file_path)
+                                values[8] = "No"
                         else:
-                            values[8] = self._apply_default_cover(file_path)
+                            values[8] = "No"
                     elif len(all_images) > 1 and manual_mode:
                         with self._lock:
                             pending_cover_reviews.append({
@@ -218,7 +218,7 @@ class ProcessManager:
                                 "values": values
                             })
                     else:
-                        values[8] = self._apply_default_cover(file_path)
+                        values[8] = "No"
 
             def _update_ui():
                 if self.app.tree.exists(row_id):
@@ -247,18 +247,18 @@ class ProcessManager:
                     values = item["values"]
                     chosen_url = selections.get(row_id)
 
-                    if chosen_url:
+                    if chosen_url and chosen_url != "__NO_COVER__":
                         image_data = self.app.discogs_client.download_image_bytes(chosen_url)
                         if image_data:
                             image_data = AudioManager.normalize_cover_image_bytes(image_data)
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
                                 values[8] = "Sí"
                             else:
-                                values[8] = self._apply_default_cover(file_path)
+                                values[8] = "No"
                         else:
-                            values[8] = self._apply_default_cover(file_path)
+                            values[8] = "No"
                     else:
-                        values[8] = self._apply_default_cover(file_path)
+                        values[8] = "No"
 
                     self.app.tree.item(row_id, values=values)
                     self.app.grid_panel.update_row_cover_status(row_id, values[8])
