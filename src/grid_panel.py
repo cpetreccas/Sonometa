@@ -18,6 +18,24 @@ class GridPanel:
         self._shift_pivot_row = None
         self._last_edited_col = 0  # Rastrear última columna editada
 
+        # Configuración del nivel de zoom base
+        self.zoom_level = 1.0
+        self.BASE_FONT_SIZE = 9
+        self.BASE_ROW_HEIGHT = 28
+
+        # Configuración base de columnas para reescalar anchos
+        self.base_col_config = {
+            "Filename":  {"width": 280, "minwidth": 180, "stretch": True,  "anchor": "w"},
+            "Artist":    {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
+            "Title":     {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
+            "MixArtist": {"width": 160, "minwidth": 100, "stretch": True,  "anchor": "w"},
+            "Album":     {"width": 100, "minwidth": 70,  "stretch": False, "anchor": "w"},
+            "Genre":     {"width": 70,  "minwidth": 50,  "stretch": False, "anchor": "w"},
+            "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
+            "Year":      {"width": 45,  "minwidth": 40,  "stretch": False, "anchor": "center"},
+            "Cover":     {"width": 55,  "minwidth": 45,  "stretch": False, "anchor": "center"}
+        }
+
         # Contenedor principal del grid
         self.frame_grid = ctk.CTkFrame(self.parent)
         self.frame_grid.pack(side="right", fill="both", expand=True, padx=(0, 0), pady=0)
@@ -64,13 +82,18 @@ class GridPanel:
             arrowcolor=[("readonly", "#181818"), ("focus", "#181818")]
         )
 
+        # Cálculo dinámico de tamaños según zoom_level
+        current_font_size = max(7, int(self.BASE_FONT_SIZE * self.zoom_level))
+        current_heading_size = max(8, int(self.BASE_FONT_SIZE * self.zoom_level))
+        current_row_height = max(18, int(self.BASE_ROW_HEIGHT * self.zoom_level))
+
         style.configure(
             "Treeview",
             background="#181818",
             foreground="#E0E0E0",
             fieldbackground="#181818",
-            rowheight=28,
-            font=('Segoe UI', 9),
+            rowheight=current_row_height,
+            font=('Segoe UI', current_font_size),
             borderwidth=0,
             relief="flat"
         )
@@ -81,13 +104,58 @@ class GridPanel:
             "Treeview.Heading",
             background="#111111",
             foreground="#FFFFFF",
-            font=('Segoe UI', 9, 'bold'),
+            font=('Segoe UI', current_heading_size, 'bold'),
             borderwidth=0,
             relief="flat",
             padding=(5, 5)
         )
         style.map("Treeview", background=[('selected', self.app.CORP_COLOR)])
         style.map("Treeview.Heading", background=[('active', '#2A2D32')])
+
+    def set_zoom(self, factor):
+        """Aplica un factor de zoom escalando fuentes, alto de filas y ancho de columnas."""
+        # Si hay una celda en edición, se destruye para evitar que quede descolocada
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            try:
+                self.cell_entry.destroy()
+            except Exception:
+                pass
+            self.cell_entry = None
+
+        self.zoom_level = round(max(0.6, min(2.5, factor)), 2)
+        self._setup_styles()
+
+        # Reescalar ancho de columnas proporcionalmente
+        for col, cfg in self.base_col_config.items():
+            new_width = max(20, int(cfg["width"] * self.zoom_level))
+            new_minwidth = max(15, int(cfg["minwidth"] * self.zoom_level))
+            self.tree.column(
+                col,
+                width=new_width,
+                minwidth=new_minwidth,
+                anchor=cfg["anchor"],
+                stretch=cfg["stretch"]
+            )
+
+    def _on_ctrl_wheel_zoom(self, event):
+        """Zoom mediante Ctrl + Rueda del ratón."""
+        if event.delta > 0 or event.num == 4:
+            self.set_zoom(self.zoom_level + 0.1)
+        elif event.delta < 0 or event.num == 5:
+            self.set_zoom(self.zoom_level - 0.1)
+        return "break"
+
+    def _on_key_zoom_in(self, event=None):
+        self.set_zoom(self.zoom_level + 0.1)
+        return "break"
+
+    def _on_key_zoom_out(self, event=None):
+        self.set_zoom(self.zoom_level - 0.1)
+        return "break"
+
+    def _on_key_zoom_reset(self, event=None):
+        self.set_zoom(1.0)
+        return "break"
 
     def _build_treeview(self):
         self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
@@ -105,22 +173,10 @@ class GridPanel:
             "Cover": "Carátula"
         }
 
-        col_config = {
-            "Filename":  {"width": 280, "minwidth": 180, "stretch": True,  "anchor": "w"},
-            "Artist":    {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
-            "Title":     {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
-            "MixArtist": {"width": 160, "minwidth": 100, "stretch": True,  "anchor": "w"},
-            "Album":     {"width": 100, "minwidth": 70,  "stretch": False, "anchor": "w"},
-            "Genre":     {"width": 70,  "minwidth": 50,  "stretch": False, "anchor": "w"},
-            "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
-            "Year":      {"width": 45,  "minwidth": 40,  "stretch": False, "anchor": "center"},
-            "Cover":     {"width": 55,  "minwidth": 45,  "stretch": False, "anchor": "center"}
-        }
-
         for col in self.columns:
             self.app.sort_directions[col] = False
             title = col_titles.get(col, col)
-            cfg = col_config[col]
+            cfg = self.base_col_config[col]
 
             self.tree.heading(col, text=title, command=lambda _col=col: self.sort_by_column(_col))
             self.tree.column(
@@ -138,6 +194,18 @@ class GridPanel:
         self.tree.bind("<Double-1>", self.on_cell_double_click)
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.tree.bind(btn_right, self._show_tree_context_menu)
+
+        # Eventos de zoom
+        self.tree.bind("<Control-MouseWheel>", self._on_ctrl_wheel_zoom)
+        self.tree.bind("<Control-Button-4>", self._on_ctrl_wheel_zoom)
+        self.tree.bind("<Control-Button-5>", self._on_ctrl_wheel_zoom)
+        self.tree.bind("<Control-plus>", self._on_key_zoom_in)
+        self.tree.bind("<Control-KP_Add>", self._on_key_zoom_in)
+        self.tree.bind("<Control-minus>", self._on_key_zoom_out)
+        self.tree.bind("<Control-KP_Subtract>", self._on_key_zoom_out)
+        self.tree.bind("<Control-0>", self._on_key_zoom_reset)
+        self.tree.bind("<Control-KP_0>", self._on_key_zoom_reset)
+        self.tree.bind("<Control-Key-0>", self._on_key_zoom_reset)
 
         # Teclas de acción vinculadas al Treeview para cortar la propagación de Tkinter
         self.tree.bind("<Return>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
@@ -621,7 +689,6 @@ class GridPanel:
                     self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
 
         def navigate(direction, evt=None):
-            # Programar la navegación tras el ciclo actual para evitar que Tkinter pierda el foco
             self.app.after_idle(lambda: execute_navigation(direction))
             return "break"
 
@@ -635,7 +702,6 @@ class GridPanel:
 
             entry.after(150, commit_if_closed)
 
-        # Interceptamos en la lista flotante
         if col_name in managed_grid_fields:
             entry.bind("<<ComboboxSelected>>", lambda _e: save_edit())
 
@@ -654,7 +720,6 @@ class GridPanel:
 
             entry.bind("<Map>", bind_popdown_events)
 
-        # Interceptamos en el cuadro de edición estándar
         entry.bind("<Tab>", lambda e: navigate("tab", e))
         entry.bind("<Shift-Tab>", lambda e: navigate("shift_tab", e))
         entry.bind("<ISO_Left_Tab>", lambda e: navigate("shift_tab", e))
@@ -869,7 +934,7 @@ class GridPanel:
         return "break"
 
     def _handle_page_navigation(self, event, direction="down", select_range=False):
-        """Maneja Re Pág / Av Pág moviendo la vista, el foco y la selección real."""
+        """Maneja Re Pág / Av Pág moviendo la vista, el foco y la selección real ajustado al zoom actual."""
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 
@@ -888,8 +953,8 @@ class GridPanel:
             curr_idx = 0
 
         tree_height = self.tree.winfo_height()
-        row_height = 28
-        page_step = max(1, tree_height // row_height)
+        current_row_height = max(18, int(self.BASE_ROW_HEIGHT * self.zoom_level))
+        page_step = max(1, tree_height // current_row_height)
 
         next_idx = curr_idx - page_step if direction == "up" else curr_idx + page_step
         next_idx = max(0, min(len(all_rows) - 1, next_idx))
@@ -920,7 +985,7 @@ class GridPanel:
             self._shift_pivot_row = None
             self.tree.selection_set(target_row)
 
-        self.tree.focus_set()  # Asegura el foco activo en el widget
+        self.tree.focus_set()
         self.tree.focus(target_row)
         self.tree.see(target_row)
 
@@ -928,20 +993,15 @@ class GridPanel:
             self.app.detail_panel.on_row_select(None)
 
     def _safe_grid_action(self, event, action_func, **kwargs):
-        """Verifica si el foco está en un campo de texto; si no lo está, enfoca el Treeview
-        y ejecuta la navegación sin dobles saltos."""
         try:
             widget_class = event.widget.winfo_class()
         except AttributeError:
             widget_class = ""
 
-        # Si el usuario está interactuando con un control de texto, no interferimos
         if widget_class in ("Entry", "TCombobox", "Text"):
             return
 
-        # Forzar que el Treeview reciba el foco del teclado de la app
         self.tree.focus_set()
-
         res = action_func(event, **kwargs)
         return "break" if res is None else res
 

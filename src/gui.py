@@ -171,6 +171,15 @@ class App(ctk.CTk):
         self.bind_all("<Command-z>", self.undo_manager.undo)
         self.bind_all("<Command-Shift-z>", self.undo_manager.redo)
 
+        self.bind_all("<Control-plus>", lambda e: self.grid_panel._on_key_zoom_in(e))
+        self.bind_all("<Control-KP_Add>", lambda e: self.grid_panel._on_key_zoom_in(e))
+        self.bind_all("<Control-minus>", lambda e: self.grid_panel._on_key_zoom_out(e))
+        self.bind_all("<Control-KP_Subtract>", lambda e: self.grid_panel._on_key_zoom_out(e))
+
+        self.bind_all("<Control-0>", lambda e: self.grid_panel._on_key_zoom_reset(e))
+        self.bind_all("<Control-KP_0>", lambda e: self.grid_panel._on_key_zoom_reset(e))
+        self.bind_all("<Control-Key-0>", lambda e: self.grid_panel._on_key_zoom_reset(e))
+
         # Captura universal de navegación (simples y con Shift)
         nav_keys = [
             "<Up>", "<Down>", "<Prior>", "<Next>", "<Home>", "<End>",
