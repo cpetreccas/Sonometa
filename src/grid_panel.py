@@ -82,7 +82,6 @@ class GridPanel:
             arrowcolor=[("readonly", "#181818"), ("focus", "#181818")]
         )
 
-        # Cálculo dinámico de tamaños según zoom_level
         current_font_size = max(7, int(self.BASE_FONT_SIZE * self.zoom_level))
         current_heading_size = max(8, int(self.BASE_FONT_SIZE * self.zoom_level))
         current_row_height = max(18, int(self.BASE_ROW_HEIGHT * self.zoom_level))
@@ -113,8 +112,6 @@ class GridPanel:
         style.map("Treeview.Heading", background=[('active', '#2A2D32')])
 
     def set_zoom(self, factor):
-        """Aplica un factor de zoom escalando fuentes, alto de filas y ancho de columnas."""
-        # Si hay una celda en edición, se destruye para evitar que quede descolocada
         if self.cell_entry and self.cell_entry.winfo_exists():
             try:
                 self.cell_entry.destroy()
@@ -125,7 +122,6 @@ class GridPanel:
         self.zoom_level = round(max(0.6, min(2.5, factor)), 2)
         self._setup_styles()
 
-        # Reescalar ancho de columnas proporcionalmente
         for col, cfg in self.base_col_config.items():
             new_width = max(20, int(cfg["width"] * self.zoom_level))
             new_minwidth = max(15, int(cfg["minwidth"] * self.zoom_level))
@@ -138,7 +134,6 @@ class GridPanel:
             )
 
     def _on_ctrl_wheel_zoom(self, event):
-        """Zoom mediante Ctrl + Rueda del ratón."""
         if event.delta > 0 or event.num == 4:
             self.set_zoom(self.zoom_level + 0.1)
         elif event.delta < 0 or event.num == 5:
@@ -195,7 +190,6 @@ class GridPanel:
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.tree.bind(btn_right, self._show_tree_context_menu)
 
-        # Eventos de zoom
         self.tree.bind("<Control-MouseWheel>", self._on_ctrl_wheel_zoom)
         self.tree.bind("<Control-Button-4>", self._on_ctrl_wheel_zoom)
         self.tree.bind("<Control-Button-5>", self._on_ctrl_wheel_zoom)
@@ -207,43 +201,36 @@ class GridPanel:
         self.tree.bind("<Control-KP_0>", self._on_key_zoom_reset)
         self.tree.bind("<Control-Key-0>", self._on_key_zoom_reset)
 
-        # Teclas de acción vinculadas al Treeview para cortar la propagación de Tkinter
         self.tree.bind("<Return>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
         self.tree.bind("<KP_Enter>", lambda e: self._safe_grid_action(e, self._on_tree_enter_press))
 
         self.tree.bind("<Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
         self.tree.bind("<KP_Delete>", lambda e: self._safe_grid_action(e, self._on_tree_delete_press))
 
-        # Navegación con Tabulador sobre el Treeview
         self.tree.bind("<Tab>", lambda e: self._safe_grid_action(e, self._on_tree_tab_press, reverse=False))
         self.tree.bind("<Shift-Tab>", lambda e: self._safe_grid_action(e, self._on_tree_tab_press, reverse=True))
         self.tree.bind("<ISO_Left_Tab>", lambda e: self._safe_grid_action(e, self._on_tree_tab_press, reverse=True))
 
-        # Navegación Arriba/Abajo
         self.tree.bind("<Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=False))
         self.tree.bind("<Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=False))
         self.tree.bind("<Shift-Up>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="up", select_range=True))
         self.tree.bind("<Shift-Down>", lambda e: self._safe_grid_action(e, self._handle_key_navigation, direction="down", select_range=True))
 
-        # Navegación Inicio/Fin
         self.tree.bind("<Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=False))
         self.tree.bind("<End>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="end", select_range=False))
         self.tree.bind("<Shift-Home>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="home", select_range=True))
         self.tree.bind("<Shift-End>", lambda e: self._safe_grid_action(e, self._handle_excel_navigation, move_to="end", select_range=True))
 
-        # Paginación
         self.tree.bind("<Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=False))
         self.tree.bind("<Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=False))
         self.tree.bind("<Shift-Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=True))
         self.tree.bind("<Shift-Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=True))
 
-        # Crear Scrollbars
         self.vsb = ttk.Scrollbar(self.frame_grid, orient="vertical", command=self.tree.yview)
         self.hsb = ttk.Scrollbar(self.frame_grid, orient="horizontal", command=self.tree.xview)
 
         self.tree.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
 
-        # Ubicar elementos mediante grid
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.vsb.grid(row=0, column=1, sticky="ns")
         self.hsb.grid(row=1, column=0, sticky="ew")
@@ -385,7 +372,6 @@ class GridPanel:
 
         managed_grid_fields = {"Album", "Genre", "Publisher"}
 
-        # Estilo oscuro para el Combobox nativo
         style = ttk.Style()
         style.configure(
             "DarkGrid.TCombobox",
@@ -434,7 +420,6 @@ class GridPanel:
                 exportselection=False
             )
 
-            # Personalizar colores de la lista flotante
             self.app.option_add("*TCombobox*Listbox.background", "#2B2B2B")
             self.app.option_add("*TCombobox*Listbox.foreground", "#FFFFFF")
             self.app.option_add("*TCombobox*Listbox.selectBackground", "#7B2CBF")
@@ -504,7 +489,6 @@ class GridPanel:
             entry.destroy()
             self.cell_entry = None
 
-            # Forzar el foco de vuelta explícitamente al Treeview
             self.tree.focus_set()
 
             active_selection = self.tree.selection()
@@ -580,10 +564,6 @@ class GridPanel:
             if new_value == current_value_str:
                 return True
 
-            if col_name in managed_grid_fields and new_value and new_value not in self.app.catalog_manager.catalog_values.get(col_name, []):
-                self.app.show_themed_dialog("Valor no permitido", f"El valor '{new_value}' no está en {self.app.catalog_manager.catalog_labels[col_name]}.", level="warning")
-                return False
-
             file_path = self.app.file_paths_map.get(row_id)
             if hasattr(self.app, "undo_manager"):
                 action = HistoryAction(file_path, row_id, col_name, col_index, current_value_str, new_value)
@@ -591,44 +571,6 @@ class GridPanel:
 
             values = list(self.tree.item(row_id, "values"))
             values[col_index] = new_value
-
-            album_idx, genre_idx, pub_idx = 4, 5, 6
-
-            if col_name == "Album":
-                current_genre = str(values[genre_idx]).strip() if len(values) > genre_idx else ""
-                if new_value and current_genre:
-                    if hasattr(self.app.catalog_manager, "get_allowed_genres_for_album"):
-                        allowed_genres = self.app.catalog_manager.get_allowed_genres_for_album(new_value)
-                    elif hasattr(self.app.catalog_manager, "get_genres_by_album"):
-                        allowed_genres = self.app.catalog_manager.get_genres_by_album(new_value)
-                    else:
-                        allowed_genres = []
-
-                    if allowed_genres and current_genre not in allowed_genres:
-                        values[genre_idx] = ""
-                        if file_path:
-                            self.app.audio_manager.save_single_tag(file_path, "Genre", "")
-
-                        current_pub = str(values[pub_idx]).strip() if len(values) > pub_idx else ""
-                        if current_pub:
-                            values[pub_idx] = ""
-                            if file_path:
-                                self.app.audio_manager.save_single_tag(file_path, "Publisher", "")
-
-            elif col_name == "Genre":
-                current_pub = str(values[pub_idx]).strip() if len(values) > pub_idx else ""
-                if new_value and current_pub:
-                    if hasattr(self.app.catalog_manager, "get_allowed_publishers_for_genre"):
-                        allowed_pubs = self.app.catalog_manager.get_allowed_publishers_for_genre(new_value)
-                    elif hasattr(self.app.catalog_manager, "get_publishers_by_genre"):
-                        allowed_pubs = self.app.catalog_manager.get_publishers_by_genre(new_value)
-                    else:
-                        allowed_pubs = []
-
-                    if allowed_pubs and current_pub not in allowed_pubs:
-                        values[pub_idx] = ""
-                        if file_path:
-                            self.app.audio_manager.save_single_tag(file_path, "Publisher", "")
 
             self.tree.item(row_id, values=values)
 
@@ -685,7 +627,6 @@ class GridPanel:
                     if hasattr(self.app, "detail_panel"):
                         self.app.detail_panel.on_row_select(None)
 
-                    # Iniciar la edición de la siguiente celda asegurando el foco
                     self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
 
         def navigate(direction, evt=None):
@@ -731,39 +672,6 @@ class GridPanel:
 
         self.cell_entry = entry
 
-    def filter_rows_by_traktor(self, only_unanalyzed=False, cues_under_2=False):
-        """Muestra u oculta filas en función de los estados de Traktor Pro guardados en memoria."""
-        visible_count = 0
-        total_count = len(self.app.file_paths_map)
-
-        for row_id, file_path in self.app.file_paths_map.items():
-            traktor_data = self.app.traktor_cache.get(file_path, {"analizado": False, "num_cues": 0})
-            is_analyzed = traktor_data.get("analizado", False)
-            num_cues = traktor_data.get("num_cues", 0)
-
-            show = True
-
-            if only_unanalyzed and is_analyzed:
-                show = False
-
-            if cues_under_2 and num_cues >= 2:
-                show = False
-
-            if show:
-                self.tree.reattach(row_id, "", "end")
-                tag = "even" if visible_count % 2 == 0 else "odd"
-                self.tree.item(row_id, tags=(tag,))
-                visible_count += 1
-            else:
-                self.tree.detach(row_id)
-
-        if only_unanalyzed or cues_under_2:
-            self.app.label_status.configure(
-                text=f"Filtrado: mostrando {visible_count} de {total_count} canciones"
-            )
-        else:
-            self.app.label_status.configure(text=f"Listo ({total_count} canciones)")
-
     def on_cell_double_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
         if region != "cell":
@@ -782,7 +690,6 @@ class GridPanel:
             self._start_tree_cell_edit(row_id, col_index)
 
     def sort_by_column(self, col):
-        """Ordena el Treeview al hacer clic en el encabezado de una columna."""
         data = [(self.tree.set(child, col), child) for child in self.tree.get_children('')]
         reverse = self.app.sort_directions.get(col, False)
         data.sort(key=lambda x: str(x[0]).lower(), reverse=reverse)
@@ -795,14 +702,12 @@ class GridPanel:
         self.app.sort_directions[col] = not reverse
 
     def select_all_rows(self):
-        """Selecciona todos los elementos cargados en la tabla."""
         all_items = self.tree.get_children()
         self.tree.selection_set(all_items)
         self.app.detail_panel.refresh_process_button_text(len(all_items))
         self.logger.info(f"Seleccionados todos los {len(all_items)} archivo(s).")
 
     def row_has_cover(self, row_id) -> bool:
-        """Verifica si la fila tiene carátula incrustada (columna 8)."""
         try:
             values = list(self.tree.item(row_id, "values"))
             return len(values) > 8 and str(values[8]).strip().lower() in ("sí", "si", "yes", "true", "1")
@@ -810,21 +715,18 @@ class GridPanel:
             return False
 
     def update_row_cover_status(self, row_id, status="Sí"):
-        """Actualiza la columna de carátula en la fila especificada."""
         values = list(self.tree.item(row_id, "values"))
         if len(values) > 8:
             values[8] = status
             self.tree.item(row_id, values=values)
 
     def get_row_artist_title(self, row_id):
-        """Devuelve una tupla (artista, título) de la fila."""
         values = list(self.tree.item(row_id, "values"))
         artist = values[1] if len(values) > 1 else ""
         title = values[2] if len(values) > 2 else ""
         return artist, title
 
     def insert_audio_row(self, metadata, count):
-        """Inserta un registro formateado dentro del Treeview aplicando etiquetas alternadas."""
         tag = "even" if count % 2 == 0 else "odd"
         row_id = self.tree.insert("", "end", values=(
             metadata["Filename"],
@@ -839,23 +741,7 @@ class GridPanel:
         ), tags=(tag,))
         return row_id
 
-    def _on_tree_enter_press(self, event):
-        """Al pulsar Intro sobre una fila seleccionada, inicia la edición de la columna Filename (índice 0)."""
-        if self.cell_entry and self.cell_entry.winfo_exists():
-            return
-
-        focused_row = self.tree.focus()
-        if not focused_row:
-            selected_rows = self.tree.selection()
-            if selected_rows:
-                focused_row = selected_rows[0]
-
-        if focused_row:
-            self._start_tree_cell_edit(focused_row, col_index=0)
-            return "break"
-
     def _on_tree_delete_press(self, event):
-        """Al pulsar Suprimir sobre la tabla, ejecuta el mismo borrado de metadatos que el botón de la escoba."""
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 
@@ -864,7 +750,6 @@ class GridPanel:
             return "break"
 
     def _handle_excel_navigation(self, event, move_to="home", select_range=False):
-        """Maneja la navegación y selección rápida estilo Excel (Inicio, Fin, Shift+Inicio, Shift+Fin)."""
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 
@@ -908,7 +793,6 @@ class GridPanel:
         return "break"
 
     def _handle_key_navigation(self, event, direction="down", select_range=False):
-        """Maneja la navegación con flechas arriba/abajo y selección con Shift."""
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 
@@ -934,7 +818,6 @@ class GridPanel:
         return "break"
 
     def _handle_page_navigation(self, event, direction="down", select_range=False):
-        """Maneja Re Pág / Av Pág moviendo la vista, el foco y la selección real ajustado al zoom actual."""
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 
@@ -964,7 +847,6 @@ class GridPanel:
         return "break"
 
     def _update_tree_selection(self, target_row, current_focused, all_rows, select_range):
-        """Aplica la selección (individual o rango con Shift) y sincroniza el foco y la vista."""
         if select_range:
             if not self._shift_pivot_row or self._shift_pivot_row not in all_rows:
                 self._shift_pivot_row = current_focused
@@ -1006,7 +888,6 @@ class GridPanel:
         return "break" if res is None else res
 
     def _on_tree_tab_press(self, event, reverse=False):
-        """Permite reanudar la edición en la siguiente columna al pulsar Tab sobre la tabla."""
         if self.cell_entry and self.cell_entry.winfo_exists():
             return
 

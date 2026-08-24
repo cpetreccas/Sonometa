@@ -56,43 +56,9 @@ class HeaderPanel(ctk.CTkFrame):
         )
         self.label_folder.pack(side="left", padx=10, pady=5)
 
-        # Contenedor de Switches Traktor a la derecha
-        self.frame_traktor_switches = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_traktor_switches.pack(side="right", padx=10, pady=5)
-
-        self.switch_unanalyzed = ctk.CTkSwitch(
-            self.frame_traktor_switches,
-            text="Sin analizar",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            progress_color=self.app.CORP_COLOR,
-            command=self.app.apply_traktor_filters,
-            state="disabled"
-        )
-        self.switch_unanalyzed.pack(side="left", padx=10)
-
-        self.switch_cues = ctk.CTkSwitch(
-            self.frame_traktor_switches,
-            text="Cues < 2",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            progress_color=self.app.CORP_COLOR,
-            command=self.app.apply_traktor_filters,
-            state="disabled"
-        )
-        self.switch_cues.pack(side="left", padx=5)
-
     def set_folder_path(self, path):
         """Actualiza la ruta mostrada en la etiqueta del header."""
         if path:
             self.label_folder.configure(text=path, text_color="white")
         else:
             self.label_folder.configure(text="Ninguna carpeta seleccionada", text_color="gray")
-
-    def set_switches_state(self, state="normal"):
-        """Habilita o deshabilita los interruptores de Traktor."""
-        self.switch_unanalyzed.configure(state=state)
-        self.switch_cues.configure(state=state)
-
-    def reset_switches(self):
-        """Resetea los switches al estado apagado."""
-        self.switch_unanalyzed.deselect()
-        self.switch_cues.deselect()

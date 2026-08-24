@@ -113,6 +113,7 @@ class ProcessManager:
                     self.app.audio_manager.save_single_tag(file_path, field_name, "")
                     invalid_catalog_fields.append(field_name)
 
+            # Si hubo borrado de catálogo, actualizar el Grid e informar en el log
             if invalid_catalog_fields:
                 clean_prev = {k: prev_vals[k] for k in invalid_catalog_fields}
                 clean_new = {k: "" for k in invalid_catalog_fields}
@@ -124,6 +125,14 @@ class ProcessManager:
                     new_vals=clean_new
                 )
                 self.logger.info(log_msg)
+
+                for k in invalid_catalog_fields:
+                    prev_vals[k] = ""
+
+                def _update_catalog_ui():
+                    if self.app.tree.exists(row_id):
+                        self.app.tree.item(row_id, values=values)
+                self.app.after(0, _update_catalog_ui)
 
             # 2. Parseo y Normalización Local
             old_filename = os.path.basename(file_path)
@@ -198,15 +207,11 @@ class ProcessManager:
                 already_has_cover = self.app.grid_panel.row_has_cover(row_id)
 
             has_year = bool(str(values[7]).strip()) if len(values) > 7 else False
+            all_images = []
 
             # Modificación de metadatos mediante Discogs
             if already_has_cover and has_year:
-                log_msg = LogManager.format_tree_log(
-                    context="PROCESS",
-                    action="Omitida consulta Discogs",
-                    filename=new_filename
-                )
-                self.logger.info(log_msg)
+                self.logger.info(f"[PROCESS] Omitida consulta Discogs para '{new_filename}' (ya posee carátula y año).")
                 values[8] = "Sí"
             else:
                 query_term = f"{artist_parsed} {title_parsed}".strip()
@@ -349,7 +354,9 @@ class ProcessManager:
 
             if hasattr(self.app, 'detail_panel') and hasattr(self.app.detail_panel, 'btn_process'):
                 self.app.detail_panel.btn_process.configure(state="normal", text="Procesar")
+
             if hasattr(self.app, 'detail_panel'):
+                self.app.detail_panel.refresh_catalog_comboboxes()
                 self.app.detail_panel.on_row_select(None)
 
             self.logger.info("Procesamiento multihilo finalizado con éxito.")

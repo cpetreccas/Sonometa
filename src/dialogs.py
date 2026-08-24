@@ -24,9 +24,11 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         self.pending_reviews = pending_reviews
         self.selections = {}
         self.cards_ui = {}
+        self.no_cover_vars = {}
 
         for item in self.pending_reviews:
             self.selections[item["row_id"]] = item["images"][0] if item["images"] else None
+            self.no_cover_vars[item["row_id"]] = tk.BooleanVar(value=False)
 
         self._setup_ui()
         self._load_images_async()
@@ -70,24 +72,48 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
             self.scroll_frame._parent_canvas.yview_scroll(delta * 20, "units")
             return "break"
 
+        def _bind_mousewheel_recursive(widget):
+            if sys.platform in ("win32", "darwin"):
+                widget.bind("<MouseWheel>", _forward_scroll)
+            else:
+                widget.bind("<Button-4>", _forward_scroll)
+                widget.bind("<Button-5>", _forward_scroll)
+
+            for child in widget.winfo_children():
+                _bind_mousewheel_recursive(child)
+
         for item in self.pending_reviews:
             row_id = item["row_id"]
             filename = item["filename"]
-            images = item["images"] + ["__NO_COVER__"]
+            images = item["images"]
 
             self.cards_ui[row_id] = {}
 
             card = ctk.CTkFrame(self.scroll_frame, fg_color="#262626", corner_radius=8)
             card.pack(fill="x", pady=6, padx=6, ipady=4)
 
+            # Cabecera del item: Título y Toggle Box al lado
+            header_frame = ctk.CTkFrame(card, fg_color="transparent")
+            header_frame.pack(fill="x", padx=12, pady=(6, 4))
+
             lbl_file = ctk.CTkLabel(
-                card,
+                header_frame,
                 text=f"🎵 {filename}",
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
                 text_color="#E5E7EB"
             )
-            lbl_file.pack(fill="x", padx=12, pady=(6, 4))
+            lbl_file.pack(side="left", fill="x", expand=True)
+
+            switch_no_cover = ctk.CTkSwitch(
+                header_frame,
+                text="No cargar carátula",
+                variable=self.no_cover_vars[row_id],
+                font=ctk.CTkFont(size=11),
+                progress_color=corp_color,
+                command=lambda r=row_id: self._toggle_no_cover(r)
+            )
+            switch_no_cover.pack(side="right", padx=(10, 0))
 
             covers_container = ctk.CTkScrollableFrame(
                 card,
@@ -97,18 +123,10 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
             )
             covers_container.pack(fill="x", padx=6, pady=(0, 6))
 
-            if sys.platform in ("win32", "darwin"):
-                covers_container._parent_canvas.bind("<MouseWheel>", _forward_scroll)
-            else:
-                covers_container._parent_canvas.bind("<Button-4>", _forward_scroll)
-                covers_container._parent_canvas.bind("<Button-5>", _forward_scroll)
-
             selected_url = self.selections.get(row_id)
 
             for img_idx, img_url in enumerate(images):
                 is_selected = (img_url == selected_url)
-                if img_url == "__NO_COVER__" and selected_url == "__NO_COVER__":
-                    is_selected = True
 
                 col_frame = ctk.CTkFrame(
                     covers_container,
@@ -144,10 +162,6 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                 )
                 lbl_num.pack(padx=4, pady=(0, 3))
 
-                if img_url == "__NO_COVER__":
-                    img_label.configure(text="🚫\nSin carátula", text_color="#EF4444")
-                    lbl_num.configure(text="Ninguna")
-
                 self.cards_ui[row_id][img_url] = {
                     "frame": col_frame,
                     "lbl_num": lbl_num,
@@ -159,11 +173,10 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                     widget.bind("<Enter>", lambda e, r=row_id, u=img_url: self._on_card_hover(r, u, True))
                     widget.bind("<Leave>", lambda e, r=row_id, u=img_url: self._on_card_hover(r, u, False))
 
-                    if sys.platform in ("win32", "darwin"):
-                        widget.bind("<MouseWheel>", _forward_scroll)
-                    else:
-                        widget.bind("<Button-4>", _forward_scroll)
-                        widget.bind("<Button-5>", _forward_scroll)
+            # Redirigir todos los eventos de la rueda del ratón de los scrolls horizontales y sus hijos al scroll principal
+            _bind_mousewheel_recursive(card)
+            if hasattr(covers_container, "_parent_canvas"):
+                _bind_mousewheel_recursive(covers_container._parent_canvas)
 
         btn_bar = ctk.CTkFrame(main_frame, fg_color="transparent")
         btn_bar.pack(fill="x", side="bottom")
@@ -195,7 +208,32 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         )
         self.btn_omit.pack(side="right")
 
+    def _toggle_no_cover(self, row_id):
+        is_disabled = self.no_cover_vars[row_id].get()
+        if is_disabled:
+            self.selections[row_id] = "__NO_COVER__"
+            for ui_item in self.cards_ui[row_id].values():
+                frame = ui_item["frame"]
+                lbl_num = ui_item["lbl_num"]
+                img_label = ui_item["img_label"]
+
+                frame.configure(fg_color="#181818", border_width=0, cursor="arrow")
+                lbl_num.configure(text_color="#4B5563", font=ctk.CTkFont(size=10, weight="normal"), cursor="arrow")
+                img_label.configure(cursor="arrow")
+        else:
+            first_url = list(self.cards_ui[row_id].keys())[0] if self.cards_ui[row_id] else None
+            for ui_item in self.cards_ui[row_id].values():
+                ui_item["frame"].configure(cursor="hand2")
+                ui_item["lbl_num"].configure(cursor="hand2")
+                ui_item["img_label"].configure(cursor="hand2")
+
+            if first_url:
+                self._select_card(row_id, first_url)
+
     def _select_card(self, row_id, selected_url):
+        if self.no_cover_vars[row_id].get():
+            return
+
         self.selections[row_id] = selected_url
         corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
 
@@ -211,7 +249,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                 lbl_num.configure(text_color="#9CA3AF", font=ctk.CTkFont(size=10, weight="normal"))
 
     def _on_card_hover(self, row_id, url, is_hovering):
-        if self.selections.get(row_id) == url:
+        if self.no_cover_vars[row_id].get() or self.selections.get(row_id) == url:
             return
 
         ui_item = self.cards_ui[row_id].get(url)
@@ -228,9 +266,6 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         def _worker():
             for row_id, urls_dict in self.cards_ui.items():
                 for url, ui_item in urls_dict.items():
-                    if url == "__NO_COVER__":
-                        continue
-
                     widget = ui_item.get("img_label")
                     if not widget:
                         continue

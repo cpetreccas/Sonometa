@@ -49,7 +49,6 @@ class App(ctk.CTk):
         self.folder_path = ""
         self.sort_directions = {}
         self.file_paths_map = {}
-        self.traktor_cache = {}
         self.log_history = deque(maxlen=5000)
         self._multi_select_mode = False
         self.log_window = None
@@ -224,9 +223,6 @@ class App(ctk.CTk):
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
-        self.traktor_cache.clear()
-        self.header_panel.reset_switches()
-        self.header_panel.set_switches_state("disabled")
         self.search_manager.reset_all_tree_items()
 
         self.detail_panel.clear_fields()
@@ -246,9 +242,6 @@ class App(ctk.CTk):
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()
-        self.traktor_cache.clear()
-        self.header_panel.reset_switches()
-        self.header_panel.set_switches_state("disabled")
         self.search_manager.reset_all_tree_items()
 
         self.logger.info(f"Escaneando carpeta: {folder}")
@@ -272,37 +265,6 @@ class App(ctk.CTk):
             self.search_manager.apply_search_filter()
 
         self.logger.info(f"Se encontraron {len(items)} archivo(s) de audio compatibles.")
-
-        # Lanzar la lectura de metadatos de Traktor en segundo plano
-        if items:
-            threading.Thread(target=self._load_traktor_data_bg, daemon=True).start()
-
-    def _load_traktor_data_bg(self):
-        """Hilo secundario que analiza las etiquetas PRIV:TRAKTOR4 de cada archivo."""
-        self.label_status.configure(text="Procesando datos de Traktor...")
-        paths = list(self.file_paths_map.values())
-
-        for path in paths:
-            info = self.audio_manager.get_traktor_info(path)
-            self.traktor_cache[path] = info
-
-        # Regresar al hilo principal para habilitar la interfaz
-        self.after(0, self._on_traktor_data_loaded)
-
-    def _on_traktor_data_loaded(self):
-        self.header_panel.set_switches_state("normal")
-        self.label_status.configure(text=f"Listo ({len(self.file_paths_map)} canciones)")
-        self.logger.info("Información de Traktor Pro cargada en caché.")
-
-    def apply_traktor_filters(self):
-        """Filtra el grid según el estado de los switches."""
-        only_unanalyzed = bool(self.header_panel.switch_unanalyzed.get())
-        cues_under_2 = bool(self.header_panel.switch_cues.get())
-
-        self.grid_panel.filter_rows_by_traktor(
-            only_unanalyzed=only_unanalyzed,
-            cues_under_2=cues_under_2
-        )
 
     def _on_global_key(self, event):
         """Redirige las teclas de navegación/selección al Treeview salvo si se edita un campo de texto."""

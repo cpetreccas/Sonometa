@@ -1,10 +1,8 @@
 FUNCIONALIDADES:
 
+TAB cuando estamos en el grid con un combo abierto debe omitir la seleccion actual y pasar al siguiente elemento del grid.
+
 Generar botones corporativos con una guia de estilo unificada.
-
-Aumentar zoom (o tamaño de fuente) en el grid panel. Al hacer zoom se podría ajustar el ancho de las columnas?
-
-Repasar logs, hay demasiados.
 
 La barra inferior de estado está mostrando logs. Debe ser más del estilo 'Procesando...' y 'Listo' (con iconos). El resto de los logs deben ir a un archivo de log.
 

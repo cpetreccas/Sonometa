@@ -606,48 +606,32 @@ class DetailPanel:
             menu.grab_release()
 
     def refresh_catalog_comboboxes(self):
+        """Actualiza las opciones desplegables de los Comboboxes sin modificar ni borrar los datos de la fila."""
         clear_opt = getattr(self.app, "CLEAR_OPTION", "--- Vaciar ---")
-        row_id = self._get_target_row_id()
 
         # 1. Álbumes
         album_combo = self.tag_entries.get("entry_album")
         if album_combo:
-            current_album = album_combo.get().strip()
             allowed_albums = self.app.catalog_manager.get_catalog_combo_values("Album")
             album_combo.configure(values=allowed_albums)
-            if current_album not in allowed_albums:
-                album_combo.set("")
 
         # 2. Géneros (filtrados por Álbum)
         genre_combo = self.tag_entries.get("entry_genre")
         current_album = album_combo.get().strip() if album_combo else ""
-        genre_was_cleared = False
 
         if genre_combo:
-            current_genre = genre_combo.get().strip()
             allowed_genres = self.app.catalog_manager.get_allowed_genres_for_album(current_album)
             combo_genres = allowed_genres + [clear_opt] if allowed_genres else [clear_opt]
             genre_combo.configure(values=combo_genres)
 
-            if current_genre and current_genre not in combo_genres:
-                genre_combo.set("")
-                current_genre = ""
-                genre_was_cleared = True
-                if row_id:
-                    self.app.catalog_manager.apply_catalog_selection_to_row(row_id, "entry_genre", "Genre", "")
-
         # 3. Etiquetas (filtradas por Género)
         publisher_combo = self.tag_entries.get("entry_publisher")
+        current_genre = genre_combo.get().strip() if genre_combo else ""
+
         if publisher_combo:
-            current_publisher = publisher_combo.get().strip()
             allowed_publishers = self.app.catalog_manager.get_allowed_publishers_for_genre(current_genre)
             combo_publishers = allowed_publishers + [clear_opt] if allowed_publishers else [clear_opt]
             publisher_combo.configure(values=combo_publishers)
-
-            if current_publisher and (genre_was_cleared or not current_genre or current_publisher not in combo_publishers):
-                publisher_combo.set("")
-                if row_id:
-                    self.app.catalog_manager.apply_catalog_selection_to_row(row_id, "entry_publisher", "Publisher", "")
 
     def set_panel_widget_value(self, attr_name, value):
         widget = self.tag_entries.get(attr_name)
@@ -811,6 +795,7 @@ class DetailPanel:
             logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
             return
 
+        # Carga directa de todos los campos
         self.set_panel_widget_value("entry_artist", values[1])
         self.set_panel_widget_value("entry_title", values[2])
         self.set_panel_widget_value("entry_mixartist", values[3])
@@ -819,6 +804,7 @@ class DetailPanel:
         self.set_panel_widget_value("entry_publisher", values[6])
         self.set_panel_widget_value("entry_year", values[7])
 
+        # Actualiza las listas de sugerencias de los combos sin sobrescribir lo que se acaba de cargar
         self.refresh_catalog_comboboxes()
 
         file_path = self.app.file_paths_map.get(item_id)

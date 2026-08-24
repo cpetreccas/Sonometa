@@ -302,10 +302,5 @@ class CatalogManager:
 
         self.add_catalog_value(catalog_key, new_value, persist=True, is_user_action=True)
 
-        col_header = self.app.columns[col_index] if hasattr(self.app, "columns") and len(self.app.columns) > col_index else col_name
-        logger.info(
-            f"Campo '{self.catalog_labels.get(catalog_key, catalog_key)}' actualizado desde panel: "
-            f"'{col_header}' -> '{new_value}'"
-        )
         if hasattr(self.app, "detail_panel") and hasattr(self.app.detail_panel, "on_row_select"):
             self.app.detail_panel.on_row_select(None)
