@@ -48,6 +48,78 @@ class GridPanel:
         self._build_treeview()
         self._setup_context_menu()
         self.cell_entry = None
+        self._active_cell_tab_navigator = None
+        self._editor_bindtag = "SonometaGridCellEditor"
+        self._tab_trace_enabled = True  # Temporal: diagnostico de secuencia TAB en edicion de celdas.
+        self._install_editor_bindtag_guard()
+        self._install_global_tab_edit_guard()
+
+    def _tab_trace(self, step, message):
+        if not self._tab_trace_enabled:
+            return
+        try:
+            self.logger.info(f"[TABTRACE {step}] {message}")
+        except Exception:
+            pass
+
+    def _install_editor_bindtag_guard(self):
+        # Captura TAB antes del binding de clase TCombobox/TEntry.
+        self.app.bind_class(self._editor_bindtag, "<Tab>", lambda e: self._on_editor_bindtag_tab(e, reverse=False))
+        self.app.bind_class(self._editor_bindtag, "<Shift-Tab>", lambda e: self._on_editor_bindtag_tab(e, reverse=True))
+        self.app.bind_class(self._editor_bindtag, "<ISO_Left_Tab>", lambda e: self._on_editor_bindtag_tab(e, reverse=True))
+
+    def _on_editor_bindtag_tab(self, event, reverse=False):
+        if not (self.cell_entry and self.cell_entry.winfo_exists()):
+            return
+        if not hasattr(self.cell_entry, "_is_cell_editing"):
+            return
+        if getattr(self, "_nav_lock", False):
+            return "break"
+
+        direction = "shift_tab" if reverse else "tab"
+        self._tab_trace("1/8", f"bindtag captura {direction}; widget={event.widget.winfo_class() if event and hasattr(event, 'widget') else 'NA'}")
+        if callable(self._active_cell_tab_navigator):
+            self._active_cell_tab_navigator(direction)
+        return "break"
+
+    def _attach_editor_bindtag(self, widget):
+        try:
+            current = list(widget.bindtags())
+            if self._editor_bindtag in current:
+                current.remove(self._editor_bindtag)
+
+            # Orden: widget -> bindtag editor -> resto (incluye clase y all)
+            if current:
+                new_tags = [current[0], self._editor_bindtag] + current[1:]
+            else:
+                new_tags = [self._editor_bindtag]
+            widget.bindtags(tuple(new_tags))
+        except Exception:
+            pass
+
+    def _install_global_tab_edit_guard(self):
+        # Guard global para evitar que Tab/Shift+Tab escapen del grid mientras se edita una celda.
+        self.app.bind_all("<KeyPress-Tab>", self._on_global_tab_during_cell_edit, add="+")
+        self.app.bind_all("<Shift-KeyPress-Tab>", lambda e: self._on_global_tab_during_cell_edit(e, reverse=True), add="+")
+        self.app.bind_all("<ISO_Left_Tab>", lambda e: self._on_global_tab_during_cell_edit(e, reverse=True), add="+")
+
+    def _on_global_tab_during_cell_edit(self, event, reverse=False):
+        if not (self.cell_entry and self.cell_entry.winfo_exists()):
+            return
+
+        if not hasattr(self.cell_entry, "_is_cell_editing"):
+            return
+
+        if getattr(self, "_nav_lock", False):
+            return "break"
+
+        direction = "shift_tab" if reverse else "tab"
+        self._tab_trace("1/8", f"bind_all captura {direction}; widget={event.widget.winfo_class() if event and hasattr(event, 'widget') else 'NA'}")
+        if callable(self._active_cell_tab_navigator):
+            self._active_cell_tab_navigator(direction)
+            return "break"
+
+        return "break"
 
     def _setup_styles(self):
         style = ttk.Style()
@@ -444,6 +516,8 @@ class GridPanel:
             )
 
         entry._is_cell_editing = True
+        self._attach_editor_bindtag(entry)
+        self._tab_trace("2/8", f"inicio edicion row={row_id} col={col_name} open_dropdown={open_dropdown}")
 
         current_value_str = str(current_value).strip() if current_value is not None else ""
         if col_name == "Filename":
@@ -475,12 +549,18 @@ class GridPanel:
             entry.after(50, lambda: self._open_tree_combo_dropdown(entry) if entry.winfo_exists() else None)
 
         finalized = False
+        pending_nav = {"dir": None}
+
+        def queue_nav(direction):
+            pending_nav["dir"] = direction
 
         def save_edit(evt=None, commit_value=True):
             nonlocal finalized
             if finalized:
                 return True
             finalized = True
+            self._active_cell_tab_navigator = None
+            self._tab_trace("3/8", f"save_edit commit={commit_value} row={row_id} col={col_name}")
 
             if not entry.winfo_exists():
                 self.cell_entry = None
@@ -615,6 +695,7 @@ class GridPanel:
             if finalized:
                 return "break"
             finalized = True
+            self._active_cell_tab_navigator = None
 
             self._close_tree_combo_dropdown(entry)
 
@@ -631,6 +712,8 @@ class GridPanel:
                 if not entry.winfo_exists():
                     return
 
+                self._tab_trace("4/8", f"execute_navigation dir={direction} row={row_id} col={col_name}")
+
                 is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
 
                 if is_open:
@@ -641,6 +724,7 @@ class GridPanel:
                     next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
                     if next_target:
                         next_row_id, next_col_index = next_target
+                        self._tab_trace("5/8", f"next_target row={next_row_id} col={self.columns[next_col_index]}")
                         self.tree.selection_set(next_row_id)
                         self.tree.focus(next_row_id)
                         self.tree.see(next_row_id)
@@ -650,6 +734,7 @@ class GridPanel:
 
                         self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
             finally:
+                pending_nav["dir"] = None
                 self.app.after(80, lambda: setattr(self, "_nav_lock", False))
 
         def navigate(direction, evt=None):
@@ -660,9 +745,11 @@ class GridPanel:
                 return "break"
 
             is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
+            self._tab_trace("6/8", f"navigate dir={direction} col={col_name} combo_open={is_open}")
 
             # En combos gestionados, Enter solo confirma/cierra el desplegable y mantiene el modo edicion.
             if col_name in managed_grid_fields and direction in ("enter", "shift_enter"):
+                pending_nav["dir"] = None
                 if is_open:
                     self._close_tree_combo_dropdown(entry)
                 entry.focus_set()
@@ -672,12 +759,53 @@ class GridPanel:
             self.app.after_idle(lambda: execute_navigation(direction))
             return "break"
 
+        def navigate_from_global_tab(direction):
+            if direction == "shift_tab":
+                queue_nav("shift_tab")
+                return navigate("shift_tab")
+            queue_nav("tab")
+            return navigate("tab")
+
         def on_focus_out(evt=None):
             def commit_if_closed():
                 if not entry.winfo_exists():
                     return
+
+                self._tab_trace("7/8", f"focus_out col={col_name} nav_lock={self._nav_lock} pending_nav={pending_nav.get('dir')}")
+
+                # Importante: si ya hay navegacion en curso, no ejecutar save_edit desde FocusOut.
+                # Evita destruir el editor actual antes de que execute_navigation abra la siguiente celda.
+                if getattr(self, "_nav_lock", False):
+                    self._tab_trace("8/8", "focus_out detecta nav_lock activo; se omite commit local")
+                    return
+
+                # Fallback: si Tab/Shift+Tab hizo focus traversal nativo antes de nuestros binds,
+                # forzamos igualmente la navegacion de celda para no salir del modo edicion.
+                pending_direction = pending_nav.get("dir")
+                if pending_direction and not getattr(self, "_nav_lock", False):
+                    self._nav_lock = True
+                    self.app.after_idle(lambda d=pending_direction: execute_navigation(d))
+                    return
+
                 if col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry):
                     return
+
+                # Regla fuerte para combos del grid: cualquier FocusOut se resuelve
+                # con navegacion interna (nunca cerrar edicion por save_edit directo).
+                if col_name in managed_grid_fields:
+                    focus_widget = self.app.focus_get()
+                    focus_name = str(focus_widget) if focus_widget else "None"
+
+                    if focus_widget is entry:
+                        return
+
+                    forced_direction = pending_direction or "tab"
+                    self._tab_trace("8/8", f"focus_out force-navigate dir={forced_direction} col={col_name} focus='{focus_name}'")
+                    queue_nav(forced_direction)
+                    self._nav_lock = True
+                    self.app.after_idle(lambda d=forced_direction: execute_navigation(d))
+                    return
+
                 save_edit()
 
             entry.after(150, commit_if_closed)
@@ -693,21 +821,29 @@ class GridPanel:
             def bind_popdown_events(evt=None):
                 try:
                     popdown = entry.tk.eval(f"ttk::combobox::PopdownWindow {entry}")
+                    popdown_widget = entry.nametowidget(popdown)
                     listbox = entry.nametowidget(f"{popdown}.f.l")
 
-                    listbox.bind("<Tab>", lambda e: navigate("tab", e))
-                    listbox.bind("<Shift-Tab>", lambda e: navigate("shift_tab", e))
-                    listbox.bind("<ISO_Left_Tab>", lambda e: navigate("shift_tab", e))
-                    # Se han removido <Return> y <KP_Enter> aquí para que Tkinter aplique el
-                    # comportamiento nativo en listbox (seleccionar y mantener foco).
+                    # Blindaje: algunos temas/entornos envian Tab al listbox y otros al popdown.
+                    for target in (listbox, popdown_widget):
+                        self._attach_editor_bindtag(target)
+                        target.bind("<Tab>", lambda e: (queue_nav("tab"), navigate("tab", e))[1])
+                        target.bind("<KeyPress-Tab>", lambda e: (queue_nav("tab"), navigate("tab", e))[1])
+                        target.bind("<Shift-Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
+                        target.bind("<ISO_Left_Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
                 except Exception:
                     pass
 
+            # Registrar bindings al crear el editor y tambien al abrir el desplegable.
+            bind_popdown_events()
             entry.bind("<Map>", bind_popdown_events)
+            entry.bind("<Button-1>", bind_popdown_events, add="+")
+            entry.bind("<Down>", bind_popdown_events, add="+")
+            entry.bind("<F4>", bind_popdown_events, add="+")
 
-        entry.bind("<Tab>", lambda e: navigate("tab", e))
-        entry.bind("<Shift-Tab>", lambda e: navigate("shift_tab", e))
-        entry.bind("<ISO_Left_Tab>", lambda e: navigate("shift_tab", e))
+        entry.bind("<Tab>", lambda e: (queue_nav("tab"), navigate("tab", e))[1])
+        entry.bind("<Shift-Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
+        entry.bind("<ISO_Left_Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
         entry.bind("<Return>", lambda e: navigate("enter", e))
         entry.bind("<KP_Enter>", lambda e: navigate("enter", e))
         entry.bind("<Shift-Return>", lambda e: navigate("shift_enter", e))
@@ -715,6 +851,7 @@ class GridPanel:
         entry.bind("<FocusOut>", on_focus_out)
 
         self.cell_entry = entry
+        self._active_cell_tab_navigator = navigate_from_global_tab
 
     def on_cell_double_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
