@@ -331,11 +331,17 @@ class GridPanel:
                 return rows[row_pos], editable_cols[col_pos + 1]
             if row_pos < len(rows) - 1:
                 return rows[row_pos + 1], editable_cols[0]
+            # Navegacion ciclica: ultimo campo de la ultima fila -> primer campo de la primera fila
+            if rows:
+                return rows[0], editable_cols[0]
         elif direction == "shift_tab":
             if col_pos > 0:
                 return rows[row_pos], editable_cols[col_pos - 1]
             if row_pos > 0:
                 return rows[row_pos - 1], editable_cols[-1]
+            # Navegacion ciclica inversa: primer campo de la primera fila -> ultimo campo de la ultima fila
+            if rows:
+                return rows[-1], editable_cols[-1]
         elif direction == "enter":
             if row_pos < len(rows) - 1:
                 return rows[row_pos + 1], col_index
@@ -655,9 +661,11 @@ class GridPanel:
 
             is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
 
-            # Si presiona INTRO en un combo abierto, solo cerramos y mantenemos foco en edición
-            if is_open and direction in ("enter", "shift_enter"):
-                self._close_tree_combo_dropdown(entry)
+            # En combos gestionados, Enter solo confirma/cierra el desplegable y mantiene el modo edicion.
+            if col_name in managed_grid_fields and direction in ("enter", "shift_enter"):
+                if is_open:
+                    self._close_tree_combo_dropdown(entry)
+                entry.focus_set()
                 return "break"
 
             self._nav_lock = True
@@ -675,7 +683,12 @@ class GridPanel:
             entry.after(150, commit_if_closed)
 
         if col_name in managed_grid_fields:
-            entry.bind("<<ComboboxSelected>>", lambda _e: save_edit())
+            # Mantener la celda en modo edicion tras seleccionar en el combo.
+            def on_combo_selected(_evt=None):
+                entry.after(0, lambda: entry.focus_set() if entry.winfo_exists() else None)
+                return "break"
+
+            entry.bind("<<ComboboxSelected>>", on_combo_selected)
 
             def bind_popdown_events(evt=None):
                 try:
