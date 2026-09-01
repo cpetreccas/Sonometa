@@ -1,15 +1,38 @@
 FUNCIONALIDADES:
+Al eliminar un registro del catálogo, el modal se pone en 2º plano.
+
+El gestor de catálogos tiene 3 botones que no cumplen con la guía de estilo corporativa. (Albumes, géneros y etiquetas)
 
 TAB cuando estamos en el grid con un combo abierto debe omitir la seleccion actual y pasar al siguiente elemento del grid.
 
 Generar botones corporativos con una guia de estilo unificada.
 
-La barra inferior de estado está mostrando logs. Debe ser más del estilo 'Procesando...' y 'Listo' (con iconos). El resto de los logs deben ir a un archivo de log.
+La barra inferior de estado está mostrando logs. Debe ser más del estilo 'Procesando...' y 'Listo' (con iconos).
+El resto de los logs deben ir a un archivo de log.
 
-Leer metadatos de Traktor (Analizado Si/No - Número de Cues) (Revisar funcionalidad)
+Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
 
-Rehacer el Header: El logo debe contrastar más con el fondo y el texto debe ser más legible, seleccionar carpeta y actualizar deben desaparecer. Incorporar buscador de texto, mantener ruta actual. Incluir iconos (no botones) para actualizar, para filtrar por traktor o por cues (hacer los toggle modados corporativo), añadir icono para gestionar catálogos.
+Rehacer el Header: El logo debe contrastar más con el fondo y el texto debe ser más legible, seleccionar carpeta y actualizar deben desaparecer.
+Incorporar buscador de texto, mantener ruta actual. Incluir iconos (no botones) para actualizar,
+para filtrar por traktor o por cues (hacer los toggle modados corporativo), añadir icono para gestionar catálogos.
 
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
-Defecto de rendimiento (más de 60 peticiones a Discogs por minuto falla)
+Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla)
+
+cuando tengo el selector abierto y pulso TAB o SHIFT+TAB debe descartar el valor seleccionado conservando el valor previo y navegas a la celda contigua.
+si accedo a una celda de combobox con el teclado no hay forma de abrir el desplegable con el ratón
+
+SONOMETA
+
+
+	Botones:
+	Header (revisar header):
+		Seleccionar carpeta
+		Actualizar
+		Gestionar catálogos
+
+	Detail:
+		Procesar
+		Limpiar
+		Reproducir

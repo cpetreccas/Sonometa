@@ -18,6 +18,9 @@ class GridPanel:
         self._shift_pivot_row = None
         self._last_edited_col = 0  # Rastrear última columna editada
 
+        # Cerrojo de seguridad para evitar ráfagas de tabulación (Auto-repeat debounce)
+        self._tab_lock = False
+
         # Configuración del nivel de zoom base
         self.zoom_level = 1.0
         self.BASE_FONT_SIZE = 9
@@ -476,17 +479,31 @@ class GridPanel:
                 return True
             finalized = True
 
+            # Verificar si el widget aún existe en Tcl/Tk antes de interactuar
+            if not entry.winfo_exists():
+                self.cell_entry = None
+                return True
+
             self._close_tree_combo_dropdown(entry)
 
             if not commit_value:
                 new_value = current_value_str
             else:
-                new_value = entry.get().strip()
+                try:
+                    new_value = entry.get().strip()
+                except Exception:
+                    new_value = current_value_str
 
             if hasattr(entry, "_is_cell_editing"):
-                del entry._is_cell_editing
+                try:
+                    del entry._is_cell_editing
+                except AttributeError:
+                    pass
 
-            entry.destroy()
+            try:
+                entry.destroy()
+            except Exception:
+                pass
             self.cell_entry = None
 
             self.tree.focus_set()
@@ -608,12 +625,19 @@ class GridPanel:
             return "break"
 
         def execute_navigation(direction):
+            # Si el editor fue destruido por otro evento en cola, omitir navegación
+            if not entry.winfo_exists():
+                return
+
             is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
             commit = not (is_open and "tab" in direction)
 
             if is_open:
                 if "tab" in direction:
-                    entry.set(current_value_str)
+                    try:
+                        entry.set(current_value_str)
+                    except Exception:
+                        pass
                 self._close_tree_combo_dropdown(entry)
 
             if save_edit(commit_value=commit):
@@ -630,6 +654,8 @@ class GridPanel:
                     self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
 
         def navigate(direction, evt=None):
+            if not entry.winfo_exists():
+                return "break"
             self.app.after_idle(lambda: execute_navigation(direction))
             return "break"
 
@@ -748,6 +774,58 @@ class GridPanel:
         if self.tree.selection():
             self.app.process_manager.clear_selected_metadata()
             return "break"
+
+    def _on_tree_enter_press(self, event):
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return "break"
+
+        focused_row = self.tree.focus()
+        if not focused_row:
+            selected_rows = self.tree.selection()
+            if selected_rows:
+                focused_row = selected_rows[0]
+
+        if not focused_row:
+            return "break"
+
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+        target_col = editable_cols[0]
+
+        self._start_tree_cell_edit(focused_row, target_col, open_dropdown=True)
+        return "break"
+
+    def _on_tree_tab_press(self, event, reverse=False):
+        # Si ya hay un bloqueo de tabulación activo, interceptamos para evitar desborde de eventos
+        if self._tab_lock:
+            return "break"
+
+        if self.cell_entry and self.cell_entry.winfo_exists():
+            return "break"
+
+        focused_row = self.tree.focus()
+        if not focused_row:
+            selected_rows = self.tree.selection()
+            if selected_rows:
+                focused_row = selected_rows[0]
+
+        if not focused_row:
+            return "break"
+
+        self._tab_lock = True
+        try:
+            editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+
+            if reverse:
+                target_col = editable_cols[-1]
+            else:
+                target_col = editable_cols[0]
+
+            self._start_tree_cell_edit(focused_row, target_col, open_dropdown=False)
+        finally:
+            # Liberamos el cerrojo de manera segura tras un breve lapso de tiempo (debounce)
+            self.app.after(60, lambda: setattr(self, "_tab_lock", False))
+
+        return "break"
 
     def _handle_excel_navigation(self, event, move_to="home", select_range=False):
         if self.cell_entry and self.cell_entry.winfo_exists():
@@ -886,51 +964,3 @@ class GridPanel:
         self.tree.focus_set()
         res = action_func(event, **kwargs)
         return "break" if res is None else res
-
-    def _on_tree_tab_press(self, event, reverse=False):
-        if self.cell_entry and self.cell_entry.winfo_exists():
-            return
-
-        focused_row = self.tree.focus()
-        if not focused_row:
-            selected_rows = self.tree.selection()
-            if selected_rows:
-                focused_row = selected_rows[0]
-
-        if not focused_row:
-            return "break"
-
-        editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
-        last_col = getattr(self, "_last_edited_col", None)
-
-        if reverse:
-            if last_col is not None and last_col in editable_cols:
-                col_pos = editable_cols.index(last_col)
-                target_col = editable_cols[max(0, col_pos - 1)]
-            else:
-                target_col = editable_cols[-1]
-        else:
-            if last_col is not None and last_col in editable_cols:
-                col_pos = editable_cols.index(last_col)
-                if col_pos < len(editable_cols) - 1:
-                    target_col = editable_cols[col_pos + 1]
-                else:
-                    rows = list(self.tree.get_children())
-                    try:
-                        row_pos = rows.index(focused_row)
-                        if row_pos < len(rows) - 1:
-                            next_row = rows[row_pos + 1]
-                            self.tree.selection_set(next_row)
-                            self.tree.focus(next_row)
-                            self.tree.see(next_row)
-                            focused_row = next_row
-                            target_col = editable_cols[0]
-                        else:
-                            target_col = editable_cols[-1]
-                    except ValueError:
-                        target_col = editable_cols[0]
-            else:
-                target_col = editable_cols[0]
-
-        self._start_tree_cell_edit(focused_row, target_col, open_dropdown=False)
-        return "break"
