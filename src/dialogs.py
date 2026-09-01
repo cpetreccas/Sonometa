@@ -386,7 +386,7 @@ class DialogManager:
 
     @staticmethod
     def show_themed_dialog(app, title, message, level="info", is_confirm=False, parent=None):
-        """Muestra un diálogo modal y devuelve forzosamente el foco a la app principal al cerrarse."""
+        """Muestra un diálogo modal y devuelve forzosamente el foco a la ventana padre o principal al cerrarse."""
         host = parent if parent is not None else app
         dialog = ctk.CTkToplevel(host)
         dialog.title(title)
@@ -450,9 +450,9 @@ class DialogManager:
         # Espera a que el usuario cierre la ventana modal
         dialog.wait_window()
 
-        # Devuelve el foco a la app principal para reactivar los eventos de teclado
-        if app and app.winfo_exists():
-            app.focus_force()
+        # Devuelve el foco al host adecuado
+        if host and host.winfo_exists():
+            host.focus_force()
 
         return result["value"]
 
@@ -638,7 +638,18 @@ class DialogManager:
         )
         lbl_sub.pack(anchor="w", padx=16, pady=(0, 4))
 
-        tabview = ctk.CTkTabview(win)
+        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
+        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+
+        tabview = ctk.CTkTabview(
+            win,
+            segmented_button_fg_color="#181818",
+            segmented_button_selected_color=corp_color,
+            segmented_button_selected_hover_color=corp_hover,
+            segmented_button_unselected_color="#262626",
+            segmented_button_unselected_hover_color="#333333",
+            text_color="#FFFFFF"
+        )
         tabview.pack(fill="both", expand=True, padx=16, pady=(4, 16))
 
         def prompt_for_value(title, prompt_text, default_value=""):

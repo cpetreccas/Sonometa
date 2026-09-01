@@ -1,13 +1,7 @@
 FUNCIONALIDADES:
-Al eliminar un registro del catálogo, el modal se pone en 2º plano.
-
-El gestor de catálogos tiene 3 botones que no cumplen con la guía de estilo corporativa. (Albumes, géneros y etiquetas)
-
-TAB cuando estamos en el grid con un combo abierto debe omitir la seleccion actual y pasar al siguiente elemento del grid.
-
 Generar botones corporativos con una guia de estilo unificada.
 
-La barra inferior de estado está mostrando logs. Debe ser más del estilo 'Procesando...' y 'Listo' (con iconos).
+La barra inferior de estado está mostrando logs. Debe ser más del estilo 'Se han encontrado XXX ''Procesando...' y 'Listo' (con iconos).
 El resto de los logs deben ir a un archivo de log.
 
 Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)

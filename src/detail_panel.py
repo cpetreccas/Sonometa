@@ -580,6 +580,10 @@ class DetailPanel:
 
         if cover_data:
             try:
+                # Permite cargar imágenes incompletas/truncadas
+                from PIL import ImageFile
+                ImageFile.LOAD_TRUNCATED_IMAGES = True
+
                 image_stream = io.BytesIO(cover_data)
                 img = Image.open(image_stream)
 
@@ -592,8 +596,8 @@ class DetailPanel:
                 self.label_cover.configure(image=ctk_img, text="")
                 self.label_cover.image = ctk_img
                 return
-            except Exception as e:
-                self.logger.error(f"Error procesando vista previa de la carátula: {str(e)}")
+            except (OSError, SyntaxError, Exception) as e:
+                self.logger.warning(f"No se pudo cargar la vista previa de la carátula (posiblemente corrupta): {str(e)}")
 
         self.label_cover.configure(image="", text="Sin carátula")
         self.label_cover.image = None
