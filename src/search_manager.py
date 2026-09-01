@@ -1,5 +1,13 @@
 import tkinter as tk
 import customtkinter as ctk
+import unicodedata
+
+def remove_accents(text: str) -> str:
+    """Normaliza y elimina tildes/diacríticos de una cadena de texto."""
+    if not text:
+        return ""
+    normalized = unicodedata.normalize('NFD', str(text))
+    return ''.join(c for c in normalized if unicodedata.category(c) != 'Mn').lower()
 
 class SearchManager:
     def __init__(self, app, tree, frame_bottom_ref, detail_panel, grid_panel):
@@ -93,7 +101,7 @@ class SearchManager:
         for idx in searchable_indexes:
             if idx < len(values) and values[idx] is not None:
                 parts.append(str(values[idx]))
-        return " ".join(parts).lower()
+        return remove_accents(" ".join(parts))
 
     def sync_all_tree_items(self):
         """Sincroniza la lista de IDs originales cargados en el árbol."""
@@ -114,7 +122,7 @@ class SearchManager:
 
     def apply_search_filter(self):
         self.sync_all_tree_items()
-        query = self.search_var.get().strip().lower()
+        query = remove_accents(self.search_var.get().strip())
 
         matching_rows = []
         for row_id in self._all_tree_items:

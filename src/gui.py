@@ -159,8 +159,8 @@ class App(ctk.CTk):
         self.bind("<Control-q>", lambda e: self.on_close())
         self.bind("<Control-a>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-A>", lambda e: self.grid_panel.select_all_rows())
-        self.bind("<Control-f>", lambda e: self.search_manager.toggle_search_bar())
-        self.bind("<Control-F>", lambda e: self.search_manager.toggle_search_bar())
+        self.bind("<Control-f>", lambda e: self.focus_header_search())
+        self.bind("<Control-F>", lambda e: self.focus_header_search())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
 
         self.bind_all("<Control-z>", self.undo_manager.undo)
@@ -179,7 +179,6 @@ class App(ctk.CTk):
         self.bind_all("<Control-KP_0>", lambda e: self.grid_panel._on_key_zoom_reset(e))
         self.bind_all("<Control-Key-0>", lambda e: self.grid_panel._on_key_zoom_reset(e))
 
-        # Captura universal de navegación (simples y con Shift)
         nav_keys = [
             "<Up>", "<Down>", "<Prior>", "<Next>", "<Home>", "<End>",
             "<Shift-Up>", "<Shift-Down>", "<Shift-Prior>", "<Shift-Next>",
@@ -190,6 +189,12 @@ class App(ctk.CTk):
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
+    def focus_header_search(self):
+        """Pone el foco en el nuevo cuadro de búsqueda del Header al presionar Ctrl+F."""
+        if hasattr(self, "header_panel") and hasattr(self.header_panel, "entry_search"):
+            self.header_panel.entry_search.focus()
+            self.header_panel.entry_search.select_range(0, "end")
+
     def _check_initial_status(self):
         self.logger.info("Aplicación Sonometa iniciada correctamente.")
         if self.discogs_token:
@@ -198,7 +203,6 @@ class App(ctk.CTk):
             self.logger.warning("No hay token de Discogs configurado. Ve a Archivo → ⚙ Configuración.")
 
     def show_themed_dialog(self, title, message, level="info"):
-        """Delega la presentación de diálogos emergentes a DialogManager."""
         DialogManager.show_themed_dialog(self, title, message, level)
 
     # --- Acciones Principales ---
@@ -261,30 +265,26 @@ class App(ctk.CTk):
 
         self.detail_panel.refresh_catalog_comboboxes()
         self.search_manager.sync_all_tree_items()
-        if self.search_manager.is_visible:
+        if hasattr(self.header_panel, "entry_search") and self.header_panel.entry_search.get():
             self.search_manager.apply_search_filter()
 
         self.logger.info(f"Se encontraron {len(items)} archivo(s) de audio compatibles.")
 
     def _on_global_key(self, event):
-        """Redirige las teclas de navegación/selección al Treeview salvo si se edita un campo de texto."""
         if getattr(self, "_is_redirecting_key", False):
             return
 
-        # Si el grid tiene un editor de celda activo, ignorar la captura global
         if hasattr(self, "grid_panel") and self.grid_panel.cell_entry:
             return
 
         try:
             focused_widget = self.focus_get()
         except (KeyError, AttributeError):
-            # Ocurre cuando el popdown del Combobox se cierra o destruye
             return
 
         if focused_widget is not None:
             widget_class = focused_widget.winfo_class().lower()
 
-            # Ignorar si el foco está en un control de entrada
             if any(k in widget_class for k in ["entry", "text", "spinbox", "combobox"]):
                 return
 

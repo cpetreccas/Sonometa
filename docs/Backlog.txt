@@ -6,16 +6,9 @@ El resto de los logs deben ir a un archivo de log.
 
 Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
 
-Rehacer el Header: El logo debe contrastar más con el fondo y el texto debe ser más legible, seleccionar carpeta y actualizar deben desaparecer.
-Incorporar buscador de texto, mantener ruta actual. Incluir iconos (no botones) para actualizar,
-para filtrar por traktor o por cues (hacer los toggle modados corporativo), añadir icono para gestionar catálogos.
-
 Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 
 Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla)
-
-cuando tengo el selector abierto y pulso TAB o SHIFT+TAB debe descartar el valor seleccionado conservando el valor previo y navegas a la celda contigua.
-si accedo a una celda de combobox con el teclado no hay forma de abrir el desplegable con el ratón
 
 SONOMETA
 
