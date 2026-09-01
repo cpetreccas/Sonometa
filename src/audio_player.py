@@ -2,7 +2,6 @@ import os
 import io
 import time
 import pygame
-import customtkinter as ctk
 
 
 class AudioPlayer:
@@ -38,13 +37,16 @@ class AudioPlayer:
     # ------------------------------------------------------------------
 
     def load_track(self, file_path):
-        """Asigna la ruta de la pista y resetea la barra de estado."""
+        """Asigna la ruta de la pista, obtiene su duración ultrarrápida y resetea la interfaz."""
         if self.current_file_path == file_path:
             return
 
         self.stop_and_unload()
         self.current_file_path = file_path
-        self._update_time_label(0, 0)
+
+        # Obtener duración al instante leyendo la cabecera del archivo
+        self.total_length = self.panel.get_fast_audio_duration(file_path)
+        self.panel.update_audio_time_display(0, self.total_length)
         self.panel.slider_audio.set(0)
 
     def toggle_play_pause(self):
@@ -70,10 +72,8 @@ class AudioPlayer:
     def start_playback(self, start_time=0.0):
         """Carga el audio en memoria y reproduce desde la posición indicada."""
         try:
-            # Obtener duración total mediante Mutagen para precisión en el seek
-            from mutagen import File as MutagenFile
-            audio_info = MutagenFile(self.current_file_path)
-            self.total_length = audio_info.info.length if audio_info and audio_info.info else 0.0
+            if not self.total_length or self.total_length <= 0:
+                self.total_length = self.panel.get_fast_audio_duration(self.current_file_path)
 
             # Cargar archivo a búfer en memoria si no está cargado ya
             if self.audio_stream is None:
@@ -107,6 +107,12 @@ class AudioPlayer:
         except Exception:
             pass
 
+        if self.audio_stream:
+            try:
+                self.audio_stream.close()
+            except Exception:
+                pass
+
         self.audio_stream = None
         self.is_playing = False
         self.is_paused = False
@@ -117,7 +123,7 @@ class AudioPlayer:
         if hasattr(self.panel, "btn_play") and self.panel.btn_play:
             self.panel.btn_play.configure(text="▶")
             self.panel.slider_audio.set(0)
-            self._update_time_label(0, 0)
+            self.panel.update_audio_time_display(0, 0)
 
     # ------------------------------------------------------------------
     # Gestión del Bloqueo de Archivos
@@ -159,7 +165,7 @@ class AudioPlayer:
             if self.total_length > 0:
                 progress = current_pos / self.total_length
                 self.panel.slider_audio.set(progress)
-                self._update_time_label(current_pos, self.total_length)
+                self.panel.update_audio_time_display(current_pos, self.total_length)
 
             self.app.after(100, self._schedule_progress_update)
 
@@ -172,23 +178,18 @@ class AudioPlayer:
             target_time = float(value) * self.total_length
             was_playing = self.is_playing and not self.is_paused
 
+            current_path = self.current_file_path
             self.stop_and_unload()
+            self.current_file_path = current_path
+            self.total_length = self.panel.get_fast_audio_duration(current_path)
+
             if was_playing:
                 self.start_playback(start_time=target_time)
             else:
                 self.start_time_offset = target_time
                 self.panel.slider_audio.set(value)
-                self._update_time_label(target_time, self.total_length)
+                self.panel.update_audio_time_display(target_time, self.total_length)
 
     def set_volume(self, value):
         self.volume = float(value)
         pygame.mixer.music.set_volume(self.volume)
-
-    def _update_time_label(self, current_sec, total_sec):
-        def format_time(seconds):
-            mins = int(seconds // 60)
-            secs = int(seconds % 60)
-            return f"{mins:02d}:{secs:02d}"
-
-        text = f"{format_time(current_sec)} / {format_time(total_sec)}"
-        self.panel.lbl_audio_time.configure(text=text)

@@ -26,7 +26,7 @@ class GridPanel:
         self.BASE_FONT_SIZE = 9
         self.BASE_ROW_HEIGHT = 28
 
-        # Configuración base de columnas
+        # Configuración base de columnas (Album, Genre y Publisher restaurados a la izquierda 'w')
         self.base_col_config = {
             "Filename":  {"width": 280, "minwidth": 180, "stretch": True,  "anchor": "w"},
             "Artist":    {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
@@ -160,16 +160,20 @@ class GridPanel:
 
         style.configure("Treeview.Item", borderwidth=0, relief="flat", padding=(4, 0))
 
+        # Encabezados en gris claro elegante
         style.configure(
             "Treeview.Heading",
             background="#111111",
-            foreground="#FFFFFF",
+            foreground="#D4D4D8",
             font=('Segoe UI', current_heading_size, 'bold'),
             borderwidth=0,
             relief="flat",
             padding=(5, 5)
         )
-        style.map("Treeview", background=[('selected', self.app.CORP_COLOR)])
+
+        # Fondo de fila seleccionada suavizado a morado refinado
+        selection_bg = getattr(self.app, "CORP_SELECTION", "#581C87")
+        style.map("Treeview", background=[('selected', selection_bg)])
         style.map("Treeview.Heading", background=[('active', '#2A2D32')])
 
     def set_zoom(self, factor):
@@ -313,6 +317,11 @@ class GridPanel:
         )
 
     def _show_tree_context_menu(self, event):
+        # Evita abrir el menú contextual si el clic fue en el encabezado
+        region = self.tree.identify_region(event.x, event.y)
+        if region == "heading":
+            return
+
         row_id = self.tree.identify_row(event.y)
         if not row_id:
             return

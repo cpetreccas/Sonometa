@@ -51,6 +51,7 @@ class App(ctk.CTk):
         self.file_paths_map = {}
         self.log_history = deque(maxlen=5000)
         self._multi_select_mode = False
+        self.detail_panel_visible = True  # Visibilidad del panel lateral
         self.log_window = None
         self.log_textbox = None
 
@@ -62,7 +63,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v0.08 - Audio Tag Suite")
+        self.title("Sonometa v0.09 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))
@@ -145,6 +146,17 @@ class App(ctk.CTk):
         )
         self.label_status.pack(fill="x", padx=12, pady=(2, 6))
 
+    def toggle_detail_panel(self):
+        """Alterna la visibilidad del panel de detalles lateral."""
+        if self.detail_panel_visible:
+            self.detail_panel.frame_sidebar.pack_forget()
+            self.detail_panel_visible = False
+            self.logger.info("Panel lateral colapsado.")
+        else:
+            self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
+            self.detail_panel_visible = True
+            self.logger.info("Panel lateral expandido.")
+
     @property
     def tree(self):
         return self.grid_panel.tree
@@ -161,6 +173,8 @@ class App(ctk.CTk):
         self.bind("<Control-A>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-f>", lambda e: self.focus_header_search())
         self.bind("<Control-F>", lambda e: self.focus_header_search())
+        self.bind("<Control-b>", lambda e: self.toggle_detail_panel())
+        self.bind("<Control-B>", lambda e: self.toggle_detail_panel())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
 
         self.bind_all("<Control-z>", self.undo_manager.undo)

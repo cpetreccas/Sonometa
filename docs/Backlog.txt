@@ -1,25 +1,28 @@
-FUNCIONALIDADES:
-Generar botones corporativos con una guia de estilo unificada.
+FUNCIONALIDADES GENERALES:
+- Generar botones corporativos con una guia de estilo unificada.
+- Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
+- Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
+- Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
 
-La barra inferior de estado está mostrando logs. Debe ser más del estilo 'Se han encontrado XXX ''Procesando...' y 'Listo' (con iconos).
-El resto de los logs deben ir a un archivo de log.
+LOGS:
+Logs de colores.
+Limpiar logs.
 
-Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
+ACERCA DE SONOMETA:
+Enseñar el logo corporativo.
+Poner datos de contacto para soporte o comercial?
 
-Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
+GRID PANEL:
+Pintar líneas que delimiten las columnas.
 
-Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla)
+DETAIL PANEL:
+Botón derecho en input text deben reaccionar.
+Revisar diseño del contextual de carátula.
 
-SONOMETA
+MENU:
+Añadir la opción de deshacer/rehacer.
+Al seleccionar una opción el evento hover debe poder desplegar otras opciones (ahora obliga al click)
 
-
-	Botones:
-	Header (revisar header):
-		Seleccionar carpeta
-		Actualizar
-		Gestionar catálogos
-
-	Detail:
-		Procesar
-		Limpiar
-		Reproducir
+FOOTER:
+Si no hay ningún proceso la barra desaparecerá (o se verá siempre vacía)???
+La acción de desplazarse entre filas debe dejar el log del footer con el texto 'Listo'

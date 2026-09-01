@@ -6,8 +6,10 @@ import tkinter as tk
 from tkinter import messagebox
 from io import BytesIO
 import customtkinter as ctk
-from ui_utils import UiUtils
+from mutagen import File as MutagenFile
 from PIL import Image, ImageGrab
+
+from ui_utils import UiUtils
 from undo_manager import HistoryAction
 from audio_player import AudioPlayer
 from log_handler import LogManager
@@ -15,6 +17,8 @@ from log_handler import LogManager
 
 class DetailPanel:
     """Panel lateral de metadatos y carátula desacoplado de la ventana principal."""
+
+    BORDER_DEFAULT = "#3F3F46"  # Borde fino sutil para cajas en reposo
 
     def __init__(self, app, parent, logger, get_resource_path, fallback_process_icon=None):
         self.icono_procesar = self.load_process_icon()
@@ -24,6 +28,10 @@ class DetailPanel:
         self.logger = logger
         self.get_resource_path = get_resource_path
         self.fallback_process_icon = fallback_process_icon
+
+        # Guarda la imagen PIL en memoria para redimensionarla dinámicamente según la altura
+        self._current_raw_cover_pil = None
+        self._resize_timer = None
 
         # Guarda el ID de la fila que se estaba editando antes de cambiar de selección
         self._editing_row_id = None
@@ -37,6 +45,7 @@ class DetailPanel:
         self.multi_entries = {}
 
         self.frame_sidebar = None
+        self.frame_cover_container = None
         self.label_cover = None
         self._cover_context_menu = None
         self._cover_context_menu_multi = None
@@ -52,6 +61,29 @@ class DetailPanel:
 
         self._setup_tag_panel()
         self.audio_player = AudioPlayer(self)
+
+    @staticmethod
+    def get_fast_audio_duration(file_path):
+        """Lee únicamente el header del archivo sin decodificar audio completo."""
+        try:
+            audio = MutagenFile(file_path)
+            if audio and audio.info and hasattr(audio.info, "length"):
+                return float(audio.info.length)
+        except Exception:
+            pass
+        return 0.0
+
+    def update_audio_time_display(self, current_sec, total_sec):
+        """Formatea e imprime el estado temporal MM:SS / MM:SS en la etiqueta."""
+        def format_time(seconds):
+            seconds = max(0, int(seconds or 0))
+            mins = seconds // 60
+            secs = seconds % 60
+            return f"{mins:02d}:{secs:02d}"
+
+        str_current = format_time(current_sec)
+        str_total = format_time(total_sec)
+        self.lbl_audio_time.configure(text=f"{str_current} / {str_total}")
 
     def _track_editing_row(self, event=None):
         """Memoriza la fila actualmente seleccionada cuando un campo recibe el foco."""
@@ -70,14 +102,14 @@ class DetailPanel:
             pass
 
     def _on_widget_focus_out(self, widget, attr_name=None, is_combo=False, event=None):
-        """Restaura el borde original al perder el foco y procesa cambios."""
+        """Restaura el borde original (#3F3F46) al perder el foco y procesa cambios."""
         try:
             if widget == self.btn_clean:
                 widget.configure(border_color="#DC2626", border_width=1)
             elif widget == self.btn_process:
                 widget.configure(border_color=self.app.CORP_COLOR, border_width=1)
             else:
-                widget.configure(border_color="#565B5E", border_width=1)
+                widget.configure(border_color=self.BORDER_DEFAULT, border_width=1)
         except Exception:
             pass
 
@@ -209,17 +241,18 @@ class DetailPanel:
             ("Etiqueta", "entry_publisher")
         ]
 
-        for label_text, attr_name in fields:
+        for idx, (label_text, attr_name) in enumerate(fields):
+            top_pad = 8 if idx == 0 else 4
             lbl = ctk.CTkLabel(
                 self.frame_sidebar,
                 text=label_text,
                 anchor="w",
                 font=ctk.CTkFont(family="Inter", size=11, weight="bold")
             )
-            lbl.pack(fill="x", padx=10, pady=(6, 2))
+            lbl.pack(fill="x", padx=10, pady=(top_pad, 1))
 
             field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-            field_frame.pack(fill="x", padx=10, pady=(0, 2))
+            field_frame.pack(fill="x", padx=10, pady=(0, 4))
 
             if attr_name in self.panel_combo_fields:
                 catalog_key = self.panel_combo_fields[attr_name]
@@ -229,7 +262,7 @@ class DetailPanel:
                     state="readonly",
                     height=26,
                     border_width=1,
-                    border_color="#565B5E",
+                    border_color=self.BORDER_DEFAULT,
                     font=ctk.CTkFont(family="Inter", size=12),
                     command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
                 )
@@ -251,7 +284,7 @@ class DetailPanel:
                     field_frame,
                     height=26,
                     border_width=1,
-                    border_color="#565B5E",
+                    border_color=self.BORDER_DEFAULT,
                     font=ctk.CTkFont(family="Inter", size=12)
                 )
                 widget.bind("<FocusIn>", lambda _e, _w=widget: self._on_widget_focus_in(_w))
@@ -269,7 +302,7 @@ class DetailPanel:
                 state=multi_state,
                 height=26,
                 border_width=1,
-                border_color="#565B5E",
+                border_color=self.BORDER_DEFAULT,
                 font=ctk.CTkFont(size=12),
                 command=lambda _value, _a=attr_name: self.on_multi_panel_commit(_a)
             )
@@ -303,28 +336,31 @@ class DetailPanel:
             anchor="w",
             font=ctk.CTkFont(size=11, weight="bold")
         )
-        lbl_cover_title.pack(fill="x", padx=10, pady=(6, 2))
+        lbl_cover_title.pack(fill="x", padx=10, pady=(4, 1))
+
+        self.frame_cover_container = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
+        self.frame_cover_container.pack(fill="both", expand=True, padx=10, pady=(2, 2))
 
         self.label_cover = ctk.CTkLabel(
-            self.frame_sidebar,
+            self.frame_cover_container,
             text="Sin carátula",
-            width=160,
-            height=160,
+            width=150,
+            height=150,
             fg_color="transparent",
             text_color="gray",
             border_color="#6B7280",
             border_width=1,
             cursor="hand2"
         )
-        self.label_cover.pack(padx=5, pady=2)
+        self.label_cover.pack(anchor="center", expand=True)
         UiUtils(self.label_cover, "Clic derecho para opciones de carátula")
 
-        # Menús contextuales de carátula
+        self.frame_cover_container.bind("<Configure>", self._on_cover_container_resize)
         self._setup_cover_context_menus()
 
         # --- SECCIÓN MINI REPRODUCTOR DE AUDIO ---
         self.frame_player = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-        self.frame_player.pack(fill="x", padx=10, pady=(12, 6))
+        self.frame_player.pack(fill="x", padx=10, pady=(2, 6))
 
         player_top = ctk.CTkFrame(self.frame_player, fg_color="transparent")
         player_top.pack(fill="x")
@@ -332,20 +368,20 @@ class DetailPanel:
         self.btn_play = ctk.CTkButton(
             player_top,
             text="▶",
-            width=32,
-            height=28,
+            width=30,
+            height=26,
             fg_color=self.app.CORP_COLOR,
             hover_color="#581C87",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=ctk.CTkFont(size=13, weight="bold"),
             command=lambda: self.audio_player.toggle_play_pause() if self.audio_player else None
         )
-        self.btn_play.pack(side="left", padx=(0, 5))
+        self.btn_play.pack(side="left", padx=(0, 6))
 
         self.slider_audio = ctk.CTkSlider(
             player_top,
             from_=0,
             to=1,
-            height=14,
+            height=12,
             progress_color=self.app.CORP_COLOR,
             button_color="#FFFFFF",
             button_hover_color="#E0E0E0",
@@ -363,8 +399,11 @@ class DetailPanel:
         self.lbl_audio_time.pack(fill="x", pady=(2, 0))
 
         # --- BOTONES DE ACCIÓN ---
+        frame_actions = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
+        frame_actions.pack(fill="x", side="bottom", padx=10, pady=(4, 8))
+
         self.btn_process = ctk.CTkButton(
-            self.frame_sidebar,
+            frame_actions,
             text="Procesar",
             image=self.app.process_icon,
             compound="left",
@@ -373,20 +412,19 @@ class DetailPanel:
             border_width=2,
             border_color=self.app.CORP_COLOR,
             font=ctk.CTkFont(size=13, weight="bold"),
-            height=32,
+            height=30,
             command=self.app.process_manager.process_discogs_data
         )
-        self.btn_process.pack(fill="x", padx=10, pady=(4, 6))
+        self.btn_process.pack(fill="x", pady=(0, 5))
         UiUtils(self.btn_process, "Busca metadatos y carátulas de los archivos seleccionados")
 
-        # Efectos hover y ejecución por teclado en btn_process
         self.btn_process.bind("<Enter>", lambda _e: self._set_btn_hover(self.btn_process, True))
         self.btn_process.bind("<Leave>", lambda _e: self._set_btn_hover(self.btn_process, False))
         self.btn_process.bind("<Return>", lambda _e: self.app.process_manager.process_discogs_data())
         self.btn_process.bind("<space>", lambda _e: self.app.process_manager.process_discogs_data())
 
         self.btn_clean = ctk.CTkButton(
-            self.frame_sidebar,
+            frame_actions,
             text="Limpiar",
             image=self.app.broom_icon,
             compound="left",
@@ -397,17 +435,49 @@ class DetailPanel:
             hover_color=("#FEE2E2", "#450A0A"),
             corner_radius=8,
             font=ctk.CTkFont(size=13, weight="bold"),
-            height=32,
+            height=30,
             command=lambda: self.app.process_manager.clear_selected_metadata()
         )
-        self.btn_clean.pack(fill="x", padx=10, pady=(0, 6))
+        self.btn_clean.pack(fill="x")
         UiUtils(self.btn_clean, "Elimina los metadatos de los archivos seleccionados")
 
         self.btn_clean.bind("<Return>", lambda _e: self.app.process_manager.clear_selected_metadata())
         self.btn_clean.bind("<space>", lambda _e: self.app.process_manager.clear_selected_metadata())
 
-        # --- ENCADENAMIENTO EXPLÍCITO DE TABULACIÓN ---
         self._bind_custom_tab_order()
+
+    def _on_cover_container_resize(self, event):
+        """Calcula el tamaño óptimo de la carátula basado en el espacio vertical disponible."""
+        if self._resize_timer:
+            self.app.after_cancel(self._resize_timer)
+        self._resize_timer = self.app.after(30, self._apply_dynamic_cover_resize)
+
+    def _apply_dynamic_cover_resize(self):
+        """Ajusta la imagen y la caja entre 60px y 230px según el alto libre del contenedor."""
+        if not self.frame_cover_container:
+            return
+
+        container_h = self.frame_cover_container.winfo_height()
+        container_w = self.frame_cover_container.winfo_width()
+
+        if container_h <= 10 or container_w <= 10:
+            return
+
+        max_available = min(container_w, container_h)
+        target_size = int(max(60, min(230, max_available - 8)))
+
+        self.label_cover.configure(width=target_size, height=target_size)
+
+        if self._current_raw_cover_pil:
+            try:
+                resized_img = self._current_raw_cover_pil.resize(
+                    (target_size, target_size), Image.Resampling.LANCZOS
+                )
+                ctk_img = ctk.CTkImage(light_image=resized_img, dark_image=resized_img, size=(target_size, target_size))
+                self.label_cover.configure(image=ctk_img, text="")
+                self.label_cover.image = ctk_img
+            except Exception as e:
+                self.logger.warning(f"Error al redimensionar carátula responsiva: {e}")
 
     def _set_btn_hover(self, btn, is_hover):
         """Aplica visualmente el borde blanco al pasar el ratón por encima."""
@@ -561,6 +631,7 @@ class DetailPanel:
         selected_rows = list(selected_rows or self.app.tree.selection())
         has_any_cover = any(self.app.grid_panel.row_has_cover(row_id) for row_id in selected_rows)
         text = "Mantener carátulas" if has_any_cover else "Sin carátula"
+        self._current_raw_cover_pil = None
         self.label_cover.configure(image="", text=text, text_color="gray")
         self.label_cover.image = None
 
@@ -580,7 +651,6 @@ class DetailPanel:
 
         if cover_data:
             try:
-                # Permite cargar imágenes incompletas/truncadas
                 from PIL import ImageFile
                 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -590,15 +660,13 @@ class DetailPanel:
                 if img.mode not in ("RGB", "RGBA"):
                     img = img.convert("RGB")
 
-                img = img.resize((160, 160), Image.Resampling.LANCZOS)
-
-                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(160, 160))
-                self.label_cover.configure(image=ctk_img, text="")
-                self.label_cover.image = ctk_img
+                self._current_raw_cover_pil = img
+                self._apply_dynamic_cover_resize()
                 return
             except (OSError, SyntaxError, Exception) as e:
                 self.logger.warning(f"No se pudo cargar la vista previa de la carátula (posiblemente corrupta): {str(e)}")
 
+        self._current_raw_cover_pil = None
         self.label_cover.configure(image="", text="Sin carátula")
         self.label_cover.image = None
 
@@ -767,6 +835,7 @@ class DetailPanel:
             self.audio_player.stop_and_unload()
 
         self._editing_row_id = None
+        self._current_raw_cover_pil = None
         for widget in self.tag_entries.values():
             if isinstance(widget, ctk.CTkComboBox):
                 widget.set("")
@@ -814,6 +883,11 @@ class DetailPanel:
         file_path = self.app.file_paths_map.get(item_id)
         if file_path:
             self.display_cover_art(file_path)
+
+            # Obtención instantánea de la duración total leyendo la cabecera del archivo
+            total_duration = self.get_fast_audio_duration(file_path)
+            self.update_audio_time_display(0, total_duration)
+
             if self.audio_player:
                 self.audio_player.load_track(file_path)
 
