@@ -16,17 +16,17 @@ class GridPanel:
 
         # Pivote para selecciones con Shift estilo Excel
         self._shift_pivot_row = None
-        self._last_edited_col = 0  # Rastrear última columna editada
+        self._last_edited_col = 0
 
-        # Cerrojo de seguridad para evitar ráfagas de tabulación (Auto-repeat debounce)
-        self._tab_lock = False
+        # Cerrojo unificado para evitar ráfagas de teclado (Auto-repeat debounce)
+        self._nav_lock = False
 
         # Configuración del nivel de zoom base
         self.zoom_level = 1.0
         self.BASE_FONT_SIZE = 9
         self.BASE_ROW_HEIGHT = 28
 
-        # Configuración base de columnas para reescalar anchos
+        # Configuración base de columnas
         self.base_col_config = {
             "Filename":  {"width": 280, "minwidth": 180, "stretch": True,  "anchor": "w"},
             "Artist":    {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
@@ -39,11 +39,8 @@ class GridPanel:
             "Cover":     {"width": 55,  "minwidth": 45,  "stretch": False, "anchor": "center"}
         }
 
-        # Contenedor principal del grid
         self.frame_grid = ctk.CTkFrame(self.parent)
         self.frame_grid.pack(side="right", fill="both", expand=True, padx=(0, 0), pady=0)
-
-        # Configurar grid de 2x2 para Treeview y sus Scrollbars
         self.frame_grid.grid_rowconfigure(0, weight=1)
         self.frame_grid.grid_columnconfigure(0, weight=1)
 
@@ -479,7 +476,6 @@ class GridPanel:
                 return True
             finalized = True
 
-            # Verificar si el widget aún existe en Tcl/Tk antes de interactuar
             if not entry.winfo_exists():
                 self.cell_entry = None
                 return True
@@ -625,37 +621,46 @@ class GridPanel:
             return "break"
 
         def execute_navigation(direction):
-            # Si el editor fue destruido por otro evento en cola, omitir navegación
-            if not entry.winfo_exists():
-                return
+            try:
+                if not entry.winfo_exists():
+                    return
 
-            is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
-            commit = not (is_open and "tab" in direction)
+                is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
 
-            if is_open:
-                if "tab" in direction:
-                    try:
-                        entry.set(current_value_str)
-                    except Exception:
-                        pass
-                self._close_tree_combo_dropdown(entry)
+                if is_open:
+                    self._close_tree_combo_dropdown(entry)
 
-            if save_edit(commit_value=commit):
-                next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
-                if next_target:
-                    next_row_id, next_col_index = next_target
-                    self.tree.selection_set(next_row_id)
-                    self.tree.focus(next_row_id)
-                    self.tree.see(next_row_id)
+                # Siempre commit=True al tabular para conservar lo que se tenga escrito
+                if save_edit(commit_value=True):
+                    next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
+                    if next_target:
+                        next_row_id, next_col_index = next_target
+                        self.tree.selection_set(next_row_id)
+                        self.tree.focus(next_row_id)
+                        self.tree.see(next_row_id)
 
-                    if hasattr(self.app, "detail_panel"):
-                        self.app.detail_panel.on_row_select(None)
+                        if hasattr(self.app, "detail_panel"):
+                            self.app.detail_panel.on_row_select(None)
 
-                    self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
+                        self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
+            finally:
+                self.app.after(80, lambda: setattr(self, "_nav_lock", False))
 
         def navigate(direction, evt=None):
+            if getattr(self, "_nav_lock", False):
+                return "break"
+
             if not entry.winfo_exists():
                 return "break"
+
+            is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
+
+            # Si presiona INTRO en un combo abierto, solo cerramos y mantenemos foco en edición
+            if is_open and direction in ("enter", "shift_enter"):
+                self._close_tree_combo_dropdown(entry)
+                return "break"
+
+            self._nav_lock = True
             self.app.after_idle(lambda: execute_navigation(direction))
             return "break"
 
@@ -680,8 +685,8 @@ class GridPanel:
                     listbox.bind("<Tab>", lambda e: navigate("tab", e))
                     listbox.bind("<Shift-Tab>", lambda e: navigate("shift_tab", e))
                     listbox.bind("<ISO_Left_Tab>", lambda e: navigate("shift_tab", e))
-                    listbox.bind("<Return>", lambda e: navigate("enter", e))
-                    listbox.bind("<KP_Enter>", lambda e: navigate("enter", e))
+                    # Se han removido <Return> y <KP_Enter> aquí para que Tkinter aplique el
+                    # comportamiento nativo en listbox (seleccionar y mantener foco).
                 except Exception:
                     pass
 
@@ -776,6 +781,8 @@ class GridPanel:
             return "break"
 
     def _on_tree_enter_press(self, event):
+        if getattr(self, "_nav_lock", False):
+            return "break"
         if self.cell_entry and self.cell_entry.winfo_exists():
             return "break"
 
@@ -795,8 +802,7 @@ class GridPanel:
         return "break"
 
     def _on_tree_tab_press(self, event, reverse=False):
-        # Si ya hay un bloqueo de tabulación activo, interceptamos para evitar desborde de eventos
-        if self._tab_lock:
+        if getattr(self, "_nav_lock", False):
             return "break"
 
         if self.cell_entry and self.cell_entry.winfo_exists():
@@ -811,7 +817,7 @@ class GridPanel:
         if not focused_row:
             return "break"
 
-        self._tab_lock = True
+        self._nav_lock = True
         try:
             editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
 
@@ -822,8 +828,7 @@ class GridPanel:
 
             self._start_tree_cell_edit(focused_row, target_col, open_dropdown=False)
         finally:
-            # Liberamos el cerrojo de manera segura tras un breve lapso de tiempo (debounce)
-            self.app.after(60, lambda: setattr(self, "_tab_lock", False))
+            self.app.after(50, lambda: setattr(self, "_nav_lock", False))
 
         return "break"
 
@@ -959,6 +964,9 @@ class GridPanel:
             widget_class = ""
 
         if widget_class in ("Entry", "TCombobox", "Text"):
+            # Blindaje extra frente a eventos de navegación que pudiesen colarse
+            if getattr(event, "keysym", "") in ("Tab", "ISO_Left_Tab", "Return", "KP_Enter"):
+                return "break"
             return
 
         self.tree.focus_set()
