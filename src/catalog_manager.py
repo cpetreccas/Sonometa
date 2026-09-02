@@ -17,6 +17,7 @@ class CatalogManager:
             "Publisher": "Etiquetas",
         }
         self.catalog_values = {field: [] for field in self.catalog_fields}
+        self.settings = {}
 
         # Diccionarios para almacenar las relaciones en cascada
         # album_genres: { "NombreAlbum": ["Genero1", "Genero2"] }

@@ -14,14 +14,13 @@ Poner datos de contacto para soporte o comercial?
 
 GRID PANEL:
 Pintar líneas que delimiten las columnas.
+No se ve cuál es la cabecera por la que se ordena
 
 DETAIL PANEL:
 Botón derecho en input text deben reaccionar.
 Revisar diseño del contextual de carátula.
-
-MENU:
-Añadir la opción de deshacer/rehacer.
-Al seleccionar una opción el evento hover debe poder desplegar otras opciones (ahora obliga al click)
+Cuando se acaba una reproducción la duración total de la canción se reinicia a 0.
+Cuando se limpia una canción se pierde la duración y no se puede avanzar la reproducción.
 
 FOOTER:
 Si no hay ningún proceso la barra desaparecerá (o se verá siempre vacía)???

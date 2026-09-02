@@ -1,6 +1,7 @@
 import os
 import ctypes
 import threading
+import tkinter as tk
 from collections import deque
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -63,7 +64,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v0.09 - Audio Tag Suite")
+        self.title("Sonometa v0.10 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))
@@ -83,6 +84,11 @@ class App(ctk.CTk):
         self.catalog_manager = CatalogManager(self)
         self.catalog_manager.load_catalog_values()
         self.catalog_manager.load_settings()
+
+        # Obtener configuración de carátulas de forma segura
+        settings_dict = getattr(self.catalog_manager, "settings", {})
+        manual_rev = settings_dict.get("manual_cover_review", False) if isinstance(settings_dict, dict) else False
+        self.review_covers_var = tk.BooleanVar(value=manual_rev)
 
         self.discogs_client = DiscogsClient(token_getter=lambda: self.discogs_token)
         self.process_manager = ProcessManager(self)
@@ -128,6 +134,15 @@ class App(ctk.CTk):
             detail_panel=self.detail_panel,
             grid_panel=self.grid_panel
         )
+
+    def _on_toggle_manual_cover_review(self):
+        """Callback directo al cambiar la opción 'revisar carátulas manualmente'."""
+        val = self.review_covers_var.get()
+        if hasattr(self.catalog_manager, "settings") and isinstance(self.catalog_manager.settings, dict):
+            self.catalog_manager.settings["manual_cover_review"] = val
+        self.catalog_manager.save_settings()
+        msg = "Activada" if val else "Desactivada"
+        self.logger.info(f"Revisión manual de carátulas: {msg}")
 
     def _setup_footer(self):
         self.frame_bottom = ctk.CTkFrame(self)
@@ -204,7 +219,7 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def focus_header_search(self):
-        """Pone el foco en el nuevo cuadro de búsqueda del Header al presionar Ctrl+F."""
+        """Pone el foco en el cuadro de búsqueda del Header al presionar Ctrl+F."""
         if hasattr(self, "header_panel") and hasattr(self.header_panel, "entry_search"):
             self.header_panel.entry_search.focus()
             self.header_panel.entry_search.select_range(0, "end")
@@ -214,7 +229,7 @@ class App(ctk.CTk):
         if self.discogs_token:
             self.logger.info("Token de Discogs activo ✓")
         else:
-            self.logger.warning("No hay token de Discogs configurado. Ve a Archivo → ⚙ Configuración.")
+            self.logger.warning("No hay token de Discogs configurado.")
 
     def show_themed_dialog(self, title, message, level="info"):
         DialogManager.show_themed_dialog(self, title, message, level)
@@ -254,6 +269,7 @@ class App(ctk.CTk):
         if hasattr(self, "detail_panel") and self.detail_panel.audio_player:
             self.detail_panel.audio_player.stop_and_unload()
         self.catalog_manager.save_catalog_values()
+        self.catalog_manager.save_settings()
         self.destroy()
 
     def load_audio_files(self, folder):
