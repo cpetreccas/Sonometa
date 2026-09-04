@@ -846,6 +846,32 @@ class GridPanel:
             tag = "even" if index % 2 == 0 else "odd"
             self.tree.item(item[1], tags=(tag,))
 
+        # Diccionario de títulos limpios base
+        col_titles = {
+            "Filename": "Nombre de archivo",
+            "Artist": "Intérprete",
+            "Title": "Título",
+            "MixArtist": "Remix",
+            "Album": "Álbum",
+            "Genre": "Género",
+            "Publisher": "Etiqueta",
+            "Year": "Año",
+            "Cover": "Carátula"
+        }
+
+        # Restaurar texto base en todos los encabezados
+        for c in self.columns:
+            base_text = col_titles.get(c, c)
+            self.tree.heading(c, text=base_text)
+
+        # Determinar dirección de la flecha
+        arrow = " ▲" if not reverse else " ▼"
+
+        # Actualizar el encabezado activo con el indicador de ordenación
+        sorted_title = col_titles.get(col, col) + arrow
+        self.tree.heading(col, text=sorted_title)
+
+        # Alternar la dirección para el próximo clic
         self.app.sort_directions[col] = not reverse
 
     def select_all_rows(self):
