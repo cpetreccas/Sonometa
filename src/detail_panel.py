@@ -35,6 +35,7 @@ class DetailPanel:
 
         # Guarda el ID de la fila que se estaba editando antes de cambiar de selección
         self._editing_row_id = None
+        self._entry_context_menu = None
 
         self.panel_combo_fields = {
             "entry_album": "Album",
@@ -59,6 +60,7 @@ class DetailPanel:
         self.lbl_audio_time = None
         self.audio_player = None
 
+        self._setup_entry_context_menu()
         self._setup_tag_panel()
         self.audio_player = AudioPlayer(self)
 
@@ -73,8 +75,59 @@ class DetailPanel:
             pass
         return 0.0
 
+    def _setup_entry_context_menu(self):
+        """Crea el menú contextual para las entradas de texto (Copiar, Cortar, Pegar, Seleccionar todo)."""
+        self._entry_context_menu = tk.Menu(
+            self.app,
+            tearoff=0,
+            bg="#2B2B2B",
+            fg="#FFFFFF",
+            activebackground=self.app.CORP_COLOR,
+            activeforeground="#FFFFFF",
+            bd=1,
+            relief="solid",
+            font=("Segoe UI", 9)
+        )
+        self._entry_context_menu.add_command(label="Cortar", command=lambda: self._entry_action("cut"))
+        self._entry_context_menu.add_command(label="Copiar", command=lambda: self._entry_action("copy"))
+        self._entry_context_menu.add_command(label="Pegar", command=lambda: self._entry_action("paste"))
+        self._entry_context_menu.add_separator()
+        self._entry_context_menu.add_command(label="Seleccionar todo", command=lambda: self._entry_action("select_all"))
+
+    def _show_entry_context_menu(self, event):
+        """Muestra el menú contextual en la posición del puntero para el widget enfocado."""
+        widget = event.widget
+        widget.focus_set()
+        self._entry_target_widget = widget
+        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
+        try:
+            self._entry_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._entry_context_menu.grab_release()
+
+    def _entry_action(self, action):
+        """Ejecuta acciones de edición de texto sobre el widget activo."""
+        widget = getattr(self, "_entry_target_widget", None)
+        if not widget:
+            return
+        try:
+            if action == "cut":
+                widget.event_generate("<<Cut>>")
+            elif action == "copy":
+                widget.event_generate("<<Copy>>")
+            elif action == "paste":
+                widget.event_generate("<<Paste>>")
+            elif action == "select_all":
+                if hasattr(widget, "select_range"):
+                    widget.select_range(0, "end")
+                    widget.icursor("end")
+                else:
+                    widget.event_generate("<<SelectAll>>")
+        except Exception as e:
+            self.logger.debug(f"Error en acción de menú contextual de texto: {e}")
+
     def update_audio_time_display(self, current_sec, total_sec):
-        """Formatea e imprime el estado temporal MM:SS / MM:SS en la etiqueta."""
+        """Formatea e imprime el estado temporal MM:SS / MM:SS en la etiqueta garantizando valores válidos."""
         def format_time(seconds):
             seconds = max(0, int(seconds or 0))
             mins = seconds // 60
@@ -84,6 +137,12 @@ class DetailPanel:
         str_current = format_time(current_sec)
         str_total = format_time(total_sec)
         self.lbl_audio_time.configure(text=f"{str_current} / {str_total}")
+
+        # Habilitar slider y ajustar límites para poder adelantar la pista
+        if total_sec > 0:
+            self.slider_audio.configure(state="normal", from_=0, to=1)
+        else:
+            self.slider_audio.configure(state="disabled", from_=0, to=1)
 
     def _track_editing_row(self, event=None):
         """Memoriza la fila actualmente seleccionada cuando un campo recibe el foco."""
@@ -171,19 +230,20 @@ class DetailPanel:
         return "break"
 
     def _setup_cover_context_menus(self):
-        """Inicializa los menús contextuales de la carátula para modo individual y múltiple."""
-        self._cover_context_menu = tk.Menu(
-            self.app,
-            tearoff=0,
-            bg="#1E1E1E",
-            fg="#E0E0E0",
-            activebackground=self.app.CORP_COLOR,
-            activeforeground="#FFFFFF",
-            bd=0,
-            activeborderwidth=0,
-            relief="flat",
-            font=("Segoe UI", 10)
-        )
+        """Inicializa los menús contextuales de la carátula con estilo mejorado para modo individual y múltiple."""
+        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
+
+        menu_style = {
+            "bg": "#2B2B2B",
+            "fg": "#FFFFFF",
+            "activebackground": self.app.CORP_COLOR,
+            "activeforeground": "#FFFFFF",
+            "bd": 1,
+            "relief": "solid",
+            "font": ("Segoe UI", 9)
+        }
+
+        self._cover_context_menu = tk.Menu(self.app, tearoff=0, **menu_style)
         self._cover_context_menu.add_command(
             label="📋  Pegar imagen desde el portapapeles",
             command=self.paste_cover_from_clipboard
@@ -198,17 +258,7 @@ class DetailPanel:
             command=self.remove_cover_art
         )
 
-        self._cover_context_menu_multi = tk.Menu(
-            self.app,
-            tearoff=0,
-            bg="#252526",
-            fg="#FFFFFF",
-            activebackground=self.app.CORP_COLOR,
-            activeforeground="#FFFFFF",
-            bd=1,
-            relief="flat",
-            font=("Segoe UI", 10)
-        )
+        self._cover_context_menu_multi = tk.Menu(self.app, tearoff=0, **menu_style)
         self._cover_context_menu_multi.add_command(
             label="📋  Pegar imagen a todos los seleccionados",
             command=self.paste_cover_from_clipboard
@@ -223,7 +273,6 @@ class DetailPanel:
             command=self.remove_cover_art
         )
 
-        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.label_cover.bind(btn_right, self.show_cover_context_menu)
 
     def _setup_tag_panel(self):
@@ -240,6 +289,8 @@ class DetailPanel:
             ("Género", "entry_genre"),
             ("Etiqueta", "entry_publisher")
         ]
+
+        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
 
         for idx, (label_text, attr_name) in enumerate(fields):
             top_pad = 8 if idx == 0 else 4
@@ -291,6 +342,11 @@ class DetailPanel:
                 widget.bind("<FocusOut>", lambda _e, _w=widget, _a=attr_name: self._on_widget_focus_out(_w, _a, is_combo=False))
                 widget.bind("<Return>", lambda _e, _attr=attr_name: self.on_panel_text_field_enter(_attr))
 
+                # Asignación de menú contextual en entradas estándar
+                widget.bind(btn_right, self._show_entry_context_menu)
+                if hasattr(widget, "_entry"):
+                    widget._entry.bind(btn_right, self._show_entry_context_menu)
+
             widget.pack(fill="x")
             self.tag_entries[attr_name] = widget
 
@@ -321,6 +377,9 @@ class DetailPanel:
                     "<Return>",
                     lambda _e, _a=attr_name: self.on_multi_panel_commit(_a) or "break"
                 )
+                multi_widget.bind(btn_right, self._show_entry_context_menu)
+                if hasattr(multi_widget, "_entry"):
+                    multi_widget._entry.bind(btn_right, self._show_entry_context_menu)
             else:
                 multi_widget.bind("<FocusOut>", lambda _e, _w=multi_widget: self._on_widget_focus_out(_w))
                 multi_widget.bind("<Up>", lambda _e, _w=multi_widget: self._toggle_combo_dropdown(_w))
@@ -548,7 +607,18 @@ class DetailPanel:
         if self.btn_play:
             self.btn_play.configure(state="normal", fg_color=self.app.CORP_COLOR)
             self.slider_audio.configure(state="normal")
-            self.lbl_audio_time.configure(text="00:00 / 00:00")
+
+            # Preserva la duración de la pista seleccionada en lugar de reiniciarla a cero
+            selected = self.app.tree.selection()
+            if selected:
+                file_path = self.app.file_paths_map.get(selected[0])
+                if file_path:
+                    total_dur = self.get_fast_audio_duration(file_path)
+                    self.update_audio_time_display(0, total_dur)
+                else:
+                    self.lbl_audio_time.configure(text="00:00 / 00:00")
+            else:
+                self.lbl_audio_time.configure(text="00:00 / 00:00")
 
         if not self.multi_entries:
             return
@@ -831,8 +901,13 @@ class DetailPanel:
             self.logger.info(log_msg)
 
     def clear_fields(self):
+        """Limpia la interfaz sin destruir la duración del reproductor para la fila seleccionada."""
+        selected = self.app.tree.selection()
+        current_file = self.app.file_paths_map.get(selected[0]) if selected else None
+
         if self.audio_player:
-            self.audio_player.stop_and_unload()
+            # Detiene la música pero conserva el archivo/duración si sigue habiendo una fila seleccionada
+            self.audio_player.stop_and_unload(keep_duration=bool(current_file))
 
         self._editing_row_id = None
         self._current_raw_cover_pil = None
@@ -844,6 +919,14 @@ class DetailPanel:
 
         self.label_cover.configure(image="", text="Sin carátula")
         self.label_cover.image = None
+
+        # Si hay un archivo seleccionado, mantenemos su duración visible y lista para reproducir
+        if current_file and os.path.exists(current_file):
+            total_duration = self.get_fast_audio_duration(current_file)
+            if total_duration > 0:
+                self.update_audio_time_display(0, total_duration)
+                if self.audio_player:
+                    self.audio_player.load_track(current_file)
 
     def on_row_select(self, event):
         selected = self.app.tree.selection()
