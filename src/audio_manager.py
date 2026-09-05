@@ -62,9 +62,11 @@ class AudioManager:
                     data["Artist"]    = get_tag("artist")
                     data["MixArtist"] = get_tag("mixartist")
                     data["Album"]     = get_tag("album")
-                    data["Genre"] = get_tag("genre")
+                    data["Genre"]     = get_tag("genre")
                     data["Publisher"] = get_tag("organization") or get_tag("publisher")
                     data["Year"]      = get_tag("date") or get_tag("year")
+
+            data["CUEs"] = self.count_traktor_cues(file_path)
 
             if self.extract_cover_bytes(file_path):
                 data["Cover"] = "Sí"
@@ -73,6 +75,68 @@ class AudioManager:
             logger.error(f"Error extrayendo metadatos de {filename}: {str(e)}")
 
         return data
+
+    def count_traktor_cues(self, file_path):
+        """Lee la etiqueta GEOB/PRIV 'TRAKTOR4' o la etiqueta 'TRAKTOR4' y cuenta
+        el número de Cue Points configurados dentro del XML subyacente.
+        """
+        from mutagen import File as MutagenFile
+
+        try:
+            audio = MutagenFile(file_path)
+            if audio is None:
+                return 0
+
+            xml_data_bytes = None
+
+            # 1. Búsqueda en tags ID3 (MP3, WAV, AIFF)
+            if hasattr(audio, "tags") and audio.tags:
+                for key, tag in audio.tags.items():
+                    if key.startswith("GEOB") or key.startswith("PRIV"):
+                        desc = getattr(tag, "desc", "") or getattr(tag, "owner", "")
+                        if "TRAKTOR" in desc.upper():
+                            xml_data_bytes = getattr(tag, "data", None)
+                            break
+
+            # 2. Búsqueda en tags de otros formatos (FLAC, OGG, etc.) o respaldo genérico
+            if not xml_data_bytes and hasattr(audio, "get"):
+                traktor_tag = audio.get("TRAKTOR4") or audio.get("traktor4")
+                if traktor_tag:
+                    val = traktor_tag[0] if isinstance(traktor_tag, list) else traktor_tag
+                    if isinstance(val, str):
+                        xml_data_bytes = val.encode("utf-8", errors="ignore")
+                    elif isinstance(val, bytes):
+                        xml_data_bytes = val
+
+            if not xml_data_bytes:
+                return 0
+
+            # 3. Decodificación y parsing XML
+            try:
+                xml_str = xml_data_bytes.decode("utf-8", errors="ignore")
+            except Exception:
+                xml_str = str(xml_data_bytes)
+
+            start_idx = xml_str.find("<CUE_V2")
+            if start_idx == -1:
+                start_idx = xml_str.find("<ENTRY")
+                if start_idx == -1:
+                    return 0
+
+            end_idx = xml_str.rfind(">")
+            if end_idx == -1 or end_idx <= start_idx:
+                return 0
+
+            clean_xml = xml_str[start_idx : end_idx + 1]
+            root = ET.fromstring(clean_xml)
+
+            cues = root.findall(".//CUE_V2")
+            return len(cues)
+
+        except Exception as e:
+            logger.debug(f"Error parseando Traktor CUEs en {os.path.basename(file_path)}: {str(e)}")
+
+        return 0
 
     def extract_cover_bytes(self, file_path):
         """Lee y devuelve los bytes de la carátula incrustada, o None si no existe."""

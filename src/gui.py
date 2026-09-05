@@ -52,7 +52,11 @@ class App(ctk.CTk):
         self.file_paths_map = {}
         self.log_history = deque(maxlen=5000)
         self._multi_select_mode = False
-        self.detail_panel_visible = True  # Visibilidad del panel lateral
+
+        # 'Ver detalles' por defecto False al abrir la aplicación
+        self.show_detail_panel_var = tk.BooleanVar(value=True)
+        self.detail_panel_visible = True
+
         self.log_window = None
         self.log_textbox = None
 
@@ -85,9 +89,9 @@ class App(ctk.CTk):
         self.catalog_manager.load_catalog_values()
         self.catalog_manager.load_settings()
 
-        # Obtener configuración de carátulas de forma segura
+        # 'Revisar carátulas' siempre TRUE por defecto al abrir la aplicación
         settings_dict = getattr(self.catalog_manager, "settings", {})
-        manual_rev = settings_dict.get("manual_cover_review", False) if isinstance(settings_dict, dict) else False
+        manual_rev = settings_dict.get("manual_cover_review", True) if isinstance(settings_dict, dict) else True
         self.review_covers_var = tk.BooleanVar(value=manual_rev)
 
         self.discogs_client = DiscogsClient(token_getter=lambda: self.discogs_token)
@@ -124,6 +128,9 @@ class App(ctk.CTk):
             get_resource_path=UiUtils.get_resource_path
         )
         self.grid_panel = GridPanel(app=self, parent=self.frame_main, logger=self.logger)
+
+        # Mostrar el panel lateral por defecto según show_detail_panel_var = True
+        self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
 
         self._setup_footer()
 
@@ -162,15 +169,17 @@ class App(ctk.CTk):
         self.label_status.pack(fill="x", padx=12, pady=(2, 6))
 
     def toggle_detail_panel(self):
-        """Alterna la visibilidad del panel de detalles lateral."""
-        if self.detail_panel_visible:
-            self.detail_panel.frame_sidebar.pack_forget()
-            self.detail_panel_visible = False
-            self.logger.info("Panel lateral colapsado.")
-        else:
+        """Alterna la visibilidad del panel de detalles lateral según la variable del check."""
+        should_show = self.show_detail_panel_var.get()
+
+        if should_show:
             self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
             self.detail_panel_visible = True
             self.logger.info("Panel lateral expandido.")
+        else:
+            self.detail_panel.frame_sidebar.pack_forget()
+            self.detail_panel_visible = False
+            self.logger.info("Panel lateral colapsado.")
 
     @property
     def tree(self):
@@ -188,8 +197,18 @@ class App(ctk.CTk):
         self.bind("<Control-A>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-f>", lambda e: self.focus_header_search())
         self.bind("<Control-F>", lambda e: self.focus_header_search())
-        self.bind("<Control-b>", lambda e: self.toggle_detail_panel())
-        self.bind("<Control-B>", lambda e: self.toggle_detail_panel())
+
+        # Atajo para el diálogo de reemplazo en nombres de archivo
+        self.bind("<Control-r>", lambda e: self.open_replace_dialog())
+        self.bind("<Control-R>", lambda e: self.open_replace_dialog())
+
+        # Al presionar el atajo Ctrl+B, invertir la variable del check
+        def _toggle_shortcut():
+            self.show_detail_panel_var.set(not self.show_detail_panel_var.get())
+            self.toggle_detail_panel()
+
+        self.bind("<Control-b>", lambda e: _toggle_shortcut())
+        self.bind("<Control-B>", lambda e: _toggle_shortcut())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
 
         self.bind_all("<Control-z>", self.undo_manager.undo)
@@ -223,6 +242,18 @@ class App(ctk.CTk):
         if hasattr(self, "header_panel") and hasattr(self.header_panel, "entry_search"):
             self.header_panel.entry_search.focus()
             self.header_panel.entry_search.select_range(0, "end")
+
+    def open_replace_dialog(self):
+        """Abre el cuadro de diálogo modal para buscar y reemplazar en los nombres de archivo sobre la totalidad del grid."""
+        target_items = []
+        for row_id, file_path in self.file_paths_map.items():
+            filename = os.path.basename(file_path) if file_path else ""
+            target_items.append({
+                "row_id": row_id,
+                "filename": filename
+            })
+
+        DialogManager.show_replace_filename_dialog(self, target_items)
 
     def _check_initial_status(self):
         self.logger.info("Aplicación Sonometa iniciada correctamente.")

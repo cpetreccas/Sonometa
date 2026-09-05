@@ -586,7 +586,7 @@ class GridPanel:
 
             active_selection = self.tree.selection()
             if not active_selection:
-                if row_id and self.tree.exists(row_id):
+                if row_id and row_id in self.tree.get_children():
                     self.tree.selection_set(row_id)
                     self.tree.focus(row_id)
                     self.tree.see(row_id)
@@ -818,6 +818,18 @@ class GridPanel:
 
         self.cell_entry = entry
         self._active_cell_tab_navigator = navigate_from_global_tab
+
+    def select_file_by_row_id(self, row_id):
+        """Selecciona y enfoca una fila específica en la grilla mediante su row_id."""
+        if not row_id or row_id not in self.tree.get_children():
+            return
+
+        self.tree.selection_set(row_id)
+        self.tree.focus(row_id)
+        self.tree.see(row_id)
+
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)
 
     def on_cell_double_click(self, event):
         region = self.tree.identify_region(event.x, event.y)

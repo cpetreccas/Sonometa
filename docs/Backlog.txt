@@ -1,4 +1,5 @@
 FUNCIONALIDADES GENERALES:
+- Ver detalles a true por defecto.
 - Seleccionar carpeta debería enseñar los ficheros compatibles que haya en cada directorio.
 - Permitir modificar el orden de las cabeceras del grid.
 - Permitir meter columnas nuevas
@@ -17,6 +18,8 @@ FUNCIONALIDADES GENERALES:
 - Renombrar cabecera Album a (Release - 01), (Genres - 02), (Labels - 03)
 - Añadir nivel de jerarquia 4 y 5 que serán comentarios 1 y comentarios 2 separador punto y coma y añadir el apartado al gestor de catalogos.
 - Añadir exportar listado.
+- Al abrir cualquier cuadro de diálogo el foco debe estar en el en el modal abierto y si lo hubiera, primer campo de texto.
+- Al presionar ESC en cualquier modal, este se cierra.
 
 GRID:
 Eliminar la ultima fila vacía.

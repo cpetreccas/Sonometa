@@ -183,12 +183,15 @@ class ToolPanel(ctk.CTkFrame):
                 {"type": "command", "label": "Deshacer", "accelerator": "Ctrl+Z", "command": app.undo_manager.undo},
                 {"type": "command", "label": "Rehacer", "accelerator": "Ctrl+Y", "command": app.undo_manager.redo},
                 {"type": "separator"},
+                {"type": "command", "label": "Buscar…", "accelerator": "Ctrl+F", "command": lambda: app.focus_header_search()},
+                {"type": "command", "label": "Reemplazar…", "accelerator": "Ctrl+R", "command": lambda: app.open_replace_dialog()},
+                {"type": "separator"},
                 {"type": "command", "label": "Seleccionar Todo", "accelerator": "Ctrl+A", "command": lambda: app.grid_panel.select_all_rows()},
                 {"type": "command", "label": "Deseleccionar Todo", "accelerator": "Esc", "command": lambda: app.grid_panel.tree.selection_remove(app.grid_panel.tree.selection())}
             ]),
             ("Acciones", [
                 {"type": "command", "label": "Procesar", "accelerator": "", "command": lambda: app.process_manager.process_discogs_data()},
-                {"type": "command", "label": "Actualizar", "accelerator": "F5", "command": lambda: app.refresh_data() if hasattr(app, "refresh_data") else None},
+                {"type": "command", "label": "Actualizar", "accelerator": "F5", "command": lambda: app.refresh_folder() if hasattr(app, "refresh_folder") else None},
                 {"type": "command", "label": "Limpiar Metadatos Selección", "command": app.clear_all},
             ]),
             ("Ver", [

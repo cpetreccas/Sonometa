@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import sys
 import ctypes
 import threading
@@ -8,6 +9,303 @@ from PIL import Image
 import tkinter as tk
 from catalog_manager import CatalogManager
 import customtkinter as ctk
+
+
+class ReplaceFilenameDialog(ctk.CTkToplevel):
+    """Modal para buscar y reemplazar cadenas en los nombres de archivo (filename)."""
+
+    def __init__(self, parent, target_items):
+        """
+        :param parent: Referencia a la ventana principal (App)
+        :param target_items: Lista de dicts: [{"row_id": id, "filename": name}, ...]
+        """
+        super().__init__(parent)
+        self.app = parent
+        self.target_items = target_items  # Lista de dicts: [{"row_id": id, "filename": name}, ...]
+        self.matches = []  # Ocurrencias encontradas: [{"row_id": id, "filename": name, "display_name": str, "ext": str}, ...]
+
+        # Variable de estado para controlar la sensibilidad a mayúsculas/minúsculas (Activado por defecto)
+        self.case_sensitive_var = ctk.BooleanVar(value=True)
+
+        self.title("Reemplazar Texto en Nombres de Archivo - Sonometa")
+        self.geometry("700x560")
+        self.minsize(620, 460)
+
+        self._setup_ui()
+
+        # Atajo ESC para cerrar la ventana modal
+        self.bind("<Escape>", lambda event: self.destroy())
+
+        self.withdraw()
+        DialogManager.center_popup_on_parent(self, self.app, width=700, height=560)
+        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
+
+        # Foco predeterminado en el campo de búsqueda
+        self.after(50, self._set_initial_focus)
+
+    def _set_initial_focus(self):
+        self.focus_force()
+        if hasattr(self, "entry_search") and self.entry_search.winfo_exists():
+            self.entry_search.focus_force()
+
+    def _setup_ui(self):
+        main_frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
+        main_frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
+        corp_hover = getattr(self.app, "CORP_HOVER", "#581C87")
+
+        # Título y Descripción
+        lbl_title = ctk.CTkLabel(
+            main_frame,
+            text="Buscar y Reemplazar en Filename",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="#F3F4F6"
+        )
+        lbl_title.pack(anchor="w", padx=5, pady=(0, 2))
+
+        lbl_sub = ctk.CTkLabel(
+            main_frame,
+            text=f"Analizando {len(self.target_items)} archivo(s) seleccionado(s).",
+            text_color="#9CA3AF"
+        )
+        lbl_sub.pack(anchor="w", padx=5, pady=(0, 10))
+
+        # Inputs de Búsqueda y Reemplazo
+        inputs_frame = ctk.CTkFrame(main_frame, fg_color="#262626", corner_radius=8)
+        inputs_frame.pack(fill="x", pady=(0, 10), padx=5, ipady=5)
+
+        # Buscar
+        lbl_search = ctk.CTkLabel(inputs_frame, text="Buscar:", font=ctk.CTkFont(weight="bold"), text_color="#E5E7EB")
+        lbl_search.grid(row=0, column=0, padx=10, pady=8, sticky="w")
+
+        self.search_var = ctk.StringVar()
+        self.search_var.trace_add("write", lambda *args: self._find_matches())
+
+        self.entry_search = ctk.CTkEntry(
+            inputs_frame,
+            placeholder_text="Texto a buscar...",
+            textvariable=self.search_var,
+            width=320
+        )
+        self.entry_search.grid(row=0, column=1, columnspan=2, padx=10, pady=8, sticky="ew")
+
+        # Reemplazar por
+        lbl_replace = ctk.CTkLabel(inputs_frame, text="Reemplazar por:", font=ctk.CTkFont(weight="bold"), text_color="#E5E7EB")
+        lbl_replace.grid(row=1, column=0, padx=10, pady=(0, 8), sticky="w")
+
+        self.entry_replace = ctk.CTkEntry(inputs_frame, placeholder_text="Nuevo texto...", width=320)
+        self.entry_replace.grid(row=1, column=1, columnspan=2, padx=10, pady=(0, 8), sticky="ew")
+
+        # Checkbox para Case Sensitivity (marcado por defecto)
+        self.chk_case_sensitive = ctk.CTkCheckBox(
+            inputs_frame,
+            text="Coincidir mayúsculas / minúsculas",
+            variable=self.case_sensitive_var,
+            font=ctk.CTkFont(size=12),
+            fg_color=corp_color,
+            hover_color=corp_hover,
+            command=self._find_matches
+        )
+        self.chk_case_sensitive.grid(row=2, column=1, columnspan=2, padx=10, pady=(4, 8), sticky="w")
+
+        inputs_frame.columnconfigure(1, weight=1)
+
+        # Lista para Coincidencias
+        lbl_matches_header = ctk.CTkLabel(
+            main_frame,
+            text="Coincidencias encontradas:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#D1D5DB"
+        )
+        lbl_matches_header.pack(anchor="w", padx=5, pady=(4, 4))
+
+        list_container = ctk.CTkFrame(main_frame, fg_color="#181818", corner_radius=8)
+        list_container.pack(fill="both", expand=True, padx=5, pady=(0, 10))
+
+        # Scrollbar y Listbox para selección de items sin aspecto de editor de texto ni cursor parpadeante
+        scrollbar = ctk.CTkScrollbar(list_container)
+        scrollbar.pack(side="right", fill="y", padx=(0, 4), pady=4)
+
+        self.matches_listbox = tk.Listbox(
+            list_container,
+            bg="#181818",
+            fg="#E5E7EB",
+            selectbackground=corp_color,
+            selectforeground="#FFFFFF",
+            font=("Consolas", 11),
+            borderwidth=0,
+            highlightthickness=0,
+            activestyle="none",
+            selectmode=tk.SINGLE,
+            yscrollcommand=scrollbar.set
+        )
+        self.matches_listbox.pack(fill="both", expand=True, padx=8, pady=8)
+        scrollbar.configure(command=self.matches_listbox.yview)
+
+        self.matches_listbox.bind("<<ListboxSelect>>", lambda e: self._update_buttons_state())
+
+        # Barra de Botones
+        btn_bar = ctk.CTkFrame(main_frame, fg_color="transparent")
+        btn_bar.pack(fill="x", side="bottom")
+
+        self.btn_replace_all = ctk.CTkButton(
+            btn_bar,
+            text="Reemplazar todos",
+            fg_color=corp_color,
+            hover_color=corp_hover,
+            state="disabled",
+            command=self._replace_all_matches
+        )
+        self.btn_replace_all.pack(side="right", padx=(8, 0))
+
+        self.btn_replace_single = ctk.CTkButton(
+            btn_bar,
+            text="Reemplazar",
+            fg_color=corp_color,
+            hover_color=corp_hover,
+            state="disabled",
+            command=self._replace_single_match
+        )
+        self.btn_replace_single.pack(side="right", padx=(8, 0))
+
+        btn_close = ctk.CTkButton(
+            btn_bar,
+            text="Cerrar",
+            fg_color="transparent",
+            border_width=1,
+            border_color="#6B7280",
+            text_color="#E5E7EB",
+            hover_color="#374151",
+            command=self.destroy
+        )
+        btn_close.pack(side="right")
+
+    def _find_matches(self):
+        search_str = self.entry_search.get()
+
+        self.matches_listbox.delete(0, tk.END)
+        self.matches.clear()
+
+        if not search_str:
+            self._update_buttons_state()
+            return
+
+        is_case_sensitive = self.case_sensitive_var.get()
+        flags = 0 if is_case_sensitive else re.IGNORECASE
+
+        try:
+            pattern = re.compile(re.escape(search_str), flags)
+        except Exception:
+            self._update_buttons_state()
+            return
+
+        for item in self.target_items:
+            row_id = item["row_id"]
+            filename = item["filename"]
+
+            # Separar extensión del nombre base
+            base_name, ext = os.path.splitext(filename)
+
+            # Buscar coincidencias únicamente sobre el nombre base (sin extensión)
+            if pattern.search(base_name):
+                self.matches.append({
+                    "row_id": row_id,
+                    "filename": filename,
+                    "display_name": base_name,
+                    "ext": ext
+                })
+                # Se inserta únicamente el nombre base (sin icono, sin código ID y sin extensión)
+                self.matches_listbox.insert(tk.END, base_name)
+
+        if not self.matches:
+            self.matches_listbox.insert(tk.END, "Sin coincidencias encontradas.")
+
+        self._update_buttons_state()
+
+    def _update_buttons_state(self):
+        has_matches = len(self.matches) > 0
+        has_selection = len(self.matches_listbox.curselection()) > 0 and has_matches
+        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
+
+        if has_matches:
+            self.btn_replace_all.configure(state="normal", fg_color=corp_color)
+        else:
+            self.btn_replace_all.configure(state="disabled", fg_color="#374151")
+
+        if has_selection:
+            self.btn_replace_single.configure(state="normal", fg_color=corp_color)
+        else:
+            self.btn_replace_single.configure(state="disabled", fg_color="#374151")
+
+    def _replace_single_match(self):
+        selected_indices = self.matches_listbox.curselection()
+        if not selected_indices or not self.matches:
+            return
+
+        idx = selected_indices[0]
+        if idx >= len(self.matches):
+            return
+
+        match_item = self.matches[idx]
+        search_str = self.entry_search.get()
+        replace_str = self.entry_replace.get()
+        is_case_sensitive = self.case_sensitive_var.get()
+
+        flags = 0 if is_case_sensitive else re.IGNORECASE
+        pattern = re.compile(re.escape(search_str), flags)
+
+        # 1. Aplicar reemplazo en ProcessManager
+        if hasattr(self.app, "process_manager") and hasattr(self.app.process_manager, "apply_filename_replacement"):
+            self.app.process_manager.apply_filename_replacement(
+                [match_item["row_id"]],
+                search_str,
+                replace_str,
+                case_sensitive=is_case_sensitive
+            )
+
+        # 2. Actualizar localmente la lista target_items manteniendo la extensión
+        new_base = pattern.sub(replace_str, match_item["display_name"])
+        new_filename = f"{new_base}{match_item['ext']}"
+
+        for item in self.target_items:
+            if item["row_id"] == match_item["row_id"]:
+                item["filename"] = new_filename
+
+        # 3. Refrescar la lista de búsquedas
+        self._find_matches()
+
+    def _replace_all_matches(self):
+        if not self.matches:
+            return
+
+        search_str = self.entry_search.get()
+        replace_str = self.entry_replace.get()
+        target_ids = [m["row_id"] for m in self.matches]
+        is_case_sensitive = self.case_sensitive_var.get()
+
+        # 1. Aplicar reemplazo a través del ProcessManager
+        if hasattr(self.app, "process_manager") and hasattr(self.app.process_manager, "apply_filename_replacement"):
+            self.app.process_manager.apply_filename_replacement(
+                target_ids,
+                search_str,
+                replace_str,
+                case_sensitive=is_case_sensitive
+            )
+
+        # 2. Actualizar los nombres localmente en target_items para todos los modificados
+        flags = 0 if is_case_sensitive else re.IGNORECASE
+        pattern = re.compile(re.escape(search_str), flags)
+        target_ids_set = set(target_ids)
+
+        for item in self.target_items:
+            if item["row_id"] in target_ids_set:
+                base_name, ext = os.path.splitext(item["filename"])
+                new_base = pattern.sub(replace_str, base_name)
+                item["filename"] = f"{new_base}{ext}"
+
+        # 3. Volver a buscar para refrescar la lista
+        self._find_matches()
 
 
 class MultiCoverSelectionDialog(ctk.CTkToplevel):
@@ -32,6 +330,9 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
 
         self._setup_ui()
         self._load_images_async()
+
+        # Atajo ESC para cancelar/omitir y cerrar
+        self.bind("<Escape>", lambda event: self._on_cancel())
 
         self.withdraw()
         DialogManager.center_popup_on_parent(self, self.app, width=900, height=620)
@@ -63,11 +364,11 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
 
         def _forward_scroll(event):
             if sys.platform == "darwin":
-                delta = -event.delta
+                delta = -int(event.delta)
             elif sys.platform == "win32":
                 delta = -int(event.delta / 120)
             else:
-                delta = 1 if event.num == 5 else -1
+                delta = 1 if getattr(event, "num", None) == 5 else -1
 
             self.scroll_frame._parent_canvas.yview_scroll(delta * 20, "units")
             return "break"
@@ -173,7 +474,6 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                     widget.bind("<Enter>", lambda e, r=row_id, u=img_url: self._on_card_hover(r, u, True))
                     widget.bind("<Leave>", lambda e, r=row_id, u=img_url: self._on_card_hover(r, u, False))
 
-            # Redirigir todos los eventos de la rueda del ratón de los scrolls horizontales y sus hijos al scroll principal
             _bind_mousewheel_recursive(card)
             if hasattr(covers_container, "_parent_canvas"):
                 _bind_mousewheel_recursive(covers_container._parent_canvas)
@@ -330,6 +630,21 @@ class DialogManager:
     """Clase especializada en la gestión de ventanas emergentes, diálogos y popups de la aplicación."""
 
     @staticmethod
+    def show_replace_filename_dialog(app, target_items):
+        """Muestra el diálogo para buscar y reemplazar en los nombres de archivo."""
+        if not target_items:
+            DialogManager.show_themed_dialog(
+                app,
+                "Sin selección",
+                "Selecciona al menos un archivo en la grilla para realizar reemplazos de filename.",
+                level="warning"
+            )
+            return
+
+        dialog = ReplaceFilenameDialog(app, target_items)
+        app.wait_window(dialog)
+
+    @staticmethod
     def apply_popup_style(app, win, is_modal=True, owner=None):
         DialogManager.apply_dark_title_bar(win)
 
@@ -346,7 +661,7 @@ class DialogManager:
             win.focus_force()
         else:
             win.lift()
-            win.focus()
+            win.focus_force()
 
     @staticmethod
     def center_popup_on_screen(win):
@@ -392,6 +707,10 @@ class DialogManager:
         dialog.title(title)
         dialog.geometry("460x210")
         dialog.resizable(False, False)
+
+        # Cierre mediante ESC
+        dialog.bind("<Escape>", lambda e: cancel() if is_confirm else accept())
+
         DialogManager.center_popup_on_parent(dialog, host, width=460, height=210)
         DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=host)
 
@@ -445,12 +764,10 @@ class DialogManager:
             fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER
         )
         btn_ok.pack(side="right")
-        btn_ok.focus()
+        btn_ok.focus_force()
 
-        # Espera a que el usuario cierre la ventana modal
         dialog.wait_window()
 
-        # Devuelve el foco al host adecuado
         if host and host.winfo_exists():
             host.focus_force()
 
@@ -471,8 +788,12 @@ class DialogManager:
     def show_keyboard_shortcuts_dialog(app):
         shortcuts_win = ctk.CTkToplevel(app)
         shortcuts_win.title("Atajos de Teclado")
-        shortcuts_win.geometry("500x350")
-        DialogManager.center_popup_on_parent(shortcuts_win, app, width=500, height=350)
+        shortcuts_win.geometry("500x380")
+
+        # Cierre con ESC
+        shortcuts_win.bind("<Escape>", lambda e: shortcuts_win.destroy())
+
+        DialogManager.center_popup_on_parent(shortcuts_win, app, width=500, height=380)
         DialogManager.apply_popup_style(app, shortcuts_win, is_modal=True, owner=app)
 
         frame_content = ctk.CTkFrame(shortcuts_win)
@@ -492,11 +813,12 @@ class DialogManager:
             ("Ctrl+O", "Seleccionar carpeta"),
             ("F5", "Actualizar lista de archivos"),
             ("Ctrl+A", "Seleccionar todo"),
-            ("Ctrl+F", "Mostrar/Ocultar barra de búsqueda"),
+            ("Ctrl+F", "Buscar coincidencias en la lista"),
+            ("Ctrl+R", "Abrir ventana para reemplazar texto en el nombre del archivo"),
             ("Ctrl+Q", "Cerrar aplicación"),
             ("Doble-clic", "Editar celda en tabla"),
             ("Enter", "Guardar edición de celda"),
-            ("Esc", "Cerrar búsqueda activa"),
+            ("Esc", "Cerrar búsqueda activa o ventana emergente"),
         ]
 
         for shortcut, description in shortcuts:
@@ -528,6 +850,7 @@ class DialogManager:
             command=shortcuts_win.destroy
         )
         btn_close.pack(fill="x", pady=(12, 0))
+        btn_close.focus_force()
 
     @staticmethod
     def show_settings_dialog(app, logger_inst):
@@ -535,6 +858,10 @@ class DialogManager:
         win.title("Configuración")
         win.geometry("450x180")
         win.resizable(False, False)
+
+        # Cierre con ESC
+        win.bind("<Escape>", lambda e: win.destroy())
+
         DialogManager.center_popup_on_parent(win, app, width=450, height=180)
         DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
 
@@ -572,10 +899,13 @@ class DialogManager:
             btns, text="Cancelar", fg_color="#374151", hover_color="#1F2937",
             command=win.destroy
         ).pack(side="right", padx=(6, 0))
-        ctk.CTkButton(
+
+        btn_save = ctk.CTkButton(
             btns, text="Guardar", fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER,
             command=save_settings
-        ).pack(side="right")
+        )
+        btn_save.pack(side="right")
+        btn_save.focus_force()
 
     @staticmethod
     def show_logs_dialog(app):
@@ -590,6 +920,9 @@ class DialogManager:
         app.log_window = ctk.CTkToplevel(app)
         app.log_window.title("Historial de Logs")
         app.log_window.geometry("700x400")
+
+        # Cierre con ESC
+        app.log_window.bind("<Escape>", lambda e: DialogManager.close_logs_dialog(app))
 
         DialogManager.center_popup_on_parent(app.log_window, app, width=700, height=400)
         DialogManager.apply_popup_style(app, app.log_window, is_modal=False, owner=app)
@@ -618,6 +951,10 @@ class DialogManager:
         win = ctk.CTkToplevel(app)
         win.title("Gestor Unificado de Catálogos")
         win.geometry("820x600")
+
+        # Cierre con ESC
+        win.bind("<Escape>", lambda e: win.destroy())
+
         DialogManager.center_popup_on_parent(win, app, width=820, height=600)
         DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
 
@@ -657,6 +994,9 @@ class DialogManager:
             dlg = ctk.CTkToplevel(win)
             dlg.title(title)
             dlg.geometry("400x150")
+
+            dlg.bind("<Escape>", lambda e: dlg.destroy())
+
             DialogManager.center_popup_on_parent(dlg, win, width=400, height=150)
             DialogManager.apply_popup_style(app, dlg, is_modal=True, owner=win)
 
@@ -667,7 +1007,7 @@ class DialogManager:
             if default_value:
                 entry.insert(0, default_value)
 
-            entry.focus()
+            entry.focus_force()
 
             def on_submit(event=None):
                 result[0] = entry.get()
@@ -841,7 +1181,6 @@ class DialogManager:
             ctk.CTkButton(btns, text="Añadir", font=font_btn, command=lambda k=catalog_key, l=lb, ln=label_name: add_value(k, l, ln), fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=(0, 2))
             ctk.CTkButton(btns, text="Modificar", font=font_btn, command=lambda k=catalog_key, l=lb, ln=label_name: update_value(k, l, ln), fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=2)
 
-            # Botón Eliminar: Transparente, borde rojo, texto blanco y en negrita
             ctk.CTkButton(
                 btns,
                 text="Eliminar",
@@ -936,7 +1275,7 @@ class DialogManager:
                 btn_save_rel.pack(fill="x", padx=12, pady=12)
                 load_relations()
 
-        ctk.CTkButton(
+        btn_close_panel = ctk.CTkButton(
             win,
             text="Cerrar Panel",
             font=font_btn,
@@ -944,7 +1283,9 @@ class DialogManager:
             fg_color=app.CORP_COLOR,
             hover_color=app.CORP_HOVER,
             height=36
-        ).pack(fill="x", padx=16, pady=(0, 16))
+        )
+        btn_close_panel.pack(fill="x", padx=16, pady=(0, 16))
+        btn_close_panel.focus_force()
 
     @staticmethod
     def process_pending_covers_dialog(app, items_to_review):
@@ -993,5 +1334,5 @@ class DialogManager:
         pos_x = max(0, parent_x + (parent_w - w) // 2)
         pos_y = max(0, parent_y + (parent_h - h) // 2)
 
-        win.geometry(f"{w}x{h}+{pos_x}+{pos_y}")
+        win.geometry(f"{w}x{height}+{pos_x}+{pos_y}")
         win.deiconify()

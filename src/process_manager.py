@@ -479,3 +479,76 @@ class ProcessManager:
     def clear_all_loaded_metadata(self):
         all_rows = self.app.tree.get_children()
         self.clear_metadata_for_rows(all_rows, scope_label="lista cargada")
+
+    def apply_filename_replacement(self, row_ids, search_str, replace_str, case_sensitive=False):
+        """
+        Reemplaza la cadena dada en los nombres de archivo para los IDs recibidos.
+        Retorna True si al menos un archivo fue modificado con éxito, False en caso contrario.
+        """
+        if not search_str or not row_ids:
+            return False
+
+        flags = 0 if case_sensitive else re.IGNORECASE
+        pattern = re.compile(re.escape(search_str), flags)
+
+        updated_count = 0
+
+        tree = getattr(self.app, "tree", None)
+        if not tree and hasattr(self.app, "grid_panel"):
+            tree = self.app.grid_panel.tree
+
+        for row_id in row_ids:
+            if not tree or not tree.exists(row_id):
+                continue
+
+            file_path = self.app.file_paths_map.get(row_id)
+            if not file_path or not os.path.exists(file_path):
+                continue
+
+            dir_name, full_filename = os.path.split(file_path)
+
+            if not pattern.search(full_filename):
+                continue
+
+            # Evaluar la sustitución sobre el nombre completo (incluida la extensión si corresponde)
+            new_filename = pattern.sub(replace_str, full_filename)
+
+            if new_filename == full_filename:
+                continue
+
+            target_path = os.path.join(dir_name, new_filename)
+
+            if os.path.normcase(target_path) != os.path.normcase(file_path) and os.path.exists(target_path):
+                if hasattr(self, "logger") and self.logger:
+                    self.logger.warning(f"Omitido: Ya existe un archivo llamado '{new_filename}'.")
+                continue
+
+            try:
+                os.rename(file_path, target_path)
+                self.app.file_paths_map[row_id] = target_path
+
+                values = list(tree.item(row_id, "values"))
+                if values:
+                    values[0] = new_filename
+                    tree.item(row_id, values=values)
+
+                updated_count += 1
+
+                if hasattr(self, "logger") and self.logger:
+                    log_msg = LogManager.format_tree_log(
+                        context="REPLACE",
+                        action="Renombrado batch",
+                        filename=new_filename,
+                        prev_vals={"Filename": full_filename},
+                        new_vals={"Filename": new_filename}
+                    )
+                    self.logger.info(log_msg)
+
+            except Exception as e:
+                if hasattr(self, "logger") and self.logger:
+                    self.logger.error(f"Error al reemplazar nombre en '{full_filename}': {str(e)}")
+
+        if updated_count > 0 and hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)
+
+        return updated_count > 0
