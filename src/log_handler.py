@@ -1,5 +1,6 @@
 import logging
 
+
 class LogManager(logging.Handler):
     def __init__(self, app_instance):
         super().__init__()
@@ -104,7 +105,7 @@ class LogManager(logging.Handler):
 
     @staticmethod
     def append_log_to_dialog(app, msg):
-        """Agrega una línea de texto al cuadro de texto del diálogo de logs si está abierto."""
+        """Agrega una línea de texto al cuadro de texto del diálogo de logs aplicando formato si está abierto."""
         log_win = getattr(app, "log_window", None)
         log_box = getattr(app, "log_textbox", None)
 
@@ -118,8 +119,23 @@ class LogManager(logging.Handler):
                 return
 
             log_box.configure(state="normal")
-            log_box.insert("end", f"{msg}\n")
+
+            # Intentar delegar el formateo enriquecido a DialogManager si está disponible
+            from dialogs import DialogManager
+            if hasattr(DialogManager, "append_formatted_log_line"):
+                DialogManager.append_formatted_log_line(log_box, msg)
+            else:
+                line_to_insert = msg if msg.endswith("\n") else f"{msg}\n"
+                log_box.insert("end", line_to_insert)
+
             log_box.see("end")
             log_box.configure(state="disabled")
         except Exception:
-            pass
+            try:
+                # Fallback seguro en caso de fallo durante el formateo
+                line_to_insert = msg if msg.endswith("\n") else f"{msg}\n"
+                log_box.insert("end", line_to_insert)
+                log_box.see("end")
+                log_box.configure(state="disabled")
+            except Exception:
+                pass

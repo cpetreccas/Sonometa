@@ -1,8 +1,25 @@
 FUNCIONALIDADES GENERALES:
+- Seleccionar carpeta debería enseñar los ficheros compatibles que haya en cada directorio.
+- Permitir modificar el orden de las cabeceras del grid.
+- Permitir meter columnas nuevas
+- Ver cómo gestionar comments2 para poder añadir múltiples tags.
+- Analizar ¿un modal? para permitir filtros avanzados con checkboxes, etc.
 - Generar botones corporativos con una guia de estilo unificada.
 - Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
+- Solo se guarda el remix en archivos FLAC.
+- El grid si pulso espacio debe reproducirse la canción o pararse.
+- Analizar si se ve mejor el grid poniendo los literales de las cabeceras a la izquierda, cabecera en gris? cabecera en mayuscula?
+- Quiero poder borrar el archivo físico del disco duro a través del grid.
+- Quiero poder hacer un CTRL + R de filename
+- Si revisar caratulas es falso, no debe saltar el modal de eleccion de caratulas.
+- Renombrar cabecera Album a (Release - 01), (Genres - 02), (Labels - 03)
+- Añadir nivel de jerarquia 4 y 5 que serán comentarios 1 y comentarios 2 separador punto y coma y añadir el apartado al gestor de catalogos.
+- Añadir exportar listado.
+
+GRID:
+Eliminar la ultima fila vacía.
 
 LOGS:
 Logs de colores.
@@ -13,9 +30,7 @@ Enseñar el logo corporativo.
 Poner datos de contacto para soporte o comercial?
 
 DETAIL PANEL:
-Botón derecho en input text deben reaccionar.
-El menú contextual de carátula es tiene una estética muy pobre.
-Cuando se acaba una reproducción la duración total de la canción se reinicia a 0.
+Cuando se acaba una reproducción la duración total de la canción se reinicia a 0. (Limpiar no debería borrar duración)
 Cuando se limpia una canción se pierde la duración y no se puede avanzar la reproducción.
 
 FOOTER:
