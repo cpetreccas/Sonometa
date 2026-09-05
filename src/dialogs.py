@@ -5,8 +5,9 @@ import sys
 import ctypes
 import threading
 import urllib.request
-from PIL import Image
 import tkinter as tk
+from tkinter import filedialog, messagebox
+from PIL import Image
 from catalog_manager import CatalogManager
 import customtkinter as ctk
 
@@ -913,31 +914,227 @@ class DialogManager:
             app.log_window.deiconify()
             app.log_window.lift()
             app.log_window.attributes("-topmost", True)
-            app.log_window.after(100, lambda: app.log_window.attributes("-topmost", False))
+            app.log_window.after(100, lambda: app.log_window.attributes("-topmost", False) if app.log_window and app.log_window.winfo_exists() else None)
             app.log_window.focus_force()
             return
 
         app.log_window = ctk.CTkToplevel(app)
-        app.log_window.title("Historial de Logs")
-        app.log_window.geometry("700x400")
+        app.log_window.title("Historial de Logs - Sonometa")
+        app.log_window.geometry("750x480")
 
         # Cierre con ESC
         app.log_window.bind("<Escape>", lambda e: DialogManager.close_logs_dialog(app))
 
-        DialogManager.center_popup_on_parent(app.log_window, app, width=700, height=400)
+        DialogManager.center_popup_on_parent(app.log_window, app, width=750, height=480)
         DialogManager.apply_popup_style(app, app.log_window, is_modal=False, owner=app)
         app.log_window.protocol("WM_DELETE_WINDOW", lambda: DialogManager.close_logs_dialog(app))
 
-        app.log_textbox = ctk.CTkTextbox(app.log_window, wrap="none")
+        # --- Frame Superior: Filtros y Acciones ---
+        top_frame = ctk.CTkFrame(app.log_window, fg_color="transparent")
+        top_frame.pack(fill="x", padx=10, pady=(10, 0))
+
+        lbl_filter = ctk.CTkLabel(
+            top_frame,
+            text="Filtrar nivel:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#E5E7EB"
+        )
+        lbl_filter.pack(side="left", padx=(5, 8))
+
+        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
+        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+
+        if not hasattr(app, "log_filter_var"):
+            app.log_filter_var = tk.StringVar(value="TODOS")
+
+        seg_filter = ctk.CTkSegmentedButton(
+            top_frame,
+            values=["TODOS", "INFO", "WARNING", "ERROR"],
+            variable=app.log_filter_var,
+            selected_color=corp_color,
+            selected_hover_color=corp_hover,
+            unselected_color="#262626",
+            unselected_hover_color="#333333",
+            text_color="#FFFFFF",
+            command=lambda selected: DialogManager._filter_and_render_logs(app)
+        )
+        seg_filter.pack(side="left")
+
+        # Botones de Acción en la barra superior (Copiar y Exportar)
+        btn_copy = ctk.CTkButton(
+            top_frame,
+            text="Copiar",
+            width=70,
+            fg_color="#374151",
+            hover_color="#1F2937",
+            command=lambda: DialogManager._copy_logs_to_clipboard(app)
+        )
+        btn_copy.pack(side="right", padx=(5, 0))
+
+        btn_export = ctk.CTkButton(
+            top_frame,
+            text="Exportar .txt",
+            width=90,
+            fg_color="#374151",
+            hover_color="#1F2937",
+            command=lambda: DialogManager._export_logs_to_file(app)
+        )
+        btn_export.pack(side="right", padx=(5, 0))
+
+        # --- Textbox Principal ---
+        app.log_textbox = ctk.CTkTextbox(app.log_window, wrap="none", font=("Consolas", 11))
         app.log_textbox.pack(fill="both", expand=True, padx=10, pady=10)
 
-        app.log_textbox.insert("1.0", "\n".join(app.log_history))
-        app.log_textbox.configure(state="disabled")
+        # Configuración de tags de formato de texto en el widget tk subyacente
+        raw_textbox = app.log_textbox._textbox
+        raw_textbox.tag_config("lvl_info", foreground="#22C55E", font=("Consolas", 11, "bold"))      # Verde
+        raw_textbox.tag_config("lvl_warning", foreground="#EAB308", font=("Consolas", 11, "bold"))   # Amarillo
+        raw_textbox.tag_config("lvl_error", foreground="#EF4444", font=("Consolas", 11, "bold"))     # Rojo
+        raw_textbox.tag_config("lvl_tree", foreground="#A855F7", font=("Consolas", 11))             # Púrpura
+
+        # Renderizar historial de logs actual
+        DialogManager._filter_and_render_logs(app)
+
+        # --- Frame Inferior: Botones de Acción ---
+        btn_bar = ctk.CTkFrame(app.log_window, fg_color="transparent")
+        btn_bar.pack(fill="x", padx=10, pady=(0, 10))
+
+        btn_clear = ctk.CTkButton(
+            btn_bar,
+            text="Limpiar Consola",
+            fg_color="#EF4444",
+            hover_color="#B91C1C",
+            command=lambda: DialogManager._clear_console(app)
+        )
+        btn_clear.pack(side="left", padx=(5, 0))
+
+        btn_close = ctk.CTkButton(
+            btn_bar,
+            text="Cerrar",
+            fg_color=corp_color,
+            hover_color=corp_hover,
+            command=lambda: DialogManager.close_logs_dialog(app)
+        )
+        btn_close.pack(side="right", padx=(0, 5))
 
         app.log_window.lift()
         app.log_window.attributes("-topmost", True)
         app.log_window.after(150, lambda: app.log_window.attributes("-topmost", False) if app.log_window and app.log_window.winfo_exists() else None)
+
+        # Asignar el foco a la ventana modal de logs para captura de eventos (p. ej. ESC)
         app.log_window.focus_force()
+        app.log_window.after(50, lambda: app.log_window.focus_force() if app.log_window and app.log_window.winfo_exists() else None)
+
+    @staticmethod
+    def append_formatted_log_line(app, level, msg):
+        """Inserta una línea de log enriquecida en el textbox respetando el filtro activo."""
+        log_box = getattr(app, "log_textbox", None)
+        if not log_box or not log_box.winfo_exists():
+            return
+
+        filter_level = getattr(app, "log_filter_var", None)
+        selected_filter = filter_level.get() if filter_level else "TODOS"
+
+        if selected_filter != "TODOS" and selected_filter != level:
+            return
+
+        log_box.configure(state="normal")
+        line = msg if msg.endswith("\n") else f"{msg}\n"
+
+        # Determinar tag visual
+        tag = "lvl_tree" if ("├──" in line or "└──" in line) else f"lvl_{level.lower()}"
+
+        try:
+            log_box._textbox.insert("end", line, tag)
+        except Exception:
+            log_box.insert("end", line)
+
+        log_box.see("end")
+        log_box.configure(state="disabled")
+
+    @staticmethod
+    def _filter_and_render_logs(app):
+        """Redibuja el cuadro de logs filtrando el historial según el nivel seleccionado."""
+        log_box = getattr(app, "log_textbox", None)
+        if not log_box or not log_box.winfo_exists():
+            return
+
+        filter_level = getattr(app, "log_filter_var", None)
+        selected_filter = filter_level.get() if filter_level else "TODOS"
+
+        log_box.configure(state="normal")
+        log_box.delete("1.0", "end")
+
+        for item in list(getattr(app, "log_history", [])):
+            if isinstance(item, tuple):
+                level, msg = item
+            else:
+                level = "INFO"
+                msg = item
+
+            if selected_filter != "TODOS" and selected_filter != level:
+                continue
+
+            line = msg if msg.endswith("\n") else f"{msg}\n"
+            tag = "lvl_tree" if ("├──" in line or "└──" in line) else f"lvl_{level.lower()}"
+            try:
+                log_box._textbox.insert("end", line, tag)
+            except Exception:
+                log_box.insert("end", line)
+
+        log_box.see("end")
+        log_box.configure(state="disabled")
+
+    @staticmethod
+    def _clear_console(app):
+        """Limpia el historial acumulado y la vista."""
+        if hasattr(app, "log_history"):
+            app.log_history.clear()
+        if getattr(app, "log_textbox", None) and app.log_textbox.winfo_exists():
+            app.log_textbox.configure(state="normal")
+            app.log_textbox.delete("1.0", "end")
+            app.log_textbox.configure(state="disabled")
+
+    @staticmethod
+    def _copy_logs_to_clipboard(app):
+        """Copia los logs que están visibles según el filtro al portapapeles."""
+        history = getattr(app, "log_history", [])
+        filter_level = getattr(app, "log_filter_var", None)
+        selected_filter = filter_level.get() if filter_level else "TODOS"
+
+        filtered_lines = []
+        for item in history:
+            level, msg = item if isinstance(item, tuple) else ("INFO", item)
+            if selected_filter == "TODOS" or selected_filter == level:
+                filtered_lines.append(msg)
+
+        if not filtered_lines:
+            return
+
+        app.clipboard_clear()
+        app.clipboard_append("\n".join(filtered_lines))
+        DialogManager.show_themed_dialog(app, "Copiado", "Logs copiados al portapapeles con éxito.", level="info")
+
+    @staticmethod
+    def _export_logs_to_file(app):
+        """Exporta el historial de logs filtrado a un archivo de texto .txt."""
+        history = getattr(app, "log_history", [])
+        if not history:
+            DialogManager.show_themed_dialog(app, "Exportar", "No hay logs registrados para exportar.", level="warning")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            title="Guardar historial de logs"
+        )
+
+        if file_path:
+            with open(file_path, "w", encoding="utf-8") as f:
+                for item in history:
+                    msg = item[1] if isinstance(item, tuple) else item
+                    f.write(msg if msg.endswith("\n") else f"{msg}\n")
+            DialogManager.show_themed_dialog(app, "Exportar", f"Logs guardados con éxito en:\n{file_path}", level="info")
 
     @staticmethod
     def close_logs_dialog(app):

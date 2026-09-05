@@ -53,7 +53,7 @@ class App(ctk.CTk):
         self.log_history = deque(maxlen=5000)
         self._multi_select_mode = False
 
-        # 'Ver detalles' por defecto False al abrir la aplicación
+        # 'Ver detalles' visible por defecto al abrir la aplicación
         self.show_detail_panel_var = tk.BooleanVar(value=True)
         self.detail_panel_visible = True
 
@@ -89,7 +89,7 @@ class App(ctk.CTk):
         self.catalog_manager.load_catalog_values()
         self.catalog_manager.load_settings()
 
-        # 'Revisar carátulas' siempre TRUE por defecto al abrir la aplicación
+        # 'Revisar carátulas' activado por defecto
         settings_dict = getattr(self.catalog_manager, "settings", {})
         manual_rev = settings_dict.get("manual_cover_review", True) if isinstance(settings_dict, dict) else True
         self.review_covers_var = tk.BooleanVar(value=manual_rev)
@@ -129,11 +129,12 @@ class App(ctk.CTk):
         )
         self.grid_panel = GridPanel(app=self, parent=self.frame_main, logger=self.logger)
 
-        # Mostrar el panel lateral por defecto según show_detail_panel_var = True
+        # Mostrar el panel lateral según el estado inicial
         self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
 
         self._setup_footer()
 
+        # Instanciación e integración con SearchManager
         self.search_manager = SearchManager(
             app=self,
             tree=self.grid_panel.tree,
@@ -191,18 +192,20 @@ class App(ctk.CTk):
 
     def _bind_shortcuts(self):
         self.bind("<Control-o>", lambda e: self.browse_folder())
+        self.bind("<Control-O>", lambda e: self.browse_folder())
         self.bind("<F5>", lambda e: self.refresh_folder())
         self.bind("<Control-q>", lambda e: self.on_close())
+        self.bind("<Control-Q>", lambda e: self.on_close())
         self.bind("<Control-a>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-A>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-f>", lambda e: self.focus_header_search())
         self.bind("<Control-F>", lambda e: self.focus_header_search())
 
-        # Atajo para el diálogo de reemplazo en nombres de archivo
+        # Diálogo de reemplazo masivo de texto en nombres de archivo
         self.bind("<Control-r>", lambda e: self.open_replace_dialog())
         self.bind("<Control-R>", lambda e: self.open_replace_dialog())
 
-        # Al presionar el atajo Ctrl+B, invertir la variable del check
+        # Conmutación de visibilidad del panel lateral
         def _toggle_shortcut():
             self.show_detail_panel_var.set(not self.show_detail_panel_var.get())
             self.toggle_detail_panel()
@@ -211,6 +214,7 @@ class App(ctk.CTk):
         self.bind("<Control-B>", lambda e: _toggle_shortcut())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
 
+        # Atajos Deshacer / Rehacer
         self.bind_all("<Control-z>", self.undo_manager.undo)
         self.bind_all("<Control-Z>", self.undo_manager.undo)
         self.bind_all("<Control-y>", self.undo_manager.redo)
@@ -218,6 +222,7 @@ class App(ctk.CTk):
         self.bind_all("<Command-z>", self.undo_manager.undo)
         self.bind_all("<Command-Shift-z>", self.undo_manager.redo)
 
+        # Zoom de la tabla
         self.bind_all("<Control-plus>", lambda e: self.grid_panel._on_key_zoom_in(e))
         self.bind_all("<Control-KP_Add>", lambda e: self.grid_panel._on_key_zoom_in(e))
         self.bind_all("<Control-minus>", lambda e: self.grid_panel._on_key_zoom_out(e))
@@ -227,6 +232,7 @@ class App(ctk.CTk):
         self.bind_all("<Control-KP_0>", lambda e: self.grid_panel._on_key_zoom_reset(e))
         self.bind_all("<Control-Key-0>", lambda e: self.grid_panel._on_key_zoom_reset(e))
 
+        # Redirección global de teclado a la tabla
         nav_keys = [
             "<Up>", "<Down>", "<Prior>", "<Next>", "<Home>", "<End>",
             "<Shift-Up>", "<Shift-Down>", "<Shift-Prior>", "<Shift-Next>",
@@ -244,7 +250,7 @@ class App(ctk.CTk):
             self.header_panel.entry_search.select_range(0, "end")
 
     def open_replace_dialog(self):
-        """Abre el cuadro de diálogo modal para buscar y reemplazar en los nombres de archivo sobre la totalidad del grid."""
+        """Abre el diálogo modal para reemplazar texto en nombres de archivo sobre el grid."""
         target_items = []
         for row_id, file_path in self.file_paths_map.items():
             filename = os.path.basename(file_path) if file_path else ""

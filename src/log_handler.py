@@ -9,7 +9,7 @@ class LogManager(logging.Handler):
     def emit(self, record):
         msg = self.format(record)
         if hasattr(self.app_instance, "log_history"):
-            self.app_instance.log_history.append(msg)
+            self.app_instance.log_history.append((record.levelname, msg))
 
         # Si la ventana principal ya fue destruida, evitamos llamar a after()
         if not hasattr(self.app_instance, "winfo_exists") or not self.app_instance.winfo_exists():
@@ -20,12 +20,12 @@ class LogManager(logging.Handler):
             message_text = record.getMessage()
             self.app_instance.after(
                 0,
-                lambda: self._update_ui_log(message_text, msg)
+                lambda: self._update_ui_log(message_text, record.levelname, msg)
             )
         except Exception:
             pass
 
-    def _update_ui_log(self, status_msg, full_msg):
+    def _update_ui_log(self, status_msg, level, full_msg):
         """Actualiza la barra de estado y el cuadro de texto del diálogo si existen."""
         if hasattr(self.app_instance, "label_status") and self.app_instance.label_status:
             try:
@@ -35,7 +35,7 @@ class LogManager(logging.Handler):
             except Exception:
                 pass
 
-        LogManager.append_log_to_dialog(self.app_instance, full_msg)
+        LogManager.append_log_to_dialog(self.app_instance, level, full_msg)
 
     @staticmethod
     def _format_dict_value(val):
@@ -104,7 +104,7 @@ class LogManager(logging.Handler):
         return logger
 
     @staticmethod
-    def append_log_to_dialog(app, msg):
+    def append_log_to_dialog(app, level, msg):
         """Agrega una línea de texto al cuadro de texto del diálogo de logs aplicando formato si está abierto."""
         log_win = getattr(app, "log_window", None)
         log_box = getattr(app, "log_textbox", None)
@@ -118,21 +118,20 @@ class LogManager(logging.Handler):
                 app.log_textbox = None
                 return
 
-            log_box.configure(state="normal")
-
-            # Intentar delegar el formateo enriquecido a DialogManager si está disponible
+            # Intentar delegar el filtrado y formateo enriquecido a DialogManager si está disponible
             from dialogs import DialogManager
             if hasattr(DialogManager, "append_formatted_log_line"):
-                DialogManager.append_formatted_log_line(log_box, msg)
+                DialogManager.append_formatted_log_line(app, level, msg)
             else:
+                log_box.configure(state="normal")
                 line_to_insert = msg if msg.endswith("\n") else f"{msg}\n"
                 log_box.insert("end", line_to_insert)
-
-            log_box.see("end")
-            log_box.configure(state="disabled")
+                log_box.see("end")
+                log_box.configure(state="disabled")
         except Exception:
             try:
                 # Fallback seguro en caso de fallo durante el formateo
+                log_box.configure(state="normal")
                 line_to_insert = msg if msg.endswith("\n") else f"{msg}\n"
                 log_box.insert("end", line_to_insert)
                 log_box.see("end")

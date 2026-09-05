@@ -1,5 +1,4 @@
 FUNCIONALIDADES GENERALES:
-- Ver detalles a true por defecto.
 - Seleccionar carpeta debería enseñar los ficheros compatibles que haya en cada directorio.
 - Permitir modificar el orden de las cabeceras del grid.
 - Permitir meter columnas nuevas
@@ -13,7 +12,6 @@ FUNCIONALIDADES GENERALES:
 - El grid si pulso espacio debe reproducirse la canción o pararse.
 - Analizar si se ve mejor el grid poniendo los literales de las cabeceras a la izquierda, cabecera en gris? cabecera en mayuscula?
 - Quiero poder borrar el archivo físico del disco duro a través del grid.
-- Quiero poder hacer un CTRL + R de filename
 - Si revisar caratulas es falso, no debe saltar el modal de eleccion de caratulas.
 - Renombrar cabecera Album a (Release - 01), (Genres - 02), (Labels - 03)
 - Añadir nivel de jerarquia 4 y 5 que serán comentarios 1 y comentarios 2 separador punto y coma y añadir el apartado al gestor de catalogos.
