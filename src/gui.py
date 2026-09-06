@@ -190,6 +190,28 @@ class App(ctk.CTk):
     def catalog_values(self):
         return self.catalog_manager.catalog_values
 
+    def _on_space_key(self, event):
+        """Garantiza que la tecla espacio controle la reproducción solo si no se está editando texto."""
+        try:
+            focused = self.focus_get()
+        except Exception:
+            focused = None
+
+        if focused is not None:
+            w_class = focused.winfo_class().lower()
+            if any(k in w_class for k in ["entry", "text", "spinbox", "combobox"]):
+                return
+
+            if getattr(focused, "_is_cell_editing", False):
+                return
+
+        if hasattr(self, "grid_panel") and getattr(self.grid_panel, "cell_entry", None):
+            return
+
+        if hasattr(self, "detail_panel"):
+            self.detail_panel.handle_space_toggle()
+            return "break"
+
     def _bind_shortcuts(self):
         self.bind("<Control-o>", lambda e: self.browse_folder())
         self.bind("<Control-O>", lambda e: self.browse_folder())
@@ -213,6 +235,9 @@ class App(ctk.CTk):
         self.bind("<Control-b>", lambda e: _toggle_shortcut())
         self.bind("<Control-B>", lambda e: _toggle_shortcut())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
+
+        # Atajo global de tecla Espacio para reproducción/pausa
+        self.bind_all("<space>", self._on_space_key)
 
         # Atajos Deshacer / Rehacer
         self.bind_all("<Control-z>", self.undo_manager.undo)

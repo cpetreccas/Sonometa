@@ -16,11 +16,11 @@ class AudioManager:
     # ------------------------------------------------------------------
 
     def extract_metadata(self, file_path, filename):
-        """Lee todas las etiquetas de texto de un archivo de audio.
+        """Lee todas las etiquetas de texto de un archivo de audio incluyendo la duración.
 
         Returns:
             dict con claves: Filename, Title, Artist, MixArtist, Album,
-                             Genre, Publisher, Year, CUEs, Cover.
+                             Genre, Publisher, Year, Duration, CUEs, Cover.
         """
         from mutagen.wave import WAVE
         from mutagen import File as MutagenFile
@@ -34,6 +34,7 @@ class AudioManager:
             "Genre": "",
             "Publisher": "",
             "Year": "",
+            "Duration": "",  # Preservación de la duración calculada del audio
             "CUEs": 0,
             "Cover": "No",
         }
@@ -65,6 +66,13 @@ class AudioManager:
                     data["Genre"]     = get_tag("genre")
                     data["Publisher"] = get_tag("organization") or get_tag("publisher")
                     data["Year"]      = get_tag("date") or get_tag("year")
+
+            # Extracción y formateo seguro de la duración (info.length)
+            raw_audio = MutagenFile(file_path)
+            if raw_audio and hasattr(raw_audio, "info") and getattr(raw_audio.info, "length", None):
+                total_seconds = int(raw_audio.info.length)
+                mins, secs = divmod(total_seconds, 60)
+                data["Duration"] = f"{mins:02d}:{secs:02d}"
 
             data["CUEs"] = self.count_traktor_cues(file_path)
 
@@ -440,7 +448,9 @@ class AudioManager:
         return results
 
     def clear_audio_file_metadata(self, file_path):
-        """Elimina todos los metadatos del archivo de audio, conservando solo el nombre."""
+        """Elimina únicamente las etiquetas de texto editables y la carátula,
+        preservando intactas la estructura del archivo, cabeceras y duración.
+        """
         from mutagen.id3 import ID3, ID3NoHeaderError
         from mutagen.wave import WAVE
         from mutagen.flac import FLAC
@@ -451,48 +461,57 @@ class AudioManager:
         ext = os.path.splitext(file_path)[1].lower()
 
         try:
+            # Lista de tags ID3 a remover explícitamente (sin eliminar el header o TLEN/info)
+            id3_tags_to_delete = ["TIT2", "TPE1", "TPE4", "TALB", "TCON", "TPUB", "TDRC", "APIC", "COMM", "TXXX"]
+
             if ext == ".mp3":
                 try:
-                    ID3(file_path).delete(file_path)
+                    tags = ID3(file_path)
+                    for t in id3_tags_to_delete:
+                        tags.delall(t)
+                    tags.save(file_path)
                 except ID3NoHeaderError:
                     pass
 
             elif ext == ".wav":
                 audio = WAVE(file_path)
                 if audio.tags is not None:
-                    audio.delete()
+                    for t in id3_tags_to_delete:
+                        audio.tags.delall(t)
+                    audio.save()
 
             elif ext == ".flac":
                 audio = FLAC(file_path)
                 if getattr(audio, "pictures", None):
                     audio.clear_pictures()
-                    audio.save()
-                if audio.tags is not None:
-                    audio.delete()
+                # Limpiar solo tags editables de Vorbis
+                editable_vorbis = ["title", "artist", "mixartist", "album", "genre", "organization", "publisher", "date", "year"]
+                for key in editable_vorbis:
+                    audio.pop(key, None)
+                audio.save()
 
             elif ext in (".m4a", ".aac", ".mp4"):
                 audio = MP4(file_path)
                 if audio.tags is not None:
-                    audio.delete()
+                    editable_mp4 = ["\xa9nam", "\xa9ART", "soar", "\xa9alb", "\xa9gen", "covr", "\xa9day"]
+                    for key in editable_mp4:
+                        audio.tags.pop(key, None)
+                    audio.save()
 
             elif ext == ".aiff":
                 audio = AIFF(file_path)
                 if audio.tags is not None:
-                    audio.delete()
+                    for t in id3_tags_to_delete:
+                        audio.tags.delall(t)
+                    audio.save()
 
             else:
                 audio = MutagenFile(file_path)
-                if audio is None:
-                    logger.warning(
-                        f"No se pudieron identificar los metadatos para limpiar: "
-                        f"{os.path.basename(file_path)}"
-                    )
-                    return False
-
-                if hasattr(audio, "delete"):
-                    audio.delete()
-                elif hasattr(audio, "tags") and audio.tags is not None:
-                    audio.tags.clear()
+                if audio is not None and hasattr(audio, "tags") and audio.tags is not None:
+                    # Se borran las etiquetas comunes sin hacer audio.delete() directo
+                    keys_to_remove = [k for k in audio.tags.keys() if not k.startswith("TLEN")]
+                    for k in keys_to_remove:
+                        del audio.tags[k]
                     audio.save()
 
             return True

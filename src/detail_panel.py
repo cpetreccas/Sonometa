@@ -75,6 +75,18 @@ class DetailPanel:
             pass
         return 0.0
 
+    def handle_space_toggle(self):
+        """Maneja el evento global de la tecla Espacio sobre el reproductor de audio."""
+        if not self.audio_player:
+            return
+        selected = self.app.tree.selection()
+        if len(selected) == 1:
+            file_path = self.app.file_paths_map.get(selected[0])
+            if file_path and os.path.exists(file_path):
+                if self.audio_player.current_file_path != file_path:
+                    self.audio_player.load_track(file_path)
+                self.audio_player.toggle_play_pause()
+
     def _setup_entry_context_menu(self):
         """Crea el menú contextual para las entradas de texto (Copiar, Cortar, Pegar, Seleccionar todo)."""
         self._entry_context_menu = tk.Menu(
@@ -924,9 +936,10 @@ class DetailPanel:
         if current_file and os.path.exists(current_file):
             total_duration = self.get_fast_audio_duration(current_file)
             if total_duration > 0:
-                self.update_audio_time_display(0, total_duration)
                 if self.audio_player:
                     self.audio_player.load_track(current_file)
+                    self.audio_player.total_length = total_duration
+                self.update_audio_time_display(0, total_duration)
 
     def on_row_select(self, event):
         selected = self.app.tree.selection()
@@ -964,15 +977,21 @@ class DetailPanel:
         self.refresh_catalog_comboboxes()
 
         file_path = self.app.file_paths_map.get(item_id)
-        if file_path:
+        if file_path and os.path.exists(file_path):
             self.display_cover_art(file_path)
 
-            # Obtención instantánea de la duración total leyendo la cabecera del archivo
+            # 1. Leer la duración exacta directamente de la cabecera del archivo de audio
             total_duration = self.get_fast_audio_duration(file_path)
-            self.update_audio_time_display(0, total_duration)
 
+            # 2. Cargar la pista en el reproductor manteniendo el buffer listo
             if self.audio_player:
                 self.audio_player.load_track(file_path)
+                if total_duration > 0:
+                    self.audio_player.total_length = total_duration
+
+            # 3. Forzar el refresco de la etiqueta de tiempo al final del ciclo
+            if total_duration > 0:
+                self.update_audio_time_display(0, total_duration)
 
     def paste_cover_from_clipboard(self, event=None):
         try:

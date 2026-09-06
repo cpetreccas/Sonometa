@@ -390,11 +390,13 @@ class ProcessManager:
         return "No"
 
     def update_row_from_file_metadata(self, row_id, file_path):
+        """Re-extrae los metadatos desde el archivo en disco y actualiza la fila correspondiente en la grilla."""
         metadata = self.app.audio_manager.extract_metadata(file_path, os.path.basename(file_path))
         metadata["Album"] = CatalogManager.normalize_catalog_text(metadata.get("Album", ""))
         metadata["Genre"] = CatalogManager.normalize_catalog_text(metadata.get("Genre", ""))
         metadata["Publisher"] = CatalogManager.normalize_catalog_text(metadata.get("Publisher", ""))
 
+        # Preserva las columnas según el orden configurado en el Treeview
         self.app.tree.item(row_id, values=(
             metadata["Filename"],
             metadata["Artist"],
@@ -408,7 +410,7 @@ class ProcessManager:
         ))
 
     def clear_metadata_for_rows(self, rows, scope_label="selección"):
-        """Limpia los metadatos de los archivos recibidos registrando una sola línea de log por fichero."""
+        """Limpia las etiquetas editables de los archivos manteniendo intacta la duración y datos de contenedor."""
         if not rows:
             return
 
@@ -431,12 +433,21 @@ class ProcessManager:
                         "Cover": str(values[8]) if len(values) > 8 else "No"
                     }
 
-                # Limpieza total directa para evitar múltiples llamadas e inundación del log
+                # Limpieza de tags editables en el archivo físico (preservando headers y TLEN/Duration)
                 self.app.audio_manager.clear_audio_file_metadata(file_path)
                 self.app.grid_panel.update_row_cover_status(row_id, "No")
 
                 if values:
-                    new_values = [values[0], "", "", "", "", "", "", "", "No"]
+                    # Mantiene el nombre de archivo (índice 0) y limpia únicamente los tags editables y la carátula
+                    new_values = list(values)
+                    # Limpiar columnas de metadatos editables (Artist..Year)
+                    for i in range(1, 8):
+                        if i < len(new_values):
+                            new_values[i] = ""
+                    # Cover a "No"
+                    if len(new_values) > 8:
+                        new_values[8] = "No"
+
                     self.app.tree.item(row_id, values=new_values)
 
                 new_vals = {

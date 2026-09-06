@@ -41,7 +41,8 @@ class AudioPlayer:
         if self.current_file_path == file_path and self.total_length > 0:
             return
 
-        self.stop_and_unload(keep_duration=False)
+        # Cambiado keep_duration=True para evitar que la interfaz parpadee o borre la duración a 0
+        self.stop_and_unload(keep_duration=True)
         self.current_file_path = file_path
 
         # Obtener duración al instante leyendo la cabecera del archivo

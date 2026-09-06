@@ -35,8 +35,8 @@ class GridPanel:
             "Album":     {"width": 100, "minwidth": 70,  "stretch": False, "anchor": "w"},
             "Genre":     {"width": 70,  "minwidth": 50,  "stretch": False, "anchor": "w"},
             "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
-            "Year":      {"width": 45,  "minwidth": 40,  "stretch": False, "anchor": "center"},
-            "Cover":     {"width": 55,  "minwidth": 45,  "stretch": False, "anchor": "center"}
+            "Year":      {"width": 40,  "minwidth": 40,  "stretch": False, "anchor": "center"},
+            "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"}
         }
 
         self.frame_grid = ctk.CTkFrame(self.parent)
@@ -222,15 +222,15 @@ class GridPanel:
         self.tree = ttk.Treeview(self.frame_grid, columns=self.columns, show="headings", selectmode="extended")
 
         col_titles = {
-            "Filename": "Nombre de archivo",
-            "Artist": "Intérprete",
-            "Title": "Título",
-            "MixArtist": "Remix",
-            "Album": "Álbum",
-            "Genre": "Género",
-            "Publisher": "Etiqueta",
-            "Year": "Año",
-            "Cover": "Carátula"
+            "Filename": "NOMBRE DE ARCHIVO",
+            "Artist": "INTÉRPRETE",
+            "Title": "TÍTULO",
+            "MixArtist": "REMIX",
+            "Album": "ÁLBUM",
+            "Genre": "GÉNERO",
+            "Publisher": "ETIQUETA",
+            "Year": "AÑO",
+            "Cover": "CARÁTULA"
         }
 
         for col in self.columns:
@@ -238,7 +238,7 @@ class GridPanel:
             title = col_titles.get(col, col)
             cfg = self.base_col_config[col]
 
-            self.tree.heading(col, text=title, command=lambda _col=col: self.sort_by_column(_col))
+            self.tree.heading(col, text=title, anchor="w", command=lambda _col=col: self.sort_by_column(_col))
             self.tree.column(
                 col,
                 width=cfg["width"],
@@ -911,18 +911,49 @@ class GridPanel:
         title = values[2] if len(values) > 2 else ""
         return artist, title
 
+    def update_row_metadata(self, row_id, new_metadata):
+        """
+        Actualiza las celdas visibles de una fila específica conservando el orden
+        de las columnas de la grilla y reteniendo metadatos técnicos/no editables.
+        """
+        if not row_id or row_id not in self.tree.get_children():
+            return
+
+        current_values = list(self.tree.item(row_id, "values"))
+
+        # Mapeo estructurado para refrescar valores visibles manteniendo la coherencia de celdas
+        updated_values = [
+            new_metadata.get("Filename", current_values[0] if len(current_values) > 0 else ""),
+            new_metadata.get("Artist", ""),
+            new_metadata.get("Title", ""),
+            new_metadata.get("MixArtist", ""),
+            new_metadata.get("Album", ""),
+            new_metadata.get("Genre", ""),
+            new_metadata.get("Publisher", ""),
+            new_metadata.get("Year", ""),
+            new_metadata.get("Cover", current_values[8] if len(current_values) > 8 else "No")
+        ]
+
+        self.tree.item(row_id, values=updated_values)
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)
+
     def insert_audio_row(self, metadata, count):
+        """
+        Inserta una fila asegurando la extracción limpia de campos y manteniendo
+        los datos técnicos resguardados en el estado global.
+        """
         tag = "even" if count % 2 == 0 else "odd"
         row_id = self.tree.insert("", "end", values=(
-            metadata["Filename"],
-            metadata["Artist"],
-            metadata["Title"],
-            metadata["MixArtist"],
-            metadata["Album"],
-            metadata["Genre"],
-            metadata["Publisher"],
-            metadata["Year"],
-            metadata["Cover"]
+            metadata.get("Filename", ""),
+            metadata.get("Artist", ""),
+            metadata.get("Title", ""),
+            metadata.get("MixArtist", ""),
+            metadata.get("Album", ""),
+            metadata.get("Genre", ""),
+            metadata.get("Publisher", ""),
+            metadata.get("Year", ""),
+            metadata.get("Cover", "No")
         ), tags=(tag,))
         return row_id
 
