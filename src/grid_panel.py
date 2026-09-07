@@ -21,6 +21,10 @@ class GridPanel:
         # Cerrojo unificado para evitar ráfagas de teclado (Auto-repeat debounce)
         self._nav_lock = False
 
+        # Variables para el reordenamiento de columnas por arrastre (Drag & Drop)
+        self._drag_col = None
+        self._drag_x = 0
+
         # Configuración del nivel de zoom base
         self.zoom_level = 1.0
         self.BASE_FONT_SIZE = 9
@@ -250,6 +254,11 @@ class GridPanel:
         self.tree.tag_configure("even", background="#181818")
         self.tree.tag_configure("odd", background="#1E1E1E")
 
+        # Bindings para el reordenamiento de columnas (Drag & Drop)
+        self.tree.bind("<ButtonPress-1>", self._on_header_press, add="+")
+        self.tree.bind("<B1-Motion>", self._on_header_motion, add="+")
+        self.tree.bind("<ButtonRelease-1>", self._on_header_release, add="+")
+
         self.tree.bind("<<TreeviewSelect>>", lambda event: self.app.detail_panel.on_row_select(event))
         self.tree.bind("<Double-1>", self.on_cell_double_click)
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
@@ -299,6 +308,59 @@ class GridPanel:
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.vsb.grid(row=0, column=1, sticky="ns")
         self.hsb.grid(row=1, column=0, sticky="ew")
+
+    def _on_header_press(self, event):
+        """Detecta si el clic inicial fue en el encabezado de una columna para iniciar el arrastre."""
+        region = self.tree.identify_region(event.x, event.y)
+        if region == "heading":
+            col_id = self.tree.identify_column(event.x)
+            if col_id:
+                col_index = int(col_id.replace("#", "")) - 1
+                if 0 <= col_index < len(self.columns):
+                    display_cols = list(self.tree.cget("displaycolumns"))
+                    if display_cols == ["#all"] or not display_cols:
+                        display_cols = list(self.columns)
+
+                    self._drag_col = display_cols[col_index] if col_index < len(display_cols) else self.columns[col_index]
+                    self._drag_x = event.x
+
+    def _on_header_motion(self, event):
+        """Muestra el cursor de cambio horizontal cuando se arrastra una cabecera."""
+        if self._drag_col:
+            region = self.tree.identify_region(event.x, event.y)
+            if region == "heading":
+                self.tree.config(cursor="sb_h_double_arrow")
+            else:
+                self.tree.config(cursor="")
+
+    def _on_header_release(self, event):
+        """Reordena la posición de la columna al soltar el ratón."""
+        if self._drag_col:
+            self.tree.config(cursor="")
+            region = self.tree.identify_region(event.x, event.y)
+
+            if region == "heading":
+                target_col_id = self.tree.identify_column(event.x)
+                if target_col_id:
+                    target_index = int(target_col_id.replace("#", "")) - 1
+
+                    current_display = list(self.tree.cget("displaycolumns"))
+                    if current_display == ["#all"] or not current_display:
+                        current_display = list(self.columns)
+
+                    if 0 <= target_index < len(current_display):
+                        target_col = current_display[target_index]
+
+                        if target_col != self._drag_col:
+                            src_idx = current_display.index(self._drag_col)
+                            dst_idx = current_display.index(target_col)
+
+                            current_display.pop(src_idx)
+                            current_display.insert(dst_idx, self._drag_col)
+
+                            self.tree.configure(displaycolumns=tuple(current_display))
+
+            self._drag_col = None
 
     def _setup_context_menu(self):
         self._tree_context_menu = tk.Menu(
@@ -860,15 +922,15 @@ class GridPanel:
 
         # Diccionario de títulos limpios base
         col_titles = {
-            "Filename": "Nombre de archivo",
-            "Artist": "Intérprete",
-            "Title": "Título",
-            "MixArtist": "Remix",
-            "Album": "Álbum",
-            "Genre": "Género",
-            "Publisher": "Etiqueta",
-            "Year": "Año",
-            "Cover": "Carátula"
+            "Filename": "NOMBRE DE ARCHIVO",
+            "Artist": "INTÉRPRETE",
+            "Title": "TÍTULO",
+            "MixArtist": "REMIX",
+            "Album": "ÁLBUM",
+            "Genre": "GÉNERO",
+            "Publisher": "ETIQUETA",
+            "Year": "AÑO",
+            "Cover": "CARÁTULA"
         }
 
         # Restaurar texto base en todos los encabezados

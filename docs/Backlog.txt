@@ -1,7 +1,4 @@
 FUNCIONALIDADES GENERALES:
-- Limpiar no debe borrar la duración.
-- Seleccionar carpeta debería enseñar los ficheros compatibles que haya en cada directorio.
-- Permitir modificar el orden de las cabeceras del grid.
 - Permitir meter columnas nuevas
 - Ver cómo gestionar comments2 para poder añadir múltiples tags.
 - Analizar ¿un modal? para permitir filtros avanzados con checkboxes, etc.
@@ -15,6 +12,7 @@ FUNCIONALIDADES GENERALES:
 - Renombrar cabecera Album a (Release - 01), (Genres - 02), (Labels - 03)
 - Añadir nivel de jerarquia 4 y 5 que serán comentarios 1 y comentarios 2 separador punto y coma y añadir el apartado al gestor de catalogos.
 - Añadir exportar listado.
+- Seleccionar carpeta debería enseñar los ficheros compatibles que haya en cada directorio. (DESCARTADO)
 
 GRID:
 Eliminar la ultima fila vacía.
