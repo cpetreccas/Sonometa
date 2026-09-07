@@ -1511,6 +1511,115 @@ class DialogManager:
         btn_close_panel.focus_force()
 
     @staticmethod
+    def open_column_customization_dialog(app):
+        """Abre un modal para seleccionar las columnas visibles en la grilla principal."""
+        win = ctk.CTkToplevel(app)
+        win.title("Personalizar Columnas Visibles - Sonometa")
+        win.geometry("450x520")
+        win.resizable(False, False)
+
+        # Cierre con ESC
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        DialogManager.center_popup_on_parent(win, app, width=450, height=520)
+        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
+
+        font_btn = ctk.CTkFont(size=12, weight="bold")
+        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
+        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+
+        lbl_header = ctk.CTkLabel(
+            win,
+            text="Personalización de Columnas",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="#F3F4F6"
+        )
+        lbl_header.pack(anchor="w", padx=16, pady=(16, 4))
+
+        lbl_sub = ctk.CTkLabel(
+            win,
+            text="Selecciona los campos que deseas mostrar u ocultar en la grilla.",
+            text_color="#9CA3AF"
+        )
+        lbl_sub.pack(anchor="w", padx=16, pady=(0, 10))
+
+        # Panel desplazable para la lista de checkboxes
+        scroll_frame = ctk.CTkScrollableFrame(win, fg_color="#181818", corner_radius=8)
+        scroll_frame.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+
+        col_titles = {
+            "Filename": "NOMBRE DE ARCHIVO",
+            "Artist": "INTÉRPRETE",
+            "Title": "TÍTULO",
+            "MixArtist": "REMIX",
+            "Album": "ÁLBUM",
+            "Genre": "GÉNERO",
+            "Publisher": "ETIQUETA",
+            "Year": "AÑO",
+            "Cover": "CARÁTULA"
+        }
+
+        grid_panel = getattr(app, "grid_panel", None)
+        if not grid_panel or not hasattr(grid_panel, "tree"):
+            ctk.CTkLabel(scroll_frame, text="No hay grilla disponible.", text_color="gray").pack(pady=20)
+        else:
+            tree = grid_panel.tree
+            all_cols = getattr(grid_panel, "columns", [])
+            display_cols = list(tree.cget("displaycolumns"))
+            if display_cols == ["#all"] or not display_cols:
+                display_cols = list(all_cols)
+
+            def _toggle_column(col_key, var):
+                should_show = var.get()
+                curr_display = list(tree.cget("displaycolumns"))
+                if curr_display == ["#all"] or not curr_display:
+                    curr_display = list(all_cols)
+
+                if should_show and col_key not in curr_display:
+                    new_display = [c for c in all_cols if c in curr_display or c == col_key]
+                    tree.configure(displaycolumns=new_display)
+                elif not should_show and col_key in curr_display:
+                    if len(curr_display) > 1:
+                        new_display = [c for c in curr_display if c != col_key]
+                        tree.configure(displaycolumns=new_display)
+                    else:
+                        # Revertir selección si se intenta ocultar la última columna restante
+                        var.set(True)
+
+            for col in all_cols:
+                is_visible = col in display_cols
+                title = col_titles.get(col, col)
+
+                var = tk.BooleanVar(value=is_visible)
+
+                chk_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+                chk_frame.pack(fill="x", padx=8, pady=4)
+
+                chk = ctk.CTkCheckBox(
+                    chk_frame,
+                    text=title,
+                    variable=var,
+                    font=ctk.CTkFont(family="Segoe UI", size=12),
+                    fg_color=corp_color,
+                    hover_color=corp_hover,
+                    command=lambda c=col, v=var: _toggle_column(c, v)
+                )
+                chk.pack(side="left", anchor="w")
+
+        # Botón "Cerrar Panel" al pie de la ventana modal
+        btn_close_panel = ctk.CTkButton(
+            win,
+            text="Cerrar Panel",
+            font=font_btn,
+            command=win.destroy,
+            fg_color=corp_color,
+            hover_color=corp_hover,
+            height=36
+        )
+        btn_close_panel.pack(fill="x", padx=16, pady=(0, 16))
+        btn_close_panel.focus_force()
+
+    @staticmethod
     def process_pending_covers_dialog(app, items_to_review):
         if not items_to_review:
             return {}

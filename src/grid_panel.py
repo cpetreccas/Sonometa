@@ -262,7 +262,7 @@ class GridPanel:
         self.tree.bind("<<TreeviewSelect>>", lambda event: self.app.detail_panel.on_row_select(event))
         self.tree.bind("<Double-1>", self.on_cell_double_click)
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
-        self.tree.bind(btn_right, self._show_tree_context_menu)
+        self.tree.bind(btn_right, self._on_tree_right_click)
 
         self.tree.bind("<Control-MouseWheel>", self._on_ctrl_wheel_zoom)
         self.tree.bind("<Control-Button-4>", self._on_ctrl_wheel_zoom)
@@ -383,12 +383,15 @@ class GridPanel:
             command=lambda: self.app.process_manager.delete_selected_files()
         )
 
-    def _show_tree_context_menu(self, event):
-        # Evita abrir el menú contextual si el clic fue en el encabezado
+    def _on_tree_right_click(self, event):
+        """Redirige el clic derecho al menú de cabecera o al menú contextual de filas según la región."""
         region = self.tree.identify_region(event.x, event.y)
         if region == "heading":
-            return
+            self._show_header_context_menu(event)
+        else:
+            self._show_tree_context_menu(event)
 
+    def _show_tree_context_menu(self, event):
         row_id = self.tree.identify_row(event.y)
         if not row_id:
             return
@@ -1225,3 +1228,79 @@ class GridPanel:
         self.tree.focus_set()
         res = action_func(event, **kwargs)
         return "break" if res is None else res
+
+    def _show_header_context_menu(self, event):
+        """Construye y muestra el menú contextual con checkboxes para alternar columnas."""
+        header_menu = tk.Menu(
+            self.app, tearoff=0,
+            bg="#252526", fg="#FFFFFF",
+            activebackground=self.app.CORP_COLOR, activeforeground="#FFFFFF",
+            selectcolor="#7B2CBF",  # Color morado para el indicador activo
+            bd=1, relief="flat", font=('Segoe UI', 10)
+        )
+
+        col_titles = {
+            "Filename": "NOMBRE DE ARCHIVO",
+            "Artist": "INTÉRPRETE",
+            "Title": "TÍTULO",
+            "MixArtist": "REMIX",
+            "Album": "ÁLBUM",
+            "Genre": "GÉNERO",
+            "Publisher": "ETIQUETA",
+            "Year": "AÑO",
+            "Cover": "CARÁTULA"
+        }
+
+        display_cols = list(self.tree.cget("displaycolumns"))
+        if display_cols == ["#all"] or not display_cols:
+            display_cols = list(self.columns)
+
+        # Anclamos una lista en el objeto del menú para evitar que el garbage collector limpie las variables
+        header_menu.vars = []
+
+        for col in self.columns:
+            is_visible = col in display_cols
+            title = col_titles.get(col, col)
+
+            var = tk.BooleanVar(value=is_visible)
+            header_menu.vars.append(var)  # Retener la referencia en memoria
+
+            header_menu.add_checkbutton(
+                label=title,
+                onvalue=True,
+                offvalue=False,
+                variable=var,
+                command=lambda c=col, vis=is_visible: self._toggle_column_visibility(c, vis)
+            )
+
+        try:
+            header_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            header_menu.grab_release()
+
+    def _toggle_column_visibility(self, col_name, current_visible):
+        """Alterna la visibilidad de una columna en la propiedad displaycolumns del Treeview."""
+        display_cols = list(self.tree.cget("displaycolumns"))
+        if display_cols == ["#all"] or not display_cols:
+            display_cols = list(self.columns)
+
+        if current_visible:
+            # Asegurar que al menos una columna principal permanezca visible
+            if len(display_cols) > 1:
+                display_cols.remove(col_name)
+            else:
+                self.logger.warning("No se pueden ocultar todas las columnas del grid.")
+                return
+        else:
+            # Insertar respetando el orden original definido en self.columns
+            original_index = self.columns.index(col_name)
+            inserted = False
+            for idx, col in enumerate(display_cols):
+                if self.columns.index(col) > original_index:
+                    display_cols.insert(idx, col_name)
+                    inserted = True
+                    break
+            if not inserted:
+                display_cols.append(col_name)
+
+        self.tree.configure(displaycolumns=tuple(display_cols))

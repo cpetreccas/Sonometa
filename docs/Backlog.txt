@@ -1,5 +1,4 @@
 FUNCIONALIDADES GENERALES:
-- Permitir meter columnas nuevas
 - Ver cómo gestionar comments2 para poder añadir múltiples tags.
 - Analizar ¿un modal? para permitir filtros avanzados con checkboxes, etc.
 - Generar botones corporativos con una guia de estilo unificada.

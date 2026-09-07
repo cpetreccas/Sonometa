@@ -210,6 +210,8 @@ class ToolPanel(ctk.CTkFrame):
                 {"type": "command", "label": "Aumentar Zoom", "accelerator": "Ctrl++", "command": lambda: app.grid_panel._on_key_zoom_in(None)},
                 {"type": "command", "label": "Reducir Zoom", "accelerator": "Ctrl+-", "command": lambda: app.grid_panel._on_key_zoom_out(None)},
                 {"type": "command", "label": "Restablecer Zoom", "accelerator": "Ctrl+0", "command": lambda: app.grid_panel._on_key_zoom_reset(None)},
+                {"type": "separator"},
+                {"type": "command", "label": "Personalizar columnas…", "command": lambda: DialogManager.open_column_customization_dialog(app)}
             ]),
             ("Preferencias", [
                 {"type": "checkbutton", "label": "Revisar carátulas", "variable": app.review_covers_var, "command": self._on_toggle_review_covers},
