@@ -106,6 +106,10 @@ class CatalogManager:
             token = data.get("discogs_token", "").strip()
             self.manual_cover_selection = data.get("manual_cover_selection", True)
 
+            # Sincronizar estado con la variable global de la aplicación si existe
+            if hasattr(self.app, "review_covers_var") and self.app.review_covers_var is not None:
+                self.app.review_covers_var.set(self.manual_cover_selection)
+
             if token:
                 logger.info("Token de Discogs cargado desde configuración.")
             else:

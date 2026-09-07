@@ -59,6 +59,14 @@ class ProcessManager:
             daemon=True
         ).start()
 
+    def _should_review_covers(self) -> bool:
+        """Determina si la opción 'Revisar carátulas' está activa."""
+        if hasattr(self.app, "review_covers_var") and self.app.review_covers_var is not None:
+            return bool(self.app.review_covers_var.get())
+        if hasattr(self.app, "catalog_manager"):
+            return bool(getattr(self.app.catalog_manager, "manual_cover_selection", True))
+        return True
+
     def _run_processing_pipeline(self, target_rows, total_files):
         processed_count = 0
         words_to_omit = [
@@ -69,6 +77,7 @@ class ProcessManager:
         ]
         omit_pattern = re.compile('|'.join(words_to_omit), flags=re.IGNORECASE)
         pending_cover_reviews = []
+        manual_mode = self._should_review_covers()
 
         def _process_single_file(row_id):
             nonlocal processed_count
@@ -232,9 +241,19 @@ class ProcessManager:
                 if already_has_cover:
                     values[8] = "Sí"
                 else:
-                    manual_mode = getattr(self.app.catalog_manager, "manual_cover_selection", True)
-
-                    if len(all_images) == 1 or (all_images and not manual_mode):
+                    if all_images and not manual_mode:
+                        # Si manual_mode es False, asigna la primera carátula de forma automática
+                        chosen_cover_url = all_images[0]
+                        image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
+                        if image_data:
+                            image_data = AudioManager.normalize_cover_image_bytes(image_data)
+                            if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
+                                values[8] = "Sí"
+                            else:
+                                values[8] = "No"
+                        else:
+                            values[8] = "No"
+                    elif len(all_images) == 1 and manual_mode:
                         chosen_cover_url = all_images[0]
                         image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
                         if image_data:
@@ -273,7 +292,7 @@ class ProcessManager:
             diff_prev = {k: v for k, v in prev_vals.items() if prev_vals[k] != new_vals[k]}
             diff_new = {k: v for k, v in new_vals.items() if prev_vals[k] != new_vals[k]}
 
-            if diff_new and not (len(all_images) > 1 and getattr(self.app.catalog_manager, "manual_cover_selection", True)):
+            if diff_new and not (len(all_images) > 1 and manual_mode):
                 log_msg = LogManager.format_tree_log(
                     context="PROCESS",
                     action="Procesado",
@@ -563,3 +582,59 @@ class ProcessManager:
             self.app.detail_panel.on_row_select(None)
 
         return updated_count > 0
+
+    def delete_selected_files(self):
+        """Elimina físicamente del disco los archivos seleccionados en la grilla tras confirmación."""
+        tree = getattr(self.app, "tree", None)
+        if not tree and hasattr(self.app, "grid_panel"):
+            tree = self.app.grid_panel.tree
+
+        if not tree:
+            return
+
+        selected_rows = tree.selection()
+        if not selected_rows:
+            DialogManager.show_themed_dialog(
+                self.app,
+                "Sin selección",
+                "Selecciona al menos un archivo para eliminar.",
+                level="warning"
+            )
+            return
+
+        count = len(selected_rows)
+        msg = f"¿Estás seguro de que deseas eliminar permanentemente {count} archivo(s) de tu ordenador?\n\nEsta acción no se puede deshacer."
+
+        # Diálogo de confirmación
+        confirm = DialogManager.show_themed_dialog(
+            self.app,
+            "Confirmar eliminación",
+            msg,
+            level="warning"
+        )
+
+        if confirm != "Eliminar":
+            return
+
+        deleted_count = 0
+        for row_id in list(selected_rows):
+            file_path = self.app.file_paths_map.get(row_id)
+            filename = os.path.basename(file_path) if file_path else row_id
+
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    deleted_count += 1
+                    self.logger.info(f"[DELETE] Archivo eliminado del disco: {file_path}")
+                except Exception as e:
+                    self.logger.error(f"[DELETE] Error al eliminar {file_path}: {str(e)}")
+                    continue
+
+            # Eliminar la fila del Treeview y del mapa de rutas
+            if tree.exists(row_id):
+                tree.delete(row_id)
+            if row_id in self.app.file_paths_map:
+                del self.app.file_paths_map[row_id]
+
+        if deleted_count > 0 and hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)

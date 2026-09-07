@@ -377,6 +377,11 @@ class GridPanel:
             label="Limpiar",
             command=lambda: self.app.process_manager.clear_selected_metadata()
         )
+        self._tree_context_menu.add_separator()
+        self._tree_context_menu.add_command(
+            label="Eliminar del disco",
+            command=lambda: self.app.process_manager.delete_selected_files()
+        )
 
     def _show_tree_context_menu(self, event):
         # Evita abrir el menú contextual si el clic fue en el encabezado
@@ -389,11 +394,13 @@ class GridPanel:
             return
 
         selected_rows = self.tree.selection()
+        # Si el usuario hace clic derecho en una fila fuera de la selección actual, selecciona únicamente esa fila
         if row_id not in selected_rows:
             self.tree.selection_set(row_id)
 
         self.tree.focus(row_id)
-        self.app.detail_panel.on_row_select(None)
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)
 
         try:
             self._tree_context_menu.tk_popup(event.x_root, event.y_root)

@@ -163,15 +163,27 @@ class ToolPanel(ctk.CTkFrame):
         self._focus_bindings = []
         self._setup_classic_menu_bar()
 
+    def _on_toggle_review_covers(self):
+        """Callback al conmutar el checkbox de revisión de carátulas."""
+        is_checked = self.app.review_covers_var.get()
+        if hasattr(self.app, "catalog_manager"):
+            self.app.catalog_manager.manual_cover_selection = is_checked
+            self.app.catalog_manager.save_settings()
+        if hasattr(self.app, "_on_toggle_manual_cover_review"):
+            self.app._on_toggle_manual_cover_review()
+
     def _setup_classic_menu_bar(self):
         app = self.app
 
-        # Definir/Garantir variables de control si no existen
+        # Definir/Garantizar variables de control si no existen
         if not hasattr(app, "review_covers_var") or app.review_covers_var is None:
-            app.review_covers_var = tk.BooleanVar(value=True)  # Defecto True
+            initial_val = True
+            if hasattr(app, "catalog_manager"):
+                initial_val = getattr(app.catalog_manager, "manual_cover_selection", True)
+            app.review_covers_var = tk.BooleanVar(value=initial_val)
 
         if not hasattr(app, "show_detail_panel_var") or app.show_detail_panel_var is None:
-            app.show_detail_panel_var = tk.BooleanVar(value=False)  # Defecto False
+            app.show_detail_panel_var = tk.BooleanVar(value=False)
 
         categories = [
             ("Archivo", [
@@ -200,7 +212,7 @@ class ToolPanel(ctk.CTkFrame):
                 {"type": "command", "label": "Restablecer Zoom", "accelerator": "Ctrl+0", "command": lambda: app.grid_panel._on_key_zoom_reset(None)},
             ]),
             ("Preferencias", [
-                {"type": "checkbutton", "label": "Revisar carátulas", "variable": app.review_covers_var, "command": app._on_toggle_manual_cover_review if hasattr(app, "_on_toggle_manual_cover_review") else None},
+                {"type": "checkbutton", "label": "Revisar carátulas", "variable": app.review_covers_var, "command": self._on_toggle_review_covers},
                 {"type": "checkbutton", "label": "Ver detalles", "variable": app.show_detail_panel_var, "command": app.toggle_detail_panel},
                 {"type": "separator"},
                 {"type": "command", "label": "Gestión de Catálogos…", "command": lambda: DialogManager.open_unified_catalog_manager(app)}

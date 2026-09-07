@@ -631,6 +631,32 @@ class DialogManager:
     """Clase especializada en la gestión de ventanas emergentes, diálogos y popups de la aplicación."""
 
     @staticmethod
+    def center_popup_on_parent(win, parent, width=None, height=None):
+        """Calcula la posición de la ventana emergente centrada con respecto a su ventana padre."""
+        if width and height:
+            w, h = width, height
+        else:
+            w = getattr(win, "_current_width", None) or win.winfo_reqwidth()
+            h = getattr(win, "_current_height", None) or win.winfo_reqheight()
+
+            if w < 200 or h < 200:
+                w, h = 600, 400
+
+        parent.update_idletasks()
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_w = parent.winfo_width()
+        parent_h = parent.winfo_height()
+
+        if parent_w < 100 or parent_h < 100:
+            parent_w, parent_h = 1100, 700
+
+        pos_x = max(0, parent_x + (parent_w - w) // 2)
+        pos_y = max(0, parent_y + (parent_h - h) // 2)
+
+        win.geometry(f"{w}x{h}+{pos_x}+{pos_y}")
+
+    @staticmethod
     def show_replace_filename_dialog(app, target_items):
         """Muestra el diálogo para buscar y reemplazar en los nombres de archivo."""
         if not target_items:
@@ -1027,7 +1053,7 @@ class DialogManager:
 
     @staticmethod
     def append_formatted_log_line(app, level, msg):
-        """Inserta una línea de log enriquecida en el textbox respetando el filtro activo."""
+        """Inserta una línea de log enriched en el textbox respetando el filtro activo."""
         log_box = getattr(app, "log_textbox", None)
         if not log_box or not log_box.winfo_exists():
             return
@@ -1507,29 +1533,3 @@ class DialogManager:
         }]
         result = DialogManager.process_pending_covers_dialog(app, mock_item)
         return result.get("single_select")
-
-    @staticmethod
-    def center_popup_on_parent(win, parent, width=None, height=None):
-        if width and height:
-            w, h = width, height
-        else:
-            w = getattr(win, "_current_width", None) or win.winfo_reqwidth()
-            h = getattr(win, "_current_height", None) or win.winfo_reqheight()
-
-            if w < 200 or h < 200:
-                w, h = 600, 400
-
-        parent.update_idletasks()
-        parent_x = parent.winfo_rootx()
-        parent_y = parent.winfo_rooty()
-        parent_w = parent.winfo_width()
-        parent_h = parent.winfo_height()
-
-        if parent_w < 100 or parent_h < 100:
-            parent_w, parent_h = 1100, 700
-
-        pos_x = max(0, parent_x + (parent_w - w) // 2)
-        pos_y = max(0, parent_y + (parent_h - h) // 2)
-
-        win.geometry(f"{w}x{height}+{pos_x}+{pos_y}")
-        win.deiconify()

@@ -8,7 +8,6 @@ FUNCIONALIDADES GENERALES:
 - Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
 - Solo se guarda el remix en archivos FLAC.
 - Quiero poder borrar el archivo físico del disco duro a través del grid.
-- Si revisar caratulas es falso, no debe saltar el modal de eleccion de caratulas.
 - Renombrar cabecera Album a (Release - 01), (Genres - 02), (Labels - 03)
 - Añadir nivel de jerarquia 4 y 5 que serán comentarios 1 y comentarios 2 separador punto y coma y añadir el apartado al gestor de catalogos.
 - Añadir exportar listado.

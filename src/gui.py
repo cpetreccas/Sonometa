@@ -235,6 +235,7 @@ class App(ctk.CTk):
         self.bind("<Control-b>", lambda e: _toggle_shortcut())
         self.bind("<Control-B>", lambda e: _toggle_shortcut())
         self.bind("<Escape>", lambda e: self.search_manager.on_escape_pressed(e))
+        self.tree.bind("<Delete>", lambda e: self.process_manager.delete_selected_files())
 
         # Atajo global de tecla Espacio para reproducción/pausa
         self.bind_all("<space>", self._on_space_key)
