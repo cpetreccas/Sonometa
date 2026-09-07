@@ -97,8 +97,10 @@ class ProcessManager:
                 "Album": str(values[4]) if len(values) > 4 else "",
                 "Genre": str(values[5]) if len(values) > 5 else "",
                 "Publisher": str(values[6]) if len(values) > 6 else "",
-                "Year": str(values[7]) if len(values) > 7 else "",
-                "Cover": str(values[8]) if len(values) > 8 else "No"
+                "Comment": str(values[7]) if len(values) > 7 else "",
+                "Comment2": str(values[8]) if len(values) > 8 else "",
+                "Year": str(values[9]) if len(values) > 9 else "",
+                "Cover": str(values[10]) if len(values) > 10 else "No"
             }
 
             # 1. Validación de campos de catálogo
@@ -122,7 +124,6 @@ class ProcessManager:
                     self.app.audio_manager.save_single_tag(file_path, field_name, "")
                     invalid_catalog_fields.append(field_name)
 
-            # Si hubo borrado de catálogo, actualizar el Grid e informar en el log
             if invalid_catalog_fields:
                 clean_prev = {k: prev_vals[k] for k in invalid_catalog_fields}
                 clean_new = {k: "" for k in invalid_catalog_fields}
@@ -215,13 +216,14 @@ class ProcessManager:
             with self._lock:
                 already_has_cover = self.app.grid_panel.row_has_cover(row_id)
 
-            has_year = bool(str(values[7]).strip()) if len(values) > 7 else False
+            has_year = bool(str(values[9]).strip()) if len(values) > 9 else False
             all_images = []
 
             # Modificación de metadatos mediante Discogs
             if already_has_cover and has_year:
                 self.logger.info(f"[PROCESS] Omitida consulta Discogs para '{new_filename}' (ya posee carátula y año).")
-                values[8] = "Sí"
+                if len(values) > 10:
+                    values[10] = "Sí"
             else:
                 query_term = f"{artist_parsed} {title_parsed}".strip()
                 query_term = omit_pattern.sub('', query_term)
@@ -238,32 +240,32 @@ class ProcessManager:
                     values[7] = str(year)
                     self.app.audio_manager.save_single_tag(file_path, "Year", str(year))
 
+                cover_index = 10 if len(values) > 10 else len(values) - 1
                 if already_has_cover:
-                    values[8] = "Sí"
+                    values[cover_index] = "Sí"
                 else:
                     if all_images and not manual_mode:
-                        # Si manual_mode es False, asigna la primera carátula de forma automática
                         chosen_cover_url = all_images[0]
                         image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
                         if image_data:
                             image_data = AudioManager.normalize_cover_image_bytes(image_data)
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                                values[8] = "Sí"
+                                values[cover_index] = "Sí"
                             else:
-                                values[8] = "No"
+                                values[cover_index] = "No"
                         else:
-                            values[8] = "No"
+                            values[cover_index] = "No"
                     elif len(all_images) == 1 and manual_mode:
                         chosen_cover_url = all_images[0]
                         image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
                         if image_data:
                             image_data = AudioManager.normalize_cover_image_bytes(image_data)
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                                values[8] = "Sí"
+                                values[cover_index] = "Sí"
                             else:
-                                values[8] = "No"
+                                values[cover_index] = "No"
                         else:
-                            values[8] = "No"
+                            values[cover_index] = "No"
                     elif len(all_images) > 1 and manual_mode:
                         with self._lock:
                             pending_cover_reviews.append({
@@ -275,7 +277,7 @@ class ProcessManager:
                                 "prev_vals": prev_vals
                             })
                     else:
-                        values[8] = "No"
+                        values[cover_index] = "No"
 
             new_vals = {
                 "Filename": str(values[0]) if len(values) > 0 else "",
@@ -285,8 +287,10 @@ class ProcessManager:
                 "Album": str(values[4]) if len(values) > 4 else "",
                 "Genre": str(values[5]) if len(values) > 5 else "",
                 "Publisher": str(values[6]) if len(values) > 6 else "",
-                "Year": str(values[7]) if len(values) > 7 else "",
-                "Cover": str(values[8]) if len(values) > 8 else "No"
+                "Comment": str(values[7]) if len(values) > 7 else "",
+                "Comment2": str(values[8]) if len(values) > 8 else "",
+                "Year": str(values[9]) if len(values) > 9 else "",
+                "Cover": str(values[10]) if len(values) > 10 else "No"
             }
 
             diff_prev = {k: v for k, v in prev_vals.items() if prev_vals[k] != new_vals[k]}
@@ -305,7 +309,8 @@ class ProcessManager:
             def _update_ui():
                 if self.app.tree.exists(row_id):
                     self.app.tree.item(row_id, values=values)
-                    self.app.grid_panel.update_row_cover_status(row_id, values[8])
+                    cover_val = values[10] if len(values) > 10 else "No"
+                    self.app.grid_panel.update_row_cover_status(row_id, cover_val)
 
             self.app.after(0, _update_ui)
 
@@ -314,7 +319,6 @@ class ProcessManager:
                 progress = processed_count / total_files
                 self.app.after(0, lambda p=progress: self.app.progress_bar.set(p))
 
-        # Ejecución paralela con ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=4) as executor:
             executor.map(_process_single_file, target_rows)
 
@@ -330,21 +334,23 @@ class ProcessManager:
                     prev_vals = item.get("prev_vals", {})
                     chosen_url = selections.get(row_id)
 
+                    cover_index = 10 if len(values) > 10 else len(values) - 1
+
                     if chosen_url and chosen_url != "__NO_COVER__":
                         image_data = self.app.discogs_client.download_image_bytes(chosen_url)
                         if image_data:
                             image_data = AudioManager.normalize_cover_image_bytes(image_data)
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                                values[8] = "Sí"
+                                values[cover_index] = "Sí"
                             else:
-                                values[8] = "No"
+                                values[cover_index] = "No"
                         else:
-                            values[8] = "No"
+                            values[cover_index] = "No"
                     else:
-                        values[8] = "No"
+                        values[cover_index] = "No"
 
                     self.app.tree.item(row_id, values=values)
-                    self.app.grid_panel.update_row_cover_status(row_id, values[8])
+                    self.app.grid_panel.update_row_cover_status(row_id, values[cover_index])
 
                     new_vals = {
                         "Filename": str(values[0]) if len(values) > 0 else "",
@@ -354,8 +360,10 @@ class ProcessManager:
                         "Album": str(values[4]) if len(values) > 4 else "",
                         "Genre": str(values[5]) if len(values) > 5 else "",
                         "Publisher": str(values[6]) if len(values) > 6 else "",
-                        "Year": str(values[7]) if len(values) > 7 else "",
-                        "Cover": str(values[8]) if len(values) > 8 else "No"
+                        "Comment": str(values[7]) if len(values) > 7 else "",
+                        "Comment2": str(values[8]) if len(values) > 8 else "",
+                        "Year": str(values[9]) if len(values) > 9 else "",
+                        "Cover": str(values[10]) if len(values) > 10 else "No"
                     }
 
                     diff_prev = {k: v for k, v in prev_vals.items() if prev_vals.get(k) != new_vals[k]}
@@ -415,17 +423,18 @@ class ProcessManager:
         metadata["Genre"] = CatalogManager.normalize_catalog_text(metadata.get("Genre", ""))
         metadata["Publisher"] = CatalogManager.normalize_catalog_text(metadata.get("Publisher", ""))
 
-        # Preserva las columnas según el orden configurado en el Treeview
         self.app.tree.item(row_id, values=(
-            metadata["Filename"],
-            metadata["Artist"],
-            metadata["Title"],
-            metadata["MixArtist"],
-            metadata["Album"],
-            metadata["Genre"],
-            metadata["Publisher"],
-            metadata["Year"],
-            metadata["Cover"]
+            metadata.get("Filename", ""),
+            metadata.get("Artist", ""),
+            metadata.get("Title", ""),
+            metadata.get("MixArtist", ""),
+            metadata.get("Album", ""),
+            metadata.get("Genre", ""),
+            metadata.get("Publisher", ""),
+            metadata.get("Comment", ""),
+            metadata.get("Comment2", ""),
+            metadata.get("Year", ""),
+            metadata.get("Cover", "No")
         ))
 
     def clear_metadata_for_rows(self, rows, scope_label="selección"):
@@ -448,24 +457,24 @@ class ProcessManager:
                         "Album": str(values[4]) if len(values) > 4 else "",
                         "Genre": str(values[5]) if len(values) > 5 else "",
                         "Publisher": str(values[6]) if len(values) > 6 else "",
-                        "Year": str(values[7]) if len(values) > 7 else "",
-                        "Cover": str(values[8]) if len(values) > 8 else "No"
+                        "Comment": str(values[7]) if len(values) > 7 else "",
+                        "Comment2": str(values[8]) if len(values) > 8 else "",
+                        "Year": str(values[9]) if len(values) > 9 else "",
+                        "Cover": str(values[10]) if len(values) > 10 else "No"
                     }
 
-                # Limpieza de tags editables en el archivo físico (preservando headers y TLEN/Duration)
                 self.app.audio_manager.clear_audio_file_metadata(file_path)
                 self.app.grid_panel.update_row_cover_status(row_id, "No")
 
                 if values:
-                    # Mantiene el nombre de archivo (índice 0) y limpia únicamente los tags editables y la carátula
                     new_values = list(values)
-                    # Limpiar columnas de metadatos editables (Artist..Year)
-                    for i in range(1, 8):
+                    # Limpiar columnas de metadatos editables (Artist..Year: del 1 al 9)
+                    for i in range(1, 10):
                         if i < len(new_values):
                             new_values[i] = ""
-                    # Cover a "No"
-                    if len(new_values) > 8:
-                        new_values[8] = "No"
+                    # Cover a "No" en el índice 10
+                    if len(new_values) > 10:
+                        new_values[10] = "No"
 
                     self.app.tree.item(row_id, values=new_values)
 
@@ -476,6 +485,8 @@ class ProcessManager:
                     "Album": "",
                     "Genre": "",
                     "Publisher": "",
+                    "Comment": "",
+                    "Comment2": "",
                     "Year": "",
                     "Cover": "No"
                 }

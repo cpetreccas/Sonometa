@@ -38,7 +38,9 @@ class App(ctk.CTk):
         "entry_album":     ("Album",     4),
         "entry_genre":     ("Genre",     5),
         "entry_publisher": ("Publisher", 6),
-        "entry_year":      ("Year",      7),
+        "entry_comment":   ("Comment",   7),
+        "entry_comment2":  ("Comment2",  8),
+        "entry_year":      ("Year",      9),
     }
 
     CATALOG_KEYS = ("Album", "Genre", "Publisher")

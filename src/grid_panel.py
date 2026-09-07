@@ -30,7 +30,7 @@ class GridPanel:
         self.BASE_FONT_SIZE = 9
         self.BASE_ROW_HEIGHT = 28
 
-        # Configuración base de columnas (Album, Genre y Publisher restaurados a la izquierda 'w')
+        # Configuración base de columnas
         self.base_col_config = {
             "Filename":  {"width": 280, "minwidth": 180, "stretch": True,  "anchor": "w"},
             "Artist":    {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
@@ -40,6 +40,8 @@ class GridPanel:
             "Genre":     {"width": 70,  "minwidth": 50,  "stretch": False, "anchor": "w"},
             "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
             "Year":      {"width": 40,  "minwidth": 40,  "stretch": False, "anchor": "center"},
+            "Comment":   {"width": 150, "minwidth": 80,  "stretch": False, "anchor": "w"},
+            "Comment2":  {"width": 150, "minwidth": 80,  "stretch": False, "anchor": "w"},
             "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"}
         }
 
@@ -82,7 +84,6 @@ class GridPanel:
             if self._editor_bindtag in current:
                 current.remove(self._editor_bindtag)
 
-            # Orden: widget -> bindtag editor -> resto (incluye clase y all)
             if current:
                 new_tags = [current[0], self._editor_bindtag] + current[1:]
             else:
@@ -92,7 +93,6 @@ class GridPanel:
             pass
 
     def _install_global_tab_edit_guard(self):
-        # Guard global para evitar que Tab/Shift+Tab escapen del grid mientras se edita una celda.
         self.app.bind_all("<KeyPress-Tab>", self._on_global_tab_during_cell_edit, add="+")
         self.app.bind_all("<Shift-KeyPress-Tab>", lambda e: self._on_global_tab_during_cell_edit(e, reverse=True), add="+")
         self.app.bind_all("<ISO_Left_Tab>", lambda e: self._on_global_tab_during_cell_edit(e, reverse=True), add="+")
@@ -164,7 +164,6 @@ class GridPanel:
 
         style.configure("Treeview.Item", borderwidth=0, relief="flat", padding=(4, 0))
 
-        # Encabezados en gris claro elegante
         style.configure(
             "Treeview.Heading",
             background="#111111",
@@ -175,7 +174,6 @@ class GridPanel:
             padding=(5, 5)
         )
 
-        # Fondo de fila seleccionada suavizado a morado refinado
         selection_bg = getattr(self.app, "CORP_SELECTION", "#581C87")
         style.map("Treeview", background=[('selected', selection_bg)])
         style.map("Treeview.Heading", background=[('active', '#2A2D32')])
@@ -222,7 +220,7 @@ class GridPanel:
         return "break"
 
     def _build_treeview(self):
-        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
+        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Comment2", "Cover")
         self.tree = ttk.Treeview(self.frame_grid, columns=self.columns, show="headings", selectmode="extended")
 
         col_titles = {
@@ -233,6 +231,8 @@ class GridPanel:
             "Album": "ÁLBUM",
             "Genre": "GÉNERO",
             "Publisher": "ETIQUETA",
+            "Comment": "COMENTARIO-1",
+            "Comment2": "COMENTARIO-2",
             "Year": "AÑO",
             "Cover": "CARÁTULA"
         }
@@ -254,7 +254,6 @@ class GridPanel:
         self.tree.tag_configure("even", background="#181818")
         self.tree.tag_configure("odd", background="#1E1E1E")
 
-        # Bindings para el reordenamiento de columnas (Drag & Drop)
         self.tree.bind("<ButtonPress-1>", self._on_header_press, add="+")
         self.tree.bind("<B1-Motion>", self._on_header_motion, add="+")
         self.tree.bind("<ButtonRelease-1>", self._on_header_release, add="+")
@@ -310,7 +309,6 @@ class GridPanel:
         self.hsb.grid(row=1, column=0, sticky="ew")
 
     def _on_header_press(self, event):
-        """Detecta si el clic inicial fue en el encabezado de una columna para iniciar el arrastre."""
         region = self.tree.identify_region(event.x, event.y)
         if region == "heading":
             col_id = self.tree.identify_column(event.x)
@@ -325,7 +323,6 @@ class GridPanel:
                     self._drag_x = event.x
 
     def _on_header_motion(self, event):
-        """Muestra el cursor de cambio horizontal cuando se arrastra una cabecera."""
         if self._drag_col:
             region = self.tree.identify_region(event.x, event.y)
             if region == "heading":
@@ -334,7 +331,6 @@ class GridPanel:
                 self.tree.config(cursor="")
 
     def _on_header_release(self, event):
-        """Reordena la posición de la columna al soltar el ratón."""
         if self._drag_col:
             self.tree.config(cursor="")
             region = self.tree.identify_region(event.x, event.y)
@@ -384,7 +380,6 @@ class GridPanel:
         )
 
     def _on_tree_right_click(self, event):
-        """Redirige el clic derecho al menú de cabecera o al menú contextual de filas según la región."""
         region = self.tree.identify_region(event.x, event.y)
         if region == "heading":
             self._show_header_context_menu(event)
@@ -397,7 +392,6 @@ class GridPanel:
             return
 
         selected_rows = self.tree.selection()
-        # Si el usuario hace clic derecho en una fila fuera de la selección actual, selecciona únicamente esa fila
         if row_id not in selected_rows:
             self.tree.selection_set(row_id)
 
@@ -506,7 +500,7 @@ class GridPanel:
             self.cell_entry = None
 
         column_id = f"#{col_index + 1}"
-        bbox = self.tree.bbox(row_id, column_id)
+        bbox = self.tree.bbox(row_id, col_name)
         if not bbox:
             return
         x, y, w, h = bbox
@@ -892,7 +886,6 @@ class GridPanel:
         self._active_cell_tab_navigator = navigate_from_global_tab
 
     def select_file_by_row_id(self, row_id):
-        """Selecciona y enfoca una fila específica en la grilla mediante su row_id."""
         if not row_id or row_id not in self.tree.get_children():
             return
 
@@ -908,17 +901,21 @@ class GridPanel:
         if region != "cell":
             return
 
-        column_id = self.tree.identify_column(event.x)
-        col_index = int(column_id.replace("#", "")) - 1
-        if col_index < 0 or col_index >= len(self.columns):
+        # 1. Obtener el ID interno/nombre de la columna sobre la que se hizo clic
+        col_id = self.tree.identify_column(event.x)  # p. ej. "#8"
+
+        # Traducir el ID visual al nombre real de la columna usando column()
+        col_name = self.tree.column(col_id, "id")
+
+        if not col_name or col_name == "Cover":
             return
 
-        if self.columns[col_index] == "Cover":
-            return
-
-        row_id = self.tree.identify_row(event.y)
-        if row_id:
-            self._start_tree_cell_edit(row_id, col_index)
+        # 2. Obtener el índice absoluto dentro de self.columns
+        if col_name in self.columns:
+            col_index = self.columns.index(col_name)
+            row_id = self.tree.identify_row(event.y)
+            if row_id:
+                self._start_tree_cell_edit(row_id, col_index)
 
     def sort_by_column(self, col):
         data = [(self.tree.set(child, col), child) for child in self.tree.get_children('')]
@@ -930,7 +927,6 @@ class GridPanel:
             tag = "even" if index % 2 == 0 else "odd"
             self.tree.item(item[1], tags=(tag,))
 
-        # Diccionario de títulos limpios base
         col_titles = {
             "Filename": "NOMBRE DE ARCHIVO",
             "Artist": "INTÉRPRETE",
@@ -939,23 +935,21 @@ class GridPanel:
             "Album": "ÁLBUM",
             "Genre": "GÉNERO",
             "Publisher": "ETIQUETA",
+            "Comment": "COMENTARIO-1",
+            "Comment2": "COMENTARIO-2",
             "Year": "AÑO",
             "Cover": "CARÁTULA"
         }
 
-        # Restaurar texto base en todos los encabezados
         for c in self.columns:
             base_text = col_titles.get(c, c)
             self.tree.heading(c, text=base_text)
 
-        # Determinar dirección de la flecha
         arrow = " ▲" if not reverse else " ▼"
 
-        # Actualizar el encabezado activo con el indicador de ordenación
         sorted_title = col_titles.get(col, col) + arrow
         self.tree.heading(col, text=sorted_title)
 
-        # Alternar la dirección para el próximo clic
         self.app.sort_directions[col] = not reverse
 
     def select_all_rows(self):
@@ -967,14 +961,16 @@ class GridPanel:
     def row_has_cover(self, row_id) -> bool:
         try:
             values = list(self.tree.item(row_id, "values"))
-            return len(values) > 8 and str(values[8]).strip().lower() in ("sí", "si", "yes", "true", "1")
+            cover_idx = self.columns.index("Cover")
+            return len(values) > cover_idx and str(values[cover_idx]).strip().lower() in ("sí", "si", "yes", "true", "1")
         except Exception:
             return False
 
     def update_row_cover_status(self, row_id, status="Sí"):
         values = list(self.tree.item(row_id, "values"))
-        if len(values) > 8:
-            values[8] = status
+        cover_idx = self.columns.index("Cover")
+        if len(values) > cover_idx:
+            values[cover_idx] = status
             self.tree.item(row_id, values=values)
 
     def get_row_artist_title(self, row_id):
@@ -984,16 +980,12 @@ class GridPanel:
         return artist, title
 
     def update_row_metadata(self, row_id, new_metadata):
-        """
-        Actualiza las celdas visibles de una fila específica conservando el orden
-        de las columnas de la grilla y reteniendo metadatos técnicos/no editables.
-        """
         if not row_id or row_id not in self.tree.get_children():
             return
 
         current_values = list(self.tree.item(row_id, "values"))
+        cover_idx = self.columns.index("Cover")
 
-        # Mapeo estructurado para refrescar valores visibles manteniendo la coherencia de celdas
         updated_values = [
             new_metadata.get("Filename", current_values[0] if len(current_values) > 0 else ""),
             new_metadata.get("Artist", ""),
@@ -1003,7 +995,9 @@ class GridPanel:
             new_metadata.get("Genre", ""),
             new_metadata.get("Publisher", ""),
             new_metadata.get("Year", ""),
-            new_metadata.get("Cover", current_values[8] if len(current_values) > 8 else "No")
+            new_metadata.get("Comment", ""),
+            new_metadata.get("Comment2", ""),
+            new_metadata.get("Cover", current_values[cover_idx] if len(current_values) > cover_idx else "No")
         ]
 
         self.tree.item(row_id, values=updated_values)
@@ -1011,10 +1005,6 @@ class GridPanel:
             self.app.detail_panel.on_row_select(None)
 
     def insert_audio_row(self, metadata, count):
-        """
-        Inserta una fila asegurando la extracción limpia de campos y manteniendo
-        los datos técnicos resguardados en el estado global.
-        """
         tag = "even" if count % 2 == 0 else "odd"
         row_id = self.tree.insert("", "end", values=(
             metadata.get("Filename", ""),
@@ -1025,6 +1015,8 @@ class GridPanel:
             metadata.get("Genre", ""),
             metadata.get("Publisher", ""),
             metadata.get("Year", ""),
+            metadata.get("Comment", ""),
+            metadata.get("Comment2", ""),
             metadata.get("Cover", "No")
         ), tags=(tag,))
         return row_id
@@ -1230,12 +1222,11 @@ class GridPanel:
         return "break" if res is None else res
 
     def _show_header_context_menu(self, event):
-        """Construye y muestra el menú contextual con checkboxes para alternar columnas."""
         header_menu = tk.Menu(
             self.app, tearoff=0,
             bg="#252526", fg="#FFFFFF",
             activebackground=self.app.CORP_COLOR, activeforeground="#FFFFFF",
-            selectcolor="#7B2CBF",  # Color morado para el indicador activo
+            selectcolor="#7B2CBF",
             bd=1, relief="flat", font=('Segoe UI', 10)
         )
 
@@ -1247,6 +1238,8 @@ class GridPanel:
             "Album": "ÁLBUM",
             "Genre": "GÉNERO",
             "Publisher": "ETIQUETA",
+            "Comment": "COMENTARIO-1",
+            "Comment2": "COMENTARIO-2",
             "Year": "AÑO",
             "Cover": "CARÁTULA"
         }
@@ -1255,7 +1248,6 @@ class GridPanel:
         if display_cols == ["#all"] or not display_cols:
             display_cols = list(self.columns)
 
-        # Anclamos una lista en el objeto del menú para evitar que el garbage collector limpie las variables
         header_menu.vars = []
 
         for col in self.columns:
@@ -1263,7 +1255,7 @@ class GridPanel:
             title = col_titles.get(col, col)
 
             var = tk.BooleanVar(value=is_visible)
-            header_menu.vars.append(var)  # Retener la referencia en memoria
+            header_menu.vars.append(var)
 
             header_menu.add_checkbutton(
                 label=title,
@@ -1279,20 +1271,17 @@ class GridPanel:
             header_menu.grab_release()
 
     def _toggle_column_visibility(self, col_name, current_visible):
-        """Alterna la visibilidad de una columna en la propiedad displaycolumns del Treeview."""
         display_cols = list(self.tree.cget("displaycolumns"))
         if display_cols == ["#all"] or not display_cols:
             display_cols = list(self.columns)
 
         if current_visible:
-            # Asegurar que al menos una columna principal permanezca visible
             if len(display_cols) > 1:
                 display_cols.remove(col_name)
             else:
                 self.logger.warning("No se pueden ocultar todas las columnas del grid.")
                 return
         else:
-            # Insertar respetando el orden original definido en self.columns
             original_index = self.columns.index(col_name)
             inserted = False
             for idx, col in enumerate(display_cols):

@@ -20,7 +20,7 @@ class AudioManager:
 
         Returns:
             dict con claves: Filename, Title, Artist, MixArtist, Album,
-                             Genre, Publisher, Year, Duration, CUEs, Cover.
+                             Genre, Publisher, Year, Comment, Comment2, Duration, CUEs, Cover.
         """
         from mutagen.wave import WAVE
         from mutagen.flac import FLAC
@@ -37,6 +37,8 @@ class AudioManager:
             "Genre": "",
             "Publisher": "",
             "Year": "",
+            "Comment": "",
+            "Comment2": "",
             "Duration": "",  # Preservación de la duración calculada del audio
             "CUEs": 0,
             "Cover": "No",
@@ -56,6 +58,13 @@ class AudioManager:
                     data["Publisher"] = str(audio.tags.get("TPUB", ""))
                     data["Year"]      = str(audio.tags.get("TDRC", ""))
 
+                    # Lectura de comentarios en ID3 (WAV)
+                    comm_frames = [v for k, v in audio.tags.items() if k.startswith("COMM")]
+                    if comm_frames and comm_frames[0].text:
+                        data["Comment"] = str(comm_frames[0].text[0])
+                    if "TXXX:COMMENT2" in audio.tags and audio.tags["TXXX:COMMENT2"].text:
+                        data["Comment2"] = str(audio.tags["TXXX:COMMENT2"].text[0])
+
             elif ext == ".mp3":
                 try:
                     audio_id3 = ID3(file_path)
@@ -66,11 +75,21 @@ class AudioManager:
                     data["Publisher"] = str(audio_id3.get("TPUB", ""))
                     data["Year"]      = str(audio_id3.get("TDRC", ""))
 
-                    # Prioridad de lectura para MixArtist en ID3 (TPE4 -> TXXX:REMIXEDBY)
+                    # MixArtist
                     if "TPE4" in audio_id3 and audio_id3["TPE4"].text:
                         data["MixArtist"] = str(audio_id3["TPE4"].text[0])
                     elif "TXXX:REMIXEDBY" in audio_id3 and audio_id3["TXXX:REMIXEDBY"].text:
                         data["MixArtist"] = str(audio_id3["TXXX:REMIXEDBY"].text[0])
+
+                    # Comment (Buscar frame COMM)
+                    comm_frames = [v for k, v in audio_id3.items() if k.startswith("COMM")]
+                    if comm_frames and comm_frames[0].text:
+                        data["Comment"] = str(comm_frames[0].text[0])
+
+                    # Comment2 (TXXX:COMMENT2)
+                    if "TXXX:COMMENT2" in audio_id3 and audio_id3["TXXX:COMMENT2"].text:
+                        data["Comment2"] = str(audio_id3["TXXX:COMMENT2"].text[0])
+
                 except Exception:
                     pass
 
@@ -78,12 +97,13 @@ class AudioManager:
                 audio = FLAC(file_path)
                 data["Title"]     = audio.get("title", [""])[0]
                 data["Artist"]    = audio.get("artist", [""])[0]
-                # Búsqueda amplia para Vorbis Comments (REMIXEDBY / MIXARTIST / REMIX)
                 data["MixArtist"] = (audio.get("REMIXEDBY") or audio.get("MIXARTIST") or audio.get("REMIX") or [""])[0]
                 data["Album"]     = audio.get("album", [""])[0]
                 data["Genre"]     = audio.get("genre", [""])[0]
                 data["Publisher"] = (audio.get("organization") or audio.get("publisher") or [""])[0]
                 data["Year"]      = (audio.get("date") or audio.get("year") or [""])[0]
+                data["Comment"]   = audio.get("comment", [""])[0]
+                data["Comment2"]  = audio.get("comment2", [""])[0]
 
             elif ext in (".m4a", ".mp4"):
                 audio = MP4(file_path)
@@ -93,11 +113,17 @@ class AudioManager:
                 data["Genre"]     = audio.get("\xa9gen", [""])[0]
                 data["Publisher"] = audio.get("\xa9dir", [""])[0]
                 data["Year"]      = audio.get("\xa9day", [""])[0]
+                data["Comment"]   = audio.get("\xa9cmt", [""])[0]
 
                 atom_remix = audio.get("----:com.apple.iTunes:REMIXEDBY")
                 if atom_remix:
                     val = atom_remix[0]
                     data["MixArtist"] = val.decode("utf-8") if isinstance(val, bytes) else str(val)
+
+                atom_cmt2 = audio.get("----:com.apple.iTunes:COMMENT2")
+                if atom_cmt2:
+                    val = atom_cmt2[0]
+                    data["Comment2"] = val.decode("utf-8") if isinstance(val, bytes) else str(val)
 
             else:
                 audio = MutagenFile(file_path, easy=True)
@@ -113,6 +139,8 @@ class AudioManager:
                     data["Genre"]     = get_tag("genre")
                     data["Publisher"] = get_tag("organization") or get_tag("publisher")
                     data["Year"]      = get_tag("date") or get_tag("year")
+                    data["Comment"]   = get_tag("comment")
+                    data["Comment2"]  = get_tag("comment2")
 
             # Extracción y formateo seguro de la duración (info.length)
             raw_audio = MutagenFile(file_path)
@@ -227,7 +255,7 @@ class AudioManager:
     def save_single_tag(self, file_path, field_name, new_value, app=None):
         """Guarda (o elimina) una única etiqueta de texto en el archivo de audio."""
         from mutagen.id3 import (
-            ID3, TIT2, TPE1, TPE4, TALB, TCON, TPUB, TDRC, TXXX, ID3NoHeaderError,
+            ID3, TIT2, TPE1, TPE4, TALB, TCON, TPUB, TDRC, COMM, TXXX, ID3NoHeaderError,
         )
         from mutagen.wave import WAVE
         from mutagen.flac import FLAC
@@ -266,20 +294,32 @@ class AudioManager:
                     "Year":      TDRC,
                 }
 
-                frame_cls = frame_map.get(field_name)
-                if not frame_cls:
-                    logger.warning(f"Campo no soportado para guardar: {field_name}")
-                    return
+                if field_name == "Comment":
+                    if new_value:
+                        audio_tags.add(COMM(encoding=3, lang="eng", desc="", text=str(new_value)))
+                    else:
+                        audio_tags.delall("COMM")
 
-                if new_value:
-                    audio_tags.add(frame_cls(encoding=3, text=str(new_value)))
-                    # Si se guarda MixArtist en MP3, garantizamos doble escritura con TXXX:REMIXEDBY
-                    if field_name == "MixArtist":
-                        audio_tags.add(TXXX(encoding=3, desc="REMIXEDBY", text=str(new_value)))
+                elif field_name == "Comment2":
+                    if new_value:
+                        audio_tags.add(TXXX(encoding=3, desc="COMMENT2", text=str(new_value)))
+                    else:
+                        audio_tags.delall("TXXX:COMMENT2")
+
                 else:
-                    audio_tags.delall(frame_cls.__name__)
-                    if field_name == "MixArtist":
-                        audio_tags.delall("TXXX:REMIXEDBY")
+                    frame_cls = frame_map.get(field_name)
+                    if not frame_cls:
+                        logger.warning(f"Campo no soportado para guardar: {field_name}")
+                        return
+
+                    if new_value:
+                        audio_tags.add(frame_cls(encoding=3, text=str(new_value)))
+                        if field_name == "MixArtist":
+                            audio_tags.add(TXXX(encoding=3, desc="REMIXEDBY", text=str(new_value)))
+                    else:
+                        audio_tags.delall(frame_cls.__name__)
+                        if field_name == "MixArtist":
+                            audio_tags.delall("TXXX:REMIXEDBY")
 
                 if ext == ".wav" and audio_wav is not None:
                     audio_wav.save()
@@ -299,6 +339,8 @@ class AudioManager:
                     "Genre":     "GENRE",
                     "Publisher": "ORGANIZATION",
                     "Year":      "DATE",
+                    "Comment":   "COMMENT",
+                    "Comment2":  "COMMENT2",
                 }
                 flac_key = tag_map.get(field_name)
                 if not flac_key:
@@ -320,6 +362,7 @@ class AudioManager:
                     "Genre":     "\xa9gen",
                     "Publisher": "\xa9dir",
                     "Year":      "\xa9day",
+                    "Comment":   "\xa9cmt",
                 }
                 if field_name == "MixArtist":
                     atom_key = "----:com.apple.iTunes:REMIXEDBY"
@@ -327,6 +370,14 @@ class AudioManager:
                         audio[atom_key] = str(new_value).encode("utf-8")
                     else:
                         audio.pop(atom_key, None)
+
+                elif field_name == "Comment2":
+                    atom_key = "----:com.apple.iTunes:COMMENT2"
+                    if new_value:
+                        audio[atom_key] = str(new_value).encode("utf-8")
+                    else:
+                        audio.pop(atom_key, None)
+
                 else:
                     m4a_key = tag_map.get(field_name)
                     if not m4a_key:
@@ -347,6 +398,8 @@ class AudioManager:
                     "Genre":     "genre",
                     "Publisher": "organization",
                     "Year":      "date",
+                    "Comment":   "comment",
+                    "Comment2":  "comment2",
                 }
 
                 mutagen_key = tag_map.get(field_name)
@@ -588,7 +641,7 @@ class AudioManager:
                 if getattr(audio, "pictures", None):
                     audio.clear_pictures()
                 # Limpiar solo tags editables de Vorbis
-                editable_vorbis = ["title", "artist", "mixartist", "remixedby", "album", "genre", "organization", "publisher", "date", "year"]
+                editable_vorbis = ["title", "artist", "mixartist", "remixedby", "album", "genre", "organization", "publisher", "date", "year", "comment", "comment2"]
                 for key in editable_vorbis:
                     audio.pop(key, None)
                 audio.save()
@@ -596,7 +649,7 @@ class AudioManager:
             elif ext in (".m4a", ".aac", ".mp4"):
                 audio = MP4(file_path)
                 if audio.tags is not None:
-                    editable_mp4 = ["\xa9nam", "\xa9ART", "soar", "\xa9alb", "\xa9gen", "covr", "\xa9day", "----:com.apple.iTunes:REMIXEDBY"]
+                    editable_mp4 = ["\xa9nam", "\xa9ART", "soar", "\xa9alb", "\xa9gen", "covr", "\xa9day", "\xa9cmt", "----:com.apple.iTunes:REMIXEDBY", "----:com.apple.iTunes:COMMENT2"]
                     for key in editable_mp4:
                         audio.tags.pop(key, None)
                     audio.save()

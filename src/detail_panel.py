@@ -21,13 +21,13 @@ class DetailPanel:
     BORDER_DEFAULT = "#3F3F46"  # Borde fino sutil para cajas en reposo
 
     def __init__(self, app, parent, logger, get_resource_path, fallback_process_icon=None):
-        self.icono_procesar = self.load_process_icon()
-
         self.app = app
         self.parent = parent
         self.logger = logger
         self.get_resource_path = get_resource_path
         self.fallback_process_icon = fallback_process_icon
+
+        self.icono_procesar = self.load_process_icon()
 
         # Guarda la imagen PIL en memoria para redimensionarla dinámicamente según la altura
         self._current_raw_cover_pil = None
@@ -111,7 +111,6 @@ class DetailPanel:
         widget = event.widget
         widget.focus_set()
         self._entry_target_widget = widget
-        btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         try:
             self._entry_context_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -476,7 +475,7 @@ class DetailPanel:
         self.btn_process = ctk.CTkButton(
             frame_actions,
             text="Procesar",
-            image=self.app.process_icon,
+            image=self.icono_procesar or self.app.process_icon,
             compound="left",
             fg_color=self.app.CORP_COLOR,
             hover_color="#6D28D9",
@@ -961,7 +960,7 @@ class DetailPanel:
         item = self.app.tree.item(item_id)
         values = item['values']
         if len(values) < 8:
-            logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
+            self.logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
             return
 
         # Carga directa de todos los campos
