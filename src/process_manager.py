@@ -603,23 +603,24 @@ class ProcessManager:
             return
 
         count = len(selected_rows)
-        msg = f"¿Estás seguro de que deseas eliminar permanentemente {count} archivo(s) de tu ordenador?\n\nEsta acción no se puede deshacer."
 
         # Diálogo de confirmación
         confirm = DialogManager.show_themed_dialog(
             self.app,
             "Confirmar eliminación",
-            msg,
-            level="warning"
+            f"¿Estás seguro de que deseas eliminar permanentemente {count} archivo(s) del disco?\n\nEsta acción no se puede deshacer.",
+            level="warning",
+            is_confirm=True,
+            parent=self.app
         )
 
-        if confirm != "Eliminar":
+        if not confirm:
             return
 
         deleted_count = 0
+
         for row_id in list(selected_rows):
             file_path = self.app.file_paths_map.get(row_id)
-            filename = os.path.basename(file_path) if file_path else row_id
 
             if file_path and os.path.exists(file_path):
                 try:
