@@ -386,64 +386,103 @@ class GridPanel:
         )
 
     def _open_custom_tag_picker(self):
-        selected = self.tree.selection()
+        selected = list(self.tree.selection())
         if not selected:
             return
 
-        row_id = selected[0]
-        file_path = self.app.file_paths_map.get(row_id)
-        if not file_path:
-            return
-
-        # 1. Intentar obtener el comentario directamente del Treeview (interfaz)
-        values = list(self.tree.item(row_id, "values"))
         comment_col_idx = self.columns.index("Comment")
-        current_comment = ""
+        union_tags = []
+        file_paths = []
 
-        if len(values) > comment_col_idx and values[comment_col_idx] is not None:
-            current_comment = str(values[comment_col_idx]).strip()
+        for row_id in selected:
+            file_path = self.app.file_paths_map.get(row_id)
+            if not file_path:
+                continue
 
-        # 2. Si el Treeview estaba vacío, intentar leerlo con el audio_manager
-        if not current_comment and hasattr(self.app, "audio_manager"):
-            current_comment = self.app.audio_manager.get_tag_value(file_path, "Comment") or ""
+            file_paths.append(file_path)
+
+            # 1. Obtener comentario del Treeview
+            values = list(self.tree.item(row_id, "values"))
+            current_comment = ""
+            if len(values) > comment_col_idx and values[comment_col_idx] is not None:
+                current_comment = str(values[comment_col_idx]).strip()
+
+            # 2. Si estaba vacío en la grilla, intentar leerlo de audio_manager
+            if not current_comment and hasattr(self.app, "audio_manager"):
+                current_comment = self.app.audio_manager.get_tag_value(file_path, "Comment") or ""
+
+            # Extraer etiquetas del archivo y acumular la UNIÓN manteniendo el orden
+            tags = [t.strip() for t in current_comment.split(",") if t.strip()]
+            for tag in tags:
+                if tag not in union_tags:
+                    union_tags.append(tag)
+
+        if not file_paths:
+            return
 
         from custom_tag_picker import CustomTagPicker
         CustomTagPicker(
             parent=self.app,
-            file_path=file_path,
-            row_id=row_id,
-            current_comment=current_comment,
+            row_ids=selected,
+            file_paths=file_paths,
+            union_tags=union_tags,
             on_save=self._on_custom_tags_saved
         )
 
-    def _on_custom_tags_saved(self, row_id: str, file_path: str, comment_val: str) -> None:
-        if not file_path or not self.tree.exists(row_id):
+    def _on_custom_tags_saved(self, row_ids: list, file_paths: list, active_tags: set, removed_tags: set) -> None:
+        """
+        Aplica los cambios en lote:
+        - active_tags (Marcados): Se aseguran en TODOS los archivos seleccionados.
+        - removed_tags (Desmarcados): Se eliminan de TODOS los archivos seleccionados.
+        """
+        if not row_ids:
             return
 
-        values = list(self.tree.item(row_id, "values"))
         comment_col_idx = self.columns.index("Comment")
 
-        if len(values) <= comment_col_idx:
-            self.logger.error(f"La fila {row_id} no tiene suficientes columnas para el índice {comment_col_idx}.")
-            return
+        for row_id in row_ids:
+            if not self.tree.exists(row_id):
+                continue
 
-        prev_comment = str(values[comment_col_idx]).strip() if values[comment_col_idx] is not None else ""
+            file_path = self.app.file_paths_map.get(row_id)
+            if not file_path:
+                continue
 
-        if hasattr(self.app, "audio_manager"):
-            self.app.audio_manager.save_single_tag(file_path, "Comment", comment_val, app=self.app)
+            values = list(self.tree.item(row_id, "values"))
+            if len(values) <= comment_col_idx:
+                continue
 
-        values[comment_col_idx] = comment_val
-        self.tree.item(row_id, values=values)
+            prev_comment = str(values[comment_col_idx]).strip() if values[comment_col_idx] is not None else ""
+            current_tags = [t.strip() for t in prev_comment.split(",") if t.strip()]
 
-        if prev_comment != comment_val:
-            log_msg = LogManager.format_tree_log(
-                context="CUSTOM_TAGS",
-                action="Modificado",
-                filename=os.path.basename(file_path),
-                prev_vals={"Comment": prev_comment},
-                new_vals={"Comment": comment_val}
-            )
-            self.logger.info(log_msg)
+            # 1. Añadir/mantener tags marcados
+            for tag in active_tags:
+                if tag not in current_tags:
+                    current_tags.append(tag)
+
+            # 2. Eliminar tags desmarcados
+            current_tags = [t for t in current_tags if t not in removed_tags]
+
+            new_comment = ", ".join(current_tags)
+
+            if prev_comment != new_comment:
+                # Actualizar archivo físico
+                if hasattr(self.app, "audio_manager"):
+                    self.app.audio_manager.save_single_tag(file_path, "Comment", new_comment, app=self.app)
+
+                # Actualizar celda en la grilla
+                values[comment_col_idx] = new_comment
+                self.tree.item(row_id, values=values)
+
+                # Registrar Log
+                log_msg = LogManager.format_tree_log(
+                    context="CUSTOM_TAGS",
+                    action="Modificado",
+                    filename=os.path.basename(file_path),
+                    prev_vals={"Comment": prev_comment},
+                    new_vals={"Comment": new_comment}
+                )
+                self.logger.info(log_msg)
 
     def _on_tree_right_click(self, event):
         region = self.tree.identify_region(event.x, event.y)

@@ -4,7 +4,7 @@ from dialogs import DialogManager
 
 
 class CustomTagPicker(ctk.CTkToplevel):
-    """Modal para la selección y gestión de etiquetas personalizadas (Custom Tags)."""
+    """Modal para la selección y gestión de etiquetas personalizadas (Custom Tags) con soporte multiselección."""
 
     def __init__(
             self,
@@ -13,6 +13,9 @@ class CustomTagPicker(ctk.CTkToplevel):
             file_path=None,
             current_tags=None,
             current_comment=None,
+            row_ids=None,
+            file_paths=None,
+            union_tags=None,
             available_tags=None,
             on_save=None,
             on_apply=None,
@@ -20,28 +23,41 @@ class CustomTagPicker(ctk.CTkToplevel):
     ):
         super().__init__(parent)
         self.app = parent.app if hasattr(parent, "app") else parent
-        self.row_id = row_id
-        self.file_path = file_path
         self.on_save = on_save or on_apply
 
-        # Capturar etiquetas desde 'current_tags' o 'current_comment' indistintamente
-        raw_comment = current_tags if current_tags is not None else current_comment
+        # Soporte para múltiples filas/archivos
+        if row_ids is not None:
+            self.row_ids = row_ids
+            self.file_paths = file_paths or []
+        elif row_id is not None:
+            self.row_ids = [row_id]
+            self.file_paths = [file_path] if file_path else []
+        else:
+            self.row_ids = []
+            self.file_paths = []
+
+        # Determinar etiquetas iniciales (Unión de todas las etiquetas de los archivos seleccionados)
+        if union_tags is not None:
+            raw_comment = union_tags
+        else:
+            raw_comment = current_tags if current_tags is not None else current_comment
 
         if isinstance(raw_comment, str):
-            self.current_tags = [t.strip() for t in raw_comment.split(",") if t.strip()]
+            init_tags = [t.strip() for t in raw_comment.split(",") if t.strip()]
         elif isinstance(raw_comment, (list, tuple, set)):
-            self.current_tags = [str(t).strip() for t in raw_comment if str(t).strip()]
+            init_tags = [str(t).strip() for t in raw_comment if str(t).strip()]
         else:
-            self.current_tags = []
+            init_tags = []
 
-        # Recopilar etiquetas disponibles de forma segura
+        # Mantener registro de la unión original para saber qué tags fueron desmarcados explicitamente
+        self.initial_union_tags = set(init_tags)
+        self.selected_tags = set(init_tags)
+
+        # Recopilar etiquetas disponibles desde el catálogo
         if available_tags:
             self.available_tags = [str(t).strip() for t in available_tags if str(t).strip()]
         else:
             self.available_tags = self._fetch_tags_from_catalog()
-
-        # Set para comprobación rápida de tags seleccionadas
-        self.selected_tags = set(self.current_tags)
 
         self.title("Selección de Etiquetas Personalizadas - Sonometa")
         self.geometry("520x480")
@@ -66,7 +82,6 @@ class CustomTagPicker(ctk.CTkToplevel):
 
         tags = set()
 
-        # 1. Intentar varios métodos conocidos de obtención
         for method_name in ["get_catalog_values", "get_catalog_combo_values", "get_catalog", "get_values", "get_items", "get_options"]:
             if hasattr(cm, method_name) and callable(getattr(cm, method_name)):
                 getter = getattr(cm, method_name)
@@ -79,7 +94,6 @@ class CustomTagPicker(ctk.CTkToplevel):
                 if tags:
                     return sorted([str(t).strip() for t in tags if t and t != getattr(self.app, "CLEAR_OPTION", "--- Vaciar ---")])
 
-        # 2. Intentar lectura directa mediante atributos o diccionarios del CatalogManager
         for attr_name in ["catalog_values", "catalogs", "catalog", "data", "categories", "_catalogs", "_data"]:
             cat_data = getattr(cm, attr_name, None)
             if isinstance(cat_data, dict):
@@ -114,9 +128,16 @@ class CustomTagPicker(ctk.CTkToplevel):
         )
         lbl_title.pack(anchor="w", padx=5, pady=(0, 2))
 
+        count_files = len(self.row_ids)
+        sub_text = (
+            f"Añade o selecciona etiquetas a aplicar en los {count_files} archivos seleccionados."
+            if count_files > 1 else
+            "Añade o selecciona las etiquetas que deseas aplicar al archivo."
+        )
+
         lbl_sub = ctk.CTkLabel(
             main_frame,
-            text="Añade o selecciona las etiquetas que deseas aplicar al archivo.",
+            text=sub_text,
             text_color="#9CA3AF"
         )
         lbl_sub.pack(anchor="w", padx=5, pady=(0, 10))
@@ -194,14 +215,13 @@ class CustomTagPicker(ctk.CTkToplevel):
         btn_cancel.pack(side="right")
 
     def _render_tag_list(self):
-        """Redibuja la lista de tags en el contenedor scrollable y fuerza la selección visual."""
+        """Redibuja la lista de tags en el contenedor scrollable."""
         for child in self.scroll_tags.winfo_children():
             child.destroy()
 
         corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
         corp_hover = getattr(self.app, "CORP_HOVER", "#581C87")
 
-        # Fusionar disponibles y seleccionadas asegurando limpieza de cadenas
         clean_available = [str(t).strip() for t in self.available_tags if str(t).strip()]
         clean_selected = [str(t).strip() for t in self.selected_tags if str(t).strip()]
 
@@ -235,7 +255,6 @@ class CustomTagPicker(ctk.CTkToplevel):
                 command=lambda t=tag, v=var: self._toggle_tag(t, v)
             )
 
-            # Forzar explícitamente el estado visual en CustomTkinter
             if is_checked:
                 chk.select()
             else:
@@ -277,22 +296,32 @@ class CustomTagPicker(ctk.CTkToplevel):
         self._render_tag_list()
 
     def _on_apply(self):
-        # Generar lista ordenada manteniendo formato
-        final_tags = sorted(list(self.selected_tags))
-        comment_str = ", ".join(final_tags)
+        active_tags = set(self.selected_tags)
+        removed_tags = self.initial_union_tags - active_tags
 
         if callable(self.on_save):
+            # Probar primero la firma para multiselección (row_ids, file_paths, active_tags, removed_tags)
             try:
-                self.on_save(self.row_id, self.file_path, comment_str)
+                self.on_save(
+                    row_ids=self.row_ids,
+                    file_paths=self.file_paths,
+                    active_tags=active_tags,
+                    removed_tags=removed_tags
+                )
             except TypeError:
+                # Fallback para firmas simples un solo archivo (row_id, file_path, comment_str)
+                final_tags = sorted(list(active_tags))
+                comment_str = ", ".join(final_tags)
+                r_id = self.row_ids[0] if self.row_ids else None
+                f_path = self.file_paths[0] if self.file_paths else None
+
                 try:
-                    target = self.row_id if self.row_id is not None else self.file_path
-                    self.on_save(target, comment_str)
+                    self.on_save(r_id, f_path, comment_str)
                 except TypeError:
                     try:
-                        self.on_save(comment_str)
+                        self.on_save(r_id or f_path, comment_str)
                     except TypeError:
-                        self.on_save()
+                        self.on_save(comment_str)
 
         self.grab_release()
         self.destroy()
