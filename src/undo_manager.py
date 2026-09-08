@@ -6,11 +6,12 @@ logger = logging.getLogger("Sonometa")
 
 class HistoryAction:
     """Representa una modificación individual sobre un archivo o campo."""
-    def __init__(self, file_path, row_id, field_name, col_index, old_value, new_value):
+    def __init__(self, file_path, row_id, field_name, col_index, old_value, new_value, col_name=None):
         self.file_path = file_path
         self.row_id = row_id
         self.field_name = field_name      # Nombre de la etiqueta en Mutagen
         self.col_index = col_index        # Índice de la columna en el Treeview
+        self.col_name = col_name or field_name  # Identificador estable de columna para resolver índice en runtime
         self.old_value = old_value
         self.new_value = new_value
 
@@ -92,8 +93,16 @@ class UndoManager:
         # 2. Actualizar en la tabla de la interfaz (Treeview)
         if self.app.tree.exists(action.row_id):
             values = list(self.app.tree.item(action.row_id, "values"))
-            if action.col_index < len(values):
-                values[action.col_index] = target_value
+            col_index = None
+
+            if getattr(action, "col_name", None) and hasattr(self.app, "get_tree_column_index"):
+                col_index = self.app.get_tree_column_index(action.col_name)
+
+            if col_index is None:
+                col_index = action.col_index
+
+            if col_index is not None and col_index < len(values):
+                values[col_index] = target_value
                 self.app.tree.item(action.row_id, values=values)
 
             # Refrescar el panel de detalles si la fila sigue seleccionada

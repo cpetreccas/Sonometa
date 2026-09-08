@@ -1341,7 +1341,7 @@ class DialogManager:
             values_to_delete = [app.catalog_manager.catalog_values[k][idx] for idx in selected]
 
             affected_count = 0
-            col_info = CatalogManager.get_catalog_column_info(k)
+            col_info = app.catalog_manager.get_catalog_column_info(k)
             if col_info:
                 _, col_index = col_info
                 for row_id in app.tree.get_children():
@@ -1367,7 +1367,13 @@ class DialogManager:
             refresh_listbox(k, lb)
             DialogManager.show_themed_dialog(app, "Valores eliminados", f"Se eliminaron {len(values_to_delete)} registro(s).", level="info", parent=win)
 
-        ordered_keys = ["Album", "Genre", "Publisher"]
+        # Se incluye únicamente "Comment" en la gestión de catálogos
+        ordered_keys = ["Album", "Genre", "Publisher", "Comment"]
+
+        # Si catalog_manager define campos adicionales no incluidos en la lista por defecto, se añaden al final
+        for field in getattr(app.catalog_manager, "catalog_fields", ()):
+            if field not in ordered_keys:
+                ordered_keys.append(field)
 
         for catalog_key in ordered_keys:
             if catalog_key not in app.catalog_manager.catalog_fields:
@@ -1555,6 +1561,7 @@ class DialogManager:
             "Album": "ÁLBUM",
             "Genre": "GÉNERO",
             "Publisher": "ETIQUETA",
+            "Comment": "COMENTARIO",
             "Year": "AÑO",
             "Cover": "CARÁTULA"
         }

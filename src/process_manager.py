@@ -67,6 +67,51 @@ class ProcessManager:
             return bool(getattr(self.app.catalog_manager, "manual_cover_selection", True))
         return True
 
+    def _get_tree_columns(self):
+        if hasattr(self.app, "get_tree_columns"):
+            return self.app.get_tree_columns()
+        return list(self.app.tree["columns"])
+
+    def _get_col_index(self, col_name):
+        cols = self._get_tree_columns()
+        return cols.index(col_name) if col_name in cols else None
+
+    def _get_value(self, values, col_name, default=""):
+        idx = self._get_col_index(col_name)
+        if idx is None or idx >= len(values):
+            return default
+        val = values[idx]
+        return default if val is None else val
+
+    def _set_value(self, values, col_name, new_value):
+        idx = self._get_col_index(col_name)
+        if idx is None or idx >= len(values):
+            return False
+        values[idx] = new_value
+        return True
+
+    def _parse_row_values(self, row_id, values, file_path):
+        row_map = {}
+        cols = self._get_tree_columns()
+        for idx, col_name in enumerate(cols):
+            val = values[idx] if idx < len(values) else ""
+            row_map[col_name] = str(val) if val is not None else ""
+
+        filename = os.path.basename(file_path) if file_path else ""
+        parsed = {
+            "Filename": (row_map.get("Filename") or filename),
+            "Artist": row_map.get("Artist", ""),
+            "Title": row_map.get("Title", ""),
+            "MixArtist": row_map.get("MixArtist", ""),
+            "Album": row_map.get("Album", ""),
+            "Genre": row_map.get("Genre", ""),
+            "Publisher": row_map.get("Publisher", ""),
+            "Comment": row_map.get("Comment", ""),
+            "Year": row_map.get("Year", ""),
+            "Cover": row_map.get("Cover", "") or "No",
+        }
+        return parsed
+
     def _run_processing_pipeline(self, target_rows, total_files):
         processed_count = 0
         words_to_omit = [
@@ -89,27 +134,13 @@ class ProcessManager:
             if not file_path or not os.path.exists(file_path) or not values:
                 return
 
-            prev_vals = {
-                "Filename": str(values[0]) if len(values) > 0 else "",
-                "Artist": str(values[1]) if len(values) > 1 else "",
-                "Title": str(values[2]) if len(values) > 2 else "",
-                "MixArtist": str(values[3]) if len(values) > 3 else "",
-                "Album": str(values[4]) if len(values) > 4 else "",
-                "Genre": str(values[5]) if len(values) > 5 else "",
-                "Publisher": str(values[6]) if len(values) > 6 else "",
-                "Comment": str(values[7]) if len(values) > 7 else "",
-                "Comment2": str(values[8]) if len(values) > 8 else "",
-                "Year": str(values[9]) if len(values) > 9 else "",
-                "Cover": str(values[10]) if len(values) > 10 else "No"
-            }
+            prev_vals = self._parse_row_values(row_id, values, file_path)
 
-            # 1. Validación de campos de catálogo
-            catalog_fields = (("Album", 4), ("Genre", 5), ("Publisher", 6))
+            # 1. Validación de campos de catálogo por nombre de columna
+            catalog_fields = ("Album", "Genre", "Publisher")
             invalid_catalog_fields = []
-            for field_name, col_index in catalog_fields:
-                if col_index >= len(values):
-                    continue
-                current_value = str(values[col_index]).strip() if values[col_index] is not None else ""
+            for field_name in catalog_fields:
+                current_value = str(self._get_value(values, field_name, "")).strip()
                 if not current_value:
                     continue
 
@@ -120,7 +151,7 @@ class ProcessManager:
                     if str(v).strip()
                 }
                 if normalized_value not in allowed_values:
-                    values[col_index] = ""
+                    self._set_value(values, field_name, "")
                     self.app.audio_manager.save_single_tag(file_path, field_name, "")
                     invalid_catalog_fields.append(field_name)
 
@@ -191,7 +222,7 @@ class ProcessManager:
                     with self._lock:
                         self.app.file_paths_map[row_id] = new_file_path
                     file_path = new_file_path
-                    values[0] = new_filename
+                    self._set_value(values, "Filename", new_filename)
                     log_msg = LogManager.format_tree_log(
                         context="PROCESS",
                         action="Renombrado",
@@ -204,26 +235,24 @@ class ProcessManager:
                     self.logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
 
             metadata_mappings = (
-                (1, "Artist", artist_parsed),
-                (2, "Title", title_parsed),
-                (3, "MixArtist", mixartist_parsed),
+                ("Artist", artist_parsed),
+                ("Title", title_parsed),
+                ("MixArtist", mixartist_parsed),
             )
-            for col_index, tag_name, new_value in metadata_mappings:
-                if col_index < len(values):
-                    values[col_index] = new_value
+            for tag_name, new_value in metadata_mappings:
+                self._set_value(values, tag_name, new_value)
                 self.app.audio_manager.save_single_tag(file_path, tag_name, new_value)
 
             with self._lock:
                 already_has_cover = self.app.grid_panel.row_has_cover(row_id)
 
-            has_year = bool(str(values[9]).strip()) if len(values) > 9 else False
+            has_year = bool(str(self._get_value(values, "Year", "")).strip())
             all_images = []
 
             # Modificación de metadatos mediante Discogs
             if already_has_cover and has_year:
                 self.logger.info(f"[PROCESS] Omitida consulta Discogs para '{new_filename}' (ya posee carátula y año).")
-                if len(values) > 10:
-                    values[10] = "Sí"
+                self._set_value(values, "Cover", "Sí")
             else:
                 query_term = f"{artist_parsed} {title_parsed}".strip()
                 query_term = omit_pattern.sub('', query_term)
@@ -237,12 +266,11 @@ class ProcessManager:
                     all_images = [cover_url]
 
                 if year:
-                    values[7] = str(year)
+                    self._set_value(values, "Year", str(year))
                     self.app.audio_manager.save_single_tag(file_path, "Year", str(year))
 
-                cover_index = 10 if len(values) > 10 else len(values) - 1
                 if already_has_cover:
-                    values[cover_index] = "Sí"
+                    self._set_value(values, "Cover", "Sí")
                 else:
                     if all_images and not manual_mode:
                         chosen_cover_url = all_images[0]
@@ -250,22 +278,22 @@ class ProcessManager:
                         if image_data:
                             image_data = AudioManager.normalize_cover_image_bytes(image_data)
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                                values[cover_index] = "Sí"
+                                self._set_value(values, "Cover", "Sí")
                             else:
-                                values[cover_index] = "No"
+                                self._set_value(values, "Cover", "No")
                         else:
-                            values[cover_index] = "No"
+                            self._set_value(values, "Cover", "No")
                     elif len(all_images) == 1 and manual_mode:
                         chosen_cover_url = all_images[0]
                         image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
                         if image_data:
                             image_data = AudioManager.normalize_cover_image_bytes(image_data)
                             if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                                values[cover_index] = "Sí"
+                                self._set_value(values, "Cover", "Sí")
                             else:
-                                values[cover_index] = "No"
+                                self._set_value(values, "Cover", "No")
                         else:
-                            values[cover_index] = "No"
+                            self._set_value(values, "Cover", "No")
                     elif len(all_images) > 1 and manual_mode:
                         with self._lock:
                             pending_cover_reviews.append({
@@ -277,21 +305,9 @@ class ProcessManager:
                                 "prev_vals": prev_vals
                             })
                     else:
-                        values[cover_index] = "No"
+                        self._set_value(values, "Cover", "No")
 
-            new_vals = {
-                "Filename": str(values[0]) if len(values) > 0 else "",
-                "Artist": str(values[1]) if len(values) > 1 else "",
-                "Title": str(values[2]) if len(values) > 2 else "",
-                "MixArtist": str(values[3]) if len(values) > 3 else "",
-                "Album": str(values[4]) if len(values) > 4 else "",
-                "Genre": str(values[5]) if len(values) > 5 else "",
-                "Publisher": str(values[6]) if len(values) > 6 else "",
-                "Comment": str(values[7]) if len(values) > 7 else "",
-                "Comment2": str(values[8]) if len(values) > 8 else "",
-                "Year": str(values[9]) if len(values) > 9 else "",
-                "Cover": str(values[10]) if len(values) > 10 else "No"
-            }
+            new_vals = self._parse_row_values(row_id, values, file_path)
 
             diff_prev = {k: v for k, v in prev_vals.items() if prev_vals[k] != new_vals[k]}
             diff_new = {k: v for k, v in new_vals.items() if prev_vals[k] != new_vals[k]}
@@ -309,7 +325,7 @@ class ProcessManager:
             def _update_ui():
                 if self.app.tree.exists(row_id):
                     self.app.tree.item(row_id, values=values)
-                    cover_val = values[10] if len(values) > 10 else "No"
+                    cover_val = self._get_value(values, "Cover", "No")
                     self.app.grid_panel.update_row_cover_status(row_id, cover_val)
 
             self.app.after(0, _update_ui)
@@ -334,7 +350,9 @@ class ProcessManager:
                     prev_vals = item.get("prev_vals", {})
                     chosen_url = selections.get(row_id)
 
-                    cover_index = 10 if len(values) > 10 else len(values) - 1
+                    cover_index = self._get_col_index("Cover")
+                    if cover_index is None or cover_index >= len(values):
+                        continue
 
                     if chosen_url and chosen_url != "__NO_COVER__":
                         image_data = self.app.discogs_client.download_image_bytes(chosen_url)
@@ -352,19 +370,7 @@ class ProcessManager:
                     self.app.tree.item(row_id, values=values)
                     self.app.grid_panel.update_row_cover_status(row_id, values[cover_index])
 
-                    new_vals = {
-                        "Filename": str(values[0]) if len(values) > 0 else "",
-                        "Artist": str(values[1]) if len(values) > 1 else "",
-                        "Title": str(values[2]) if len(values) > 2 else "",
-                        "MixArtist": str(values[3]) if len(values) > 3 else "",
-                        "Album": str(values[4]) if len(values) > 4 else "",
-                        "Genre": str(values[5]) if len(values) > 5 else "",
-                        "Publisher": str(values[6]) if len(values) > 6 else "",
-                        "Comment": str(values[7]) if len(values) > 7 else "",
-                        "Comment2": str(values[8]) if len(values) > 8 else "",
-                        "Year": str(values[9]) if len(values) > 9 else "",
-                        "Cover": str(values[10]) if len(values) > 10 else "No"
-                    }
+                    new_vals = self._parse_row_values(row_id, values, file_path)
 
                     diff_prev = {k: v for k, v in prev_vals.items() if prev_vals.get(k) != new_vals[k]}
                     diff_new = {k: v for k, v in new_vals.items() if prev_vals.get(k) != new_vals[k]}
@@ -423,19 +429,24 @@ class ProcessManager:
         metadata["Genre"] = CatalogManager.normalize_catalog_text(metadata.get("Genre", ""))
         metadata["Publisher"] = CatalogManager.normalize_catalog_text(metadata.get("Publisher", ""))
 
-        self.app.tree.item(row_id, values=(
-            metadata.get("Filename", ""),
-            metadata.get("Artist", ""),
-            metadata.get("Title", ""),
-            metadata.get("MixArtist", ""),
-            metadata.get("Album", ""),
-            metadata.get("Genre", ""),
-            metadata.get("Publisher", ""),
-            metadata.get("Comment", ""),
-            metadata.get("Comment2", ""),
-            metadata.get("Year", ""),
-            metadata.get("Cover", "No")
-        ))
+        row_payload = {
+            "Filename": metadata.get("Filename", ""),
+            "Artist": metadata.get("Artist", ""),
+            "Title": metadata.get("Title", ""),
+            "MixArtist": metadata.get("MixArtist", ""),
+            "Album": metadata.get("Album", ""),
+            "Genre": metadata.get("Genre", ""),
+            "Publisher": metadata.get("Publisher", ""),
+            "Comment": metadata.get("Comment", ""),
+            "Year": metadata.get("Year", ""),
+            "Cover": metadata.get("Cover", "No"),
+        }
+
+        if hasattr(self.app, "grid_panel") and hasattr(self.app.grid_panel, "build_row_values"):
+            self.app.tree.item(row_id, values=self.app.grid_panel.build_row_values(row_payload))
+        else:
+            cols = self._get_tree_columns()
+            self.app.tree.item(row_id, values=tuple(row_payload.get(c, "") for c in cols))
 
     def clear_metadata_for_rows(self, rows, scope_label="selección"):
         """Limpia las etiquetas editables de los archivos manteniendo intacta la duración y datos de contenedor."""
@@ -448,37 +459,28 @@ class ProcessManager:
                 filename = os.path.basename(file_path)
                 values = list(self.app.tree.item(row_id, "values"))
 
-                prev_vals = {}
-                if values:
-                    prev_vals = {
-                        "Artist": str(values[1]) if len(values) > 1 else "",
-                        "Title": str(values[2]) if len(values) > 2 else "",
-                        "MixArtist": str(values[3]) if len(values) > 3 else "",
-                        "Album": str(values[4]) if len(values) > 4 else "",
-                        "Genre": str(values[5]) if len(values) > 5 else "",
-                        "Publisher": str(values[6]) if len(values) > 6 else "",
-                        "Comment": str(values[7]) if len(values) > 7 else "",
-                        "Comment2": str(values[8]) if len(values) > 8 else "",
-                        "Year": str(values[9]) if len(values) > 9 else "",
-                        "Cover": str(values[10]) if len(values) > 10 else "No"
-                    }
+                # BORRAR
+                print(f"DEBUG Treeview [len={len(values)}]: {values}")
 
+                # Usar el parser centralizado para mapear correctamente las claves
+                parsed_prev = self._parse_row_values(row_id, values, file_path)
+
+                # Limpieza física en el archivo de audio
                 self.app.audio_manager.clear_audio_file_metadata(file_path)
                 self.app.grid_panel.update_row_cover_status(row_id, "No")
 
                 if values:
                     new_values = list(values)
-                    # Limpiar columnas de metadatos editables (Artist..Year: del 1 al 9)
-                    for i in range(1, 10):
-                        if i < len(new_values):
-                            new_values[i] = ""
-                    # Cover a "No" en el índice 10
-                    if len(new_values) > 10:
-                        new_values[10] = "No"
+                    # Limpiar columnas editables por nombre, preservando Filename.
+                    for col_name in ("Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Comment", "Year"):
+                        self._set_value(new_values, col_name, "")
+                    self._set_value(new_values, "Cover", "No")
 
                     self.app.tree.item(row_id, values=new_values)
 
-                new_vals = {
+                # Extraer prev_vals excluyendo 'Filename' para el formato del log de limpieza
+                log_prev = {k: v for k, v in parsed_prev.items() if k != "Filename"}
+                log_new = {
                     "Artist": "",
                     "Title": "",
                     "MixArtist": "",
@@ -486,7 +488,6 @@ class ProcessManager:
                     "Genre": "",
                     "Publisher": "",
                     "Comment": "",
-                    "Comment2": "",
                     "Year": "",
                     "Cover": "No"
                 }
@@ -495,8 +496,8 @@ class ProcessManager:
                     context="PROCESS",
                     action="Limpiar",
                     filename=filename,
-                    prev_vals=prev_vals,
-                    new_vals=new_vals
+                    prev_vals=log_prev,
+                    new_vals=log_new
                 )
                 self.logger.info(log_msg)
 
@@ -570,7 +571,7 @@ class ProcessManager:
 
                 values = list(tree.item(row_id, "values"))
                 if values:
-                    values[0] = new_filename
+                    self._set_value(values, "Filename", new_filename)
                     tree.item(row_id, values=values)
 
                 updated_count += 1

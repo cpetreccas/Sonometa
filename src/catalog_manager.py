@@ -10,24 +10,22 @@ class CatalogManager:
     def __init__(self, app_instance):
         self.app = app_instance
         self.manual_cover_selection = True
-        self.catalog_fields = ("Genre", "Album", "Publisher")
+        # Solo se gestiona Comment (se elimina Comment2)
+        self.catalog_fields = ("Genre", "Album", "Publisher", "Comment")
         self.catalog_labels = {
             "Album": "Álbumes",
             "Genre": "Géneros",
             "Publisher": "Etiquetas",
+            "Comment": "Comentarios",
         }
         self.catalog_values = {field: [] for field in self.catalog_fields}
         self.settings = {}
 
-        # Diccionarios para almacenar las relaciones en cascada
-        # album_genres: { "NombreAlbum": ["Genero1", "Genero2"] }
-        # genre_publishers: { "NombreGenero": ["Etiqueta1", "Etiqueta2"] }
         self.album_genres = {}
         self.genre_publishers = {}
 
         self.catalog_file_path = self.get_catalog_file_path()
         self.settings_file_path = self.get_settings_file_path()
-        self.load_catalog_values()
 
     def get_catalog_file_path(self):
         base_dir = os.getenv("APPDATA") or os.path.expanduser("~")
@@ -65,7 +63,6 @@ class CatalogManager:
                             cleaned.append(value_str)
                     self.catalog_values[field] = cleaned
 
-            # Carga de relaciones jerárquicas
             raw_ag = data.get("album_genres", {})
             self.album_genres = {
                 self.normalize_catalog_text(k): [self.normalize_catalog_text(v) for v in vals if v]
@@ -79,9 +76,7 @@ class CatalogManager:
             }
 
         except Exception as e:
-            logger.warning(
-                f"No se pudieron cargar catálogos persistidos: {str(e)}"
-            )
+            logger.warning(f"No se pudieron cargar catálogos persistidos: {str(e)}")
 
     def save_catalog_values(self):
         try:
@@ -89,6 +84,7 @@ class CatalogManager:
                 "Genre": self.catalog_values.get("Genre", []),
                 "Album": self.catalog_values.get("Album", []),
                 "Publisher": self.catalog_values.get("Publisher", []),
+                "Comment": self.catalog_values.get("Comment", []),
                 "album_genres": self.album_genres,
                 "genre_publishers": self.genre_publishers
             }
@@ -106,7 +102,6 @@ class CatalogManager:
             token = data.get("discogs_token", "").strip()
             self.manual_cover_selection = data.get("manual_cover_selection", True)
 
-            # Sincronizar estado con la variable global de la aplicación si existe
             if hasattr(self.app, "review_covers_var") and self.app.review_covers_var is not None:
                 self.app.review_covers_var.set(self.manual_cover_selection)
 
@@ -193,14 +188,26 @@ class CatalogManager:
         self.genre_publishers[genre_norm] = [self.normalize_catalog_text(p) for p in publishers_list]
         self.save_catalog_values()
 
-    @staticmethod
-    def get_catalog_column_info(catalog_key):
+    def get_catalog_column_info(self, catalog_key):
         mapping = {
-            "Album": ("Album", 4),
-            "Genre": ("Genre", 5),
-            "Publisher": ("Publisher", 6),
+            "Album": "Album",
+            "Genre": "Genre",
+            "Publisher": "Publisher",
+            "Comment": "Comment",
         }
-        return mapping.get(catalog_key)
+        col_name = mapping.get(catalog_key)
+        if not col_name:
+            return None
+
+        col_index = None
+        if hasattr(self.app, "get_tree_column_index"):
+            col_index = self.app.get_tree_column_index(col_name)
+        elif hasattr(self.app, "grid_panel") and hasattr(self.app.grid_panel, "get_column_index"):
+            col_index = self.app.grid_panel.get_column_index(col_name)
+
+        if col_index is None:
+            return None
+        return col_name, col_index
 
     def apply_catalog_value_change(self, catalog_key, old_value, new_value):
         info = self.get_catalog_column_info(catalog_key)
@@ -247,32 +254,12 @@ class CatalogManager:
             return 0, False
 
         merged = new_value in values
-        updated_count = self.apply_catalog_value_change(
-            catalog_key, old_value, new_value
-        )
+        updated_count = self.apply_catalog_value_change(catalog_key, old_value, new_value)
 
         values.remove(old_value)
         if new_value not in values:
             values.append(new_value)
         values.sort(key=lambda x: x.lower())
-
-        # Actualizar claves en diccionarios de relaciones
-        if catalog_key == "Album" and old_value in self.album_genres:
-            self.album_genres[new_value] = self.album_genres.pop(old_value)
-        elif catalog_key == "Genre":
-            if old_value in self.genre_publishers:
-                self.genre_publishers[new_value] = self.genre_publishers.pop(old_value)
-            for alb, g_list in self.album_genres.items():
-                if old_value in g_list:
-                    g_list.remove(old_value)
-                    if new_value not in g_list:
-                        g_list.append(new_value)
-        elif catalog_key == "Publisher":
-            for gen, p_list in self.genre_publishers.items():
-                if old_value in p_list:
-                    p_list.remove(old_value)
-                    if new_value not in p_list:
-                        p_list.append(new_value)
 
         self.refresh_ui_comboboxes()
         self.save_catalog_values()
@@ -284,9 +271,10 @@ class CatalogManager:
 
     def apply_catalog_selection_to_row(self, row_id, attr_name, catalog_key, new_value):
         column_map = {
-            "entry_album": CatalogManager.get_catalog_column_info("Album"),
-            "entry_genre": CatalogManager.get_catalog_column_info("Genre"),
-            "entry_publisher": CatalogManager.get_catalog_column_info("Publisher"),
+            "entry_album": self.get_catalog_column_info("Album"),
+            "entry_genre": self.get_catalog_column_info("Genre"),
+            "entry_publisher": self.get_catalog_column_info("Publisher"),
+            "entry_comment": self.get_catalog_column_info("Comment"),
         }
         if attr_name not in column_map:
             return

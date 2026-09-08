@@ -20,7 +20,7 @@ class AudioManager:
 
         Returns:
             dict con claves: Filename, Title, Artist, MixArtist, Album,
-                             Genre, Publisher, Year, Comment, Comment2, Duration, CUEs, Cover.
+                             Genre, Publisher, Year, Comment, Duration, CUEs, Cover.
         """
         from mutagen.wave import WAVE
         from mutagen.flac import FLAC
@@ -38,7 +38,6 @@ class AudioManager:
             "Publisher": "",
             "Year": "",
             "Comment": "",
-            "Comment2": "",
             "Duration": "",  # Preservación de la duración calculada del audio
             "CUEs": 0,
             "Cover": "No",
@@ -62,8 +61,6 @@ class AudioManager:
                     comm_frames = [v for k, v in audio.tags.items() if k.startswith("COMM")]
                     if comm_frames and comm_frames[0].text:
                         data["Comment"] = str(comm_frames[0].text[0])
-                    if "TXXX:COMMENT2" in audio.tags and audio.tags["TXXX:COMMENT2"].text:
-                        data["Comment2"] = str(audio.tags["TXXX:COMMENT2"].text[0])
 
             elif ext == ".mp3":
                 try:
@@ -86,10 +83,6 @@ class AudioManager:
                     if comm_frames and comm_frames[0].text:
                         data["Comment"] = str(comm_frames[0].text[0])
 
-                    # Comment2 (TXXX:COMMENT2)
-                    if "TXXX:COMMENT2" in audio_id3 and audio_id3["TXXX:COMMENT2"].text:
-                        data["Comment2"] = str(audio_id3["TXXX:COMMENT2"].text[0])
-
                 except Exception:
                     pass
 
@@ -103,7 +96,6 @@ class AudioManager:
                 data["Publisher"] = (audio.get("organization") or audio.get("publisher") or [""])[0]
                 data["Year"]      = (audio.get("date") or audio.get("year") or [""])[0]
                 data["Comment"]   = audio.get("comment", [""])[0]
-                data["Comment2"]  = audio.get("comment2", [""])[0]
 
             elif ext in (".m4a", ".mp4"):
                 audio = MP4(file_path)
@@ -120,11 +112,6 @@ class AudioManager:
                     val = atom_remix[0]
                     data["MixArtist"] = val.decode("utf-8") if isinstance(val, bytes) else str(val)
 
-                atom_cmt2 = audio.get("----:com.apple.iTunes:COMMENT2")
-                if atom_cmt2:
-                    val = atom_cmt2[0]
-                    data["Comment2"] = val.decode("utf-8") if isinstance(val, bytes) else str(val)
-
             else:
                 audio = MutagenFile(file_path, easy=True)
                 if audio is not None:
@@ -140,7 +127,6 @@ class AudioManager:
                     data["Publisher"] = get_tag("organization") or get_tag("publisher")
                     data["Year"]      = get_tag("date") or get_tag("year")
                     data["Comment"]   = get_tag("comment")
-                    data["Comment2"]  = get_tag("comment2")
 
             # Extracción y formateo seguro de la duración (info.length)
             raw_audio = MutagenFile(file_path)
@@ -300,12 +286,6 @@ class AudioManager:
                     else:
                         audio_tags.delall("COMM")
 
-                elif field_name == "Comment2":
-                    if new_value:
-                        audio_tags.add(TXXX(encoding=3, desc="COMMENT2", text=str(new_value)))
-                    else:
-                        audio_tags.delall("TXXX:COMMENT2")
-
                 else:
                     frame_cls = frame_map.get(field_name)
                     if not frame_cls:
@@ -340,7 +320,6 @@ class AudioManager:
                     "Publisher": "ORGANIZATION",
                     "Year":      "DATE",
                     "Comment":   "COMMENT",
-                    "Comment2":  "COMMENT2",
                 }
                 flac_key = tag_map.get(field_name)
                 if not flac_key:
@@ -371,13 +350,6 @@ class AudioManager:
                     else:
                         audio.pop(atom_key, None)
 
-                elif field_name == "Comment2":
-                    atom_key = "----:com.apple.iTunes:COMMENT2"
-                    if new_value:
-                        audio[atom_key] = str(new_value).encode("utf-8")
-                    else:
-                        audio.pop(atom_key, None)
-
                 else:
                     m4a_key = tag_map.get(field_name)
                     if not m4a_key:
@@ -399,7 +371,6 @@ class AudioManager:
                     "Publisher": "organization",
                     "Year":      "date",
                     "Comment":   "comment",
-                    "Comment2":  "comment2",
                 }
 
                 mutagen_key = tag_map.get(field_name)
@@ -641,7 +612,7 @@ class AudioManager:
                 if getattr(audio, "pictures", None):
                     audio.clear_pictures()
                 # Limpiar solo tags editables de Vorbis
-                editable_vorbis = ["title", "artist", "mixartist", "remixedby", "album", "genre", "organization", "publisher", "date", "year", "comment", "comment2"]
+                editable_vorbis = ["title", "artist", "mixartist", "remixedby", "album", "genre", "organization", "publisher", "date", "year", "comment"]
                 for key in editable_vorbis:
                     audio.pop(key, None)
                 audio.save()
@@ -649,7 +620,7 @@ class AudioManager:
             elif ext in (".m4a", ".aac", ".mp4"):
                 audio = MP4(file_path)
                 if audio.tags is not None:
-                    editable_mp4 = ["\xa9nam", "\xa9ART", "soar", "\xa9alb", "\xa9gen", "covr", "\xa9day", "\xa9cmt", "----:com.apple.iTunes:REMIXEDBY", "----:com.apple.iTunes:COMMENT2"]
+                    editable_mp4 = ["\xa9nam", "\xa9ART", "soar", "\xa9alb", "\xa9gen", "covr", "\xa9day", "\xa9cmt", "----:com.apple.iTunes:REMIXEDBY"]
                     for key in editable_mp4:
                         audio.tags.pop(key, None)
                     audio.save()
@@ -698,3 +669,22 @@ class AudioManager:
         except Exception as e:
             logger.debug(f"Error normalizando imagen (se devuelven bytes originales): {str(e)}")
             return image_bytes
+
+    def get_tag_value(self, file_path, field_name, default=""):
+        """Devuelve el valor de una etiqueta específica para un archivo de audio.
+
+        Args:
+            file_path (str): Ruta absoluta al archivo en disco.
+            field_name (str): Nombre del campo (p. ej. 'Comment', 'Artist', etc.).
+            default (str): Valor de retorno si la etiqueta no existe o hay error.
+
+        Returns:
+            str: Valor de la etiqueta.
+        """
+        try:
+            filename = os.path.basename(file_path)
+            metadata = self.extract_metadata(file_path, filename)
+            return metadata.get(field_name, default)
+        except Exception as e:
+            logger.error(f"Error al obtener el tag '{field_name}' de {file_path}: {str(e)}")
+            return default

@@ -556,13 +556,28 @@ class DetailPanel:
         else:
             btn.configure(border_color=self.app.CORP_COLOR, border_width=2)
 
+    def _resolve_attr_column(self, attr_name):
+        mapping = self.app.PANEL_FIELD_COL_MAP.get(attr_name)
+        if not mapping:
+            return None, None
+
+        field_name, column_ref = mapping
+        col_name = column_ref if isinstance(column_ref, str) else field_name
+        col_index = self.app.get_tree_column_index(col_name) if hasattr(self.app, "get_tree_column_index") else None
+        return field_name, col_index
+
+    def _get_row_value(self, values, col_name, default=""):
+        if hasattr(self.app, "get_tree_value"):
+            return self.app.get_tree_value(values, col_name, default)
+        return default
+
     def compute_common_panel_values(self, selected_rows):
         result = {}
-        for attr_name, (_, col_index) in self.app.PANEL_FIELD_COL_MAP.items():
+        for attr_name, (_, col_name) in self.app.PANEL_FIELD_COL_MAP.items():
             values_across_rows = []
             for row_id in selected_rows:
                 vals = self.app.tree.item(row_id, "values")
-                v = str(vals[col_index]).strip() if col_index < len(vals) and vals[col_index] is not None else ""
+                v = str(self._get_row_value(vals, col_name, "")).strip()
                 values_across_rows.append(v)
             unique = set(values_across_rows)
             result[attr_name] = values_across_rows[0] if len(unique) == 1 else self.app.KEEP_VALUE
@@ -596,12 +611,11 @@ class DetailPanel:
                 ]
                 options = [self.app.KEEP_VALUE, self.app.CLEAR_OPTION] + sorted(catalog_vals, key=lambda x: x.lower())
             else:
-                _, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
+                _, col_name = self.app.PANEL_FIELD_COL_MAP[attr_name]
                 distinct = sorted({
-                    str(self.app.tree.item(r, "values")[col_index]).strip()
+                    str(self._get_row_value(self.app.tree.item(r, "values"), col_name, "")).strip()
                     for r in selected_rows
-                    if col_index < len(self.app.tree.item(r, "values"))
-                       and self.app.tree.item(r, "values")[col_index]
+                    if str(self._get_row_value(self.app.tree.item(r, "values"), col_name, "")).strip()
                 })
                 options = [self.app.KEEP_VALUE, self.app.CLEAR_OPTION] + [
                     v for v in distinct if v and v not in (self.app.KEEP_VALUE, self.app.CLEAR_OPTION)
@@ -668,7 +682,9 @@ class DetailPanel:
         if attr_name not in self.app.PANEL_FIELD_COL_MAP:
             return
 
-        field_name, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
+        field_name, col_index = self._resolve_attr_column(attr_name)
+        if col_index is None:
+            return
         selected_rows = self.app.tree.selection()
 
         batch_actions = []
@@ -686,7 +702,15 @@ class DetailPanel:
             file_path = self.app.file_paths_map.get(row_id)
 
             batch_actions.append(
-                HistoryAction(file_path, row_id, field_name, col_index, current_value, new_value)
+                HistoryAction(
+                    file_path,
+                    row_id,
+                    field_name,
+                    col_index,
+                    current_value,
+                    new_value,
+                    col_name=field_name,
+                )
             )
 
             values[col_index] = new_value
@@ -825,13 +849,23 @@ class DetailPanel:
         new_value = "" if raw_value == self.app.CLEAR_OPTION else self.app.catalog_manager.normalize_catalog_text(raw_value)
 
         if row_id:
-            col_name, col_index = self.app.PANEL_FIELD_COL_MAP[attr_name]
+            col_name, col_index = self._resolve_attr_column(attr_name)
+            if col_index is None:
+                return
             values = list(self.app.tree.item(row_id, "values"))
             current_val = str(values[col_index]).strip() if col_index < len(values) and values[col_index] is not None else ""
 
             if current_val != new_value:
                 file_path = self.app.file_paths_map.get(row_id)
-                action = HistoryAction(file_path, row_id, col_name, col_index, current_val, new_value)
+                action = HistoryAction(
+                    file_path,
+                    row_id,
+                    col_name,
+                    col_index,
+                    current_val,
+                    new_value,
+                    col_name=col_name,
+                )
                 self.app.undo_manager.record_action(action)
 
                 if file_path:
@@ -862,10 +896,10 @@ class DetailPanel:
 
     def on_panel_text_field_commit(self, attr_name):
         text_column_map = {
-            "entry_artist": ("Artist", 1),
-            "entry_title": ("Title", 2),
-            "entry_mixartist": ("MixArtist", 3),
-            "entry_year": ("Year", 7),
+            "entry_artist": "Artist",
+            "entry_title": "Title",
+            "entry_mixartist": "MixArtist",
+            "entry_year": "Year",
         }
         if attr_name not in text_column_map:
             return
@@ -883,7 +917,10 @@ class DetailPanel:
             return
 
         new_value = widget.get().strip()
-        col_name, col_index = text_column_map[attr_name]
+        col_name = text_column_map[attr_name]
+        col_index = self.app.get_tree_column_index(col_name)
+        if col_index is None:
+            return
         values = list(self.app.tree.item(row_id, "values"))
         if col_index >= len(values):
             return
@@ -893,7 +930,15 @@ class DetailPanel:
             return
 
         file_path = self.app.file_paths_map.get(row_id)
-        action = HistoryAction(file_path, row_id, col_name, col_index, current_value, new_value)
+        action = HistoryAction(
+            file_path,
+            row_id,
+            col_name,
+            col_index,
+            current_value,
+            new_value,
+            col_name=col_name,
+        )
         self.app.undo_manager.record_action(action)
 
         values[col_index] = new_value
@@ -959,18 +1004,20 @@ class DetailPanel:
         item_id = selected[0]
         item = self.app.tree.item(item_id)
         values = item['values']
-        if len(values) < 8:
+        row_map = self.app.map_tree_values(values) if hasattr(self.app, "map_tree_values") else {}
+        required_cols = ["Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year"]
+        if any(col not in row_map for col in required_cols):
             self.logger.warning("Fila con metadatos incompletos; se omite actualización de panel.")
             return
 
         # Carga directa de todos los campos
-        self.set_panel_widget_value("entry_artist", values[1])
-        self.set_panel_widget_value("entry_title", values[2])
-        self.set_panel_widget_value("entry_mixartist", values[3])
-        self.set_panel_widget_value("entry_album", values[4])
-        self.set_panel_widget_value("entry_genre", values[5])
-        self.set_panel_widget_value("entry_publisher", values[6])
-        self.set_panel_widget_value("entry_year", values[7])
+        self.set_panel_widget_value("entry_artist", row_map.get("Artist", ""))
+        self.set_panel_widget_value("entry_title", row_map.get("Title", ""))
+        self.set_panel_widget_value("entry_mixartist", row_map.get("MixArtist", ""))
+        self.set_panel_widget_value("entry_album", row_map.get("Album", ""))
+        self.set_panel_widget_value("entry_genre", row_map.get("Genre", ""))
+        self.set_panel_widget_value("entry_publisher", row_map.get("Publisher", ""))
+        self.set_panel_widget_value("entry_year", row_map.get("Year", ""))
 
         # Actualiza las listas de sugerencias de los combos sin sobrescribir lo que se acaba de cargar
         self.refresh_catalog_comboboxes()

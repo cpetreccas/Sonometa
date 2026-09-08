@@ -94,12 +94,18 @@ class SearchManager:
         if self._search_visible:
             self.apply_search_filter()
 
-    @staticmethod
-    def _build_row_search_text(values):
-        searchable_indexes = (0, 1, 2, 3, 4, 5, 6, 7)
+    def _build_row_search_text(self, values):
+        columns = list(self.tree["columns"])
+        searchable_columns = [
+            col for col in columns
+            if col in ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment")
+        ]
         parts = []
-        for idx in searchable_indexes:
-            if idx < len(values) and values[idx] is not None:
+        for col_name in searchable_columns:
+            idx = columns.index(col_name) if col_name in columns else None
+            if idx is None or idx >= len(values):
+                continue
+            if values[idx] is not None:
                 parts.append(str(values[idx]))
         return remove_accents(" ".join(parts))
 

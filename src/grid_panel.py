@@ -29,8 +29,19 @@ class GridPanel:
         self.zoom_level = 1.0
         self.BASE_FONT_SIZE = 9
         self.BASE_ROW_HEIGHT = 28
+        self.col_titles = {
+            "Filename": "NOMBRE DE ARCHIVO",
+            "Artist": "INTÉRPRETE",
+            "Title": "TÍTULO",
+            "MixArtist": "REMIX",
+            "Album": "ÁLBUM",
+            "Genre": "GÉNERO",
+            "Publisher": "ETIQUETA",
+            "Year": "AÑO",
+            "Cover": "CARÁTULA"
+        }
 
-        # Configuración base de columnas
+        # Configuración base de columnas (sin Comment ni Comment2)
         self.base_col_config = {
             "Filename":  {"width": 280, "minwidth": 180, "stretch": True,  "anchor": "w"},
             "Artist":    {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
@@ -40,8 +51,7 @@ class GridPanel:
             "Genre":     {"width": 70,  "minwidth": 50,  "stretch": False, "anchor": "w"},
             "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
             "Year":      {"width": 40,  "minwidth": 40,  "stretch": False, "anchor": "center"},
-            "Comment":   {"width": 150, "minwidth": 80,  "stretch": False, "anchor": "w"},
-            "Comment2":  {"width": 150, "minwidth": 80,  "stretch": False, "anchor": "w"},
+            "Comment":   {"width": 0,   "minwidth": 0,   "stretch": False, "anchor": "w"},
             "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"}
         }
 
@@ -220,27 +230,19 @@ class GridPanel:
         return "break"
 
     def _build_treeview(self):
-        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Comment2", "Cover")
+        # Declaramos las 10 columnas en la tupla interna de datos
+        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cover")
+
         self.tree = ttk.Treeview(self.frame_grid, columns=self.columns, show="headings", selectmode="extended")
 
-        col_titles = {
-            "Filename": "NOMBRE DE ARCHIVO",
-            "Artist": "INTÉRPRETE",
-            "Title": "TÍTULO",
-            "MixArtist": "REMIX",
-            "Album": "ÁLBUM",
-            "Genre": "GÉNERO",
-            "Publisher": "ETIQUETA",
-            "Comment": "COMENTARIO-1",
-            "Comment2": "COMENTARIO-2",
-            "Year": "AÑO",
-            "Cover": "CARÁTULA"
-        }
+        # Ocultamos Comment de la representación visual pero la mantenemos en la tupla
+        visible_cols = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
+        self.tree.configure(displaycolumns=visible_cols)
 
         for col in self.columns:
             self.app.sort_directions[col] = False
-            title = col_titles.get(col, col)
-            cfg = self.base_col_config[col]
+            title = self.col_titles.get(col, col)
+            cfg = self.base_col_config.get(col, {"width": 100, "minwidth": 50, "stretch": False, "anchor": "w"})
 
             self.tree.heading(col, text=title, anchor="w", command=lambda _col=col: self.sort_by_column(_col))
             self.tree.column(
@@ -370,6 +372,10 @@ class GridPanel:
             command=lambda: self.app.process_manager.process_discogs_data()
         )
         self._tree_context_menu.add_command(
+            label="Campos personalizables",
+            command=self._open_custom_tag_picker
+        )
+        self._tree_context_menu.add_command(
             label="Limpiar",
             command=lambda: self.app.process_manager.clear_selected_metadata()
         )
@@ -378,6 +384,66 @@ class GridPanel:
             label="Eliminar del disco",
             command=lambda: self.app.process_manager.delete_selected_files()
         )
+
+    def _open_custom_tag_picker(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+
+        row_id = selected[0]
+        file_path = self.app.file_paths_map.get(row_id)
+        if not file_path:
+            return
+
+        # 1. Intentar obtener el comentario directamente del Treeview (interfaz)
+        values = list(self.tree.item(row_id, "values"))
+        comment_col_idx = self.columns.index("Comment")
+        current_comment = ""
+
+        if len(values) > comment_col_idx and values[comment_col_idx] is not None:
+            current_comment = str(values[comment_col_idx]).strip()
+
+        # 2. Si el Treeview estaba vacío, intentar leerlo con el audio_manager
+        if not current_comment and hasattr(self.app, "audio_manager"):
+            current_comment = self.app.audio_manager.get_tag_value(file_path, "Comment") or ""
+
+        from custom_tag_picker import CustomTagPicker
+        CustomTagPicker(
+            parent=self.app,
+            file_path=file_path,
+            row_id=row_id,
+            current_comment=current_comment,
+            on_save=self._on_custom_tags_saved
+        )
+
+    def _on_custom_tags_saved(self, row_id: str, file_path: str, comment_val: str) -> None:
+        if not file_path or not self.tree.exists(row_id):
+            return
+
+        values = list(self.tree.item(row_id, "values"))
+        comment_col_idx = self.columns.index("Comment")
+
+        if len(values) <= comment_col_idx:
+            self.logger.error(f"La fila {row_id} no tiene suficientes columnas para el índice {comment_col_idx}.")
+            return
+
+        prev_comment = str(values[comment_col_idx]).strip() if values[comment_col_idx] is not None else ""
+
+        if hasattr(self.app, "audio_manager"):
+            self.app.audio_manager.save_single_tag(file_path, "Comment", comment_val, app=self.app)
+
+        values[comment_col_idx] = comment_val
+        self.tree.item(row_id, values=values)
+
+        if prev_comment != comment_val:
+            log_msg = LogManager.format_tree_log(
+                context="CUSTOM_TAGS",
+                action="Modificado",
+                filename=os.path.basename(file_path),
+                prev_vals={"Comment": prev_comment},
+                new_vals={"Comment": comment_val}
+            )
+            self.logger.info(log_msg)
 
     def _on_tree_right_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
@@ -451,7 +517,7 @@ class GridPanel:
             return False
 
     def _get_next_tree_edit_target(self, row_id, col_index, direction):
-        editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment")]
         if col_index not in editable_cols:
             return None
 
@@ -485,12 +551,45 @@ class GridPanel:
 
         return None
 
+    def _get_tree_columns(self):
+        return list(self.tree["columns"])
+
+    def get_column_index(self, col_name):
+        cols = self._get_tree_columns()
+        return cols.index(col_name) if col_name in cols else None
+
+    def get_value_by_column(self, values, col_name, default=""):
+        idx = self.get_column_index(col_name)
+        if idx is None or idx >= len(values):
+            return default
+        val = values[idx]
+        return default if val is None else val
+
+    def set_value_by_column(self, values, col_name, new_value):
+        idx = self.get_column_index(col_name)
+        if idx is None or idx >= len(values):
+            return False
+        values[idx] = new_value
+        return True
+
+    def map_row_values(self, values):
+        cols = self._get_tree_columns()
+        row_map = {}
+        for idx, col_name in enumerate(cols):
+            row_map[col_name] = values[idx] if idx < len(values) else ""
+        return row_map
+
+    def build_row_values(self, metadata, current_values=None):
+        cols = self._get_tree_columns()
+        current_map = self.map_row_values(current_values or [])
+        return tuple(metadata.get(col, current_map.get(col, "")) for col in cols)
+
     def _start_tree_cell_edit(self, row_id, col_index, open_dropdown=True):
         if col_index < 0 or col_index >= len(self.columns):
             return
 
         col_name = self.columns[col_index]
-        if col_name == "Cover":
+        if col_name in ("Cover", "Comment"):
             return
 
         self._last_edited_col = col_index
@@ -530,9 +629,11 @@ class GridPanel:
             selectforeground=[("readonly", "#FFFFFF")]
         )
 
+        allowed_values_for_validation = None
+
         if col_name in managed_grid_fields:
             if col_name == "Publisher":
-                current_genre = str(row_values[5]).strip() if len(row_values) > 5 else ""
+                current_genre = str(self.get_value_by_column(row_values, "Genre", "")).strip()
                 if hasattr(self.app.catalog_manager, "get_allowed_publishers_for_genre") and current_genre:
                     base_values = self.app.catalog_manager.get_allowed_publishers_for_genre(current_genre)
                 elif hasattr(self.app.catalog_manager, "get_publishers_by_genre") and current_genre:
@@ -540,7 +641,7 @@ class GridPanel:
                 else:
                     base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
             elif col_name == "Genre":
-                current_album = str(row_values[4]).strip() if len(row_values) > 4 else ""
+                current_album = str(self.get_value_by_column(row_values, "Album", "")).strip()
                 if hasattr(self.app.catalog_manager, "get_allowed_genres_for_album") and current_album:
                     base_values = self.app.catalog_manager.get_allowed_genres_for_album(current_album)
                 elif hasattr(self.app.catalog_manager, "get_genres_by_album") and current_album:
@@ -550,6 +651,7 @@ class GridPanel:
             else:
                 base_values = self.app.catalog_manager.get_catalog_combo_values(col_name)
 
+            allowed_values_for_validation = set(base_values) if base_values else set()
             combo_values = list(base_values) if base_values else []
 
             entry = ttk.Combobox(
@@ -663,7 +765,22 @@ class GridPanel:
             if col_name in managed_grid_fields:
                 if new_value == self.app.CLEAR_OPTION:
                     new_value = ""
-                new_value = self.app.catalog_manager.normalize_catalog_text(new_value)
+                else:
+                    new_value = self.app.catalog_manager.normalize_catalog_text(new_value)
+
+                if new_value:
+                    valid_set = allowed_values_for_validation
+                    if valid_set is None or len(valid_set) == 0:
+                        valid_set = set(self.app.catalog_manager.get_catalog_combo_values(col_name))
+
+                    if valid_set and new_value not in valid_set:
+                        self.logger.warning(f"Valor '{new_value}' no permitido para la columna {col_name}.")
+                        self.app.show_themed_dialog(
+                            "Valor no válido",
+                            f"El valor '{new_value}' no pertenece al catálogo o a las opciones permitidas para {col_name}.",
+                            level="warning"
+                        )
+                        return False
 
             if col_name == "Filename":
                 if not new_value:
@@ -725,7 +842,15 @@ class GridPanel:
 
             file_path = self.app.file_paths_map.get(row_id)
             if hasattr(self.app, "undo_manager"):
-                action = HistoryAction(file_path, row_id, col_name, col_index, current_value_str, new_value)
+                action = HistoryAction(
+                    file_path,
+                    row_id,
+                    col_name,
+                    col_index,
+                    current_value_str,
+                    new_value,
+                    col_name=col_name,
+                )
                 self.app.undo_manager.record_action(action)
 
             values = list(self.tree.item(row_id, "values"))
@@ -901,16 +1026,12 @@ class GridPanel:
         if region != "cell":
             return
 
-        # 1. Obtener el ID interno/nombre de la columna sobre la que se hizo clic
-        col_id = self.tree.identify_column(event.x)  # p. ej. "#8"
-
-        # Traducir el ID visual al nombre real de la columna usando column()
+        col_id = self.tree.identify_column(event.x)
         col_name = self.tree.column(col_id, "id")
 
-        if not col_name or col_name == "Cover":
+        if not col_name or col_name in ("Cover", "Comment"):
             return
 
-        # 2. Obtener el índice absoluto dentro de self.columns
         if col_name in self.columns:
             col_index = self.columns.index(col_name)
             row_id = self.tree.identify_row(event.y)
@@ -927,27 +1048,13 @@ class GridPanel:
             tag = "even" if index % 2 == 0 else "odd"
             self.tree.item(item[1], tags=(tag,))
 
-        col_titles = {
-            "Filename": "NOMBRE DE ARCHIVO",
-            "Artist": "INTÉRPRETE",
-            "Title": "TÍTULO",
-            "MixArtist": "REMIX",
-            "Album": "ÁLBUM",
-            "Genre": "GÉNERO",
-            "Publisher": "ETIQUETA",
-            "Comment": "COMENTARIO-1",
-            "Comment2": "COMENTARIO-2",
-            "Year": "AÑO",
-            "Cover": "CARÁTULA"
-        }
-
         for c in self.columns:
-            base_text = col_titles.get(c, c)
+            base_text = self.col_titles.get(c, c)
             self.tree.heading(c, text=base_text)
 
         arrow = " ▲" if not reverse else " ▼"
 
-        sorted_title = col_titles.get(col, col) + arrow
+        sorted_title = self.col_titles.get(col, col) + arrow
         self.tree.heading(col, text=sorted_title)
 
         self.app.sort_directions[col] = not reverse
@@ -975,8 +1082,8 @@ class GridPanel:
 
     def get_row_artist_title(self, row_id):
         values = list(self.tree.item(row_id, "values"))
-        artist = values[1] if len(values) > 1 else ""
-        title = values[2] if len(values) > 2 else ""
+        artist = self.get_value_by_column(values, "Artist", "")
+        title = self.get_value_by_column(values, "Title", "")
         return artist, title
 
     def update_row_metadata(self, row_id, new_metadata):
@@ -984,41 +1091,40 @@ class GridPanel:
             return
 
         current_values = list(self.tree.item(row_id, "values"))
-        cover_idx = self.columns.index("Cover")
+        current_map = self.map_row_values(current_values)
 
-        updated_values = [
-            new_metadata.get("Filename", current_values[0] if len(current_values) > 0 else ""),
-            new_metadata.get("Artist", ""),
-            new_metadata.get("Title", ""),
-            new_metadata.get("MixArtist", ""),
-            new_metadata.get("Album", ""),
-            new_metadata.get("Genre", ""),
-            new_metadata.get("Publisher", ""),
-            new_metadata.get("Year", ""),
-            new_metadata.get("Comment", ""),
-            new_metadata.get("Comment2", ""),
-            new_metadata.get("Cover", current_values[cover_idx] if len(current_values) > cover_idx else "No")
-        ]
+        row_payload = {
+            "Filename": new_metadata.get("Filename", current_map.get("Filename", "")),
+            "Artist": new_metadata.get("Artist", ""),
+            "Title": new_metadata.get("Title", ""),
+            "MixArtist": new_metadata.get("MixArtist", ""),
+            "Album": new_metadata.get("Album", ""),
+            "Genre": new_metadata.get("Genre", ""),
+            "Publisher": new_metadata.get("Publisher", ""),
+            "Year": new_metadata.get("Year", ""),
+            "Comment": new_metadata.get("Comment", current_map.get("Comment", "")),
+            "Cover": new_metadata.get("Cover", current_map.get("Cover", "No")),
+        }
 
-        self.tree.item(row_id, values=updated_values)
+        self.tree.item(row_id, values=self.build_row_values(row_payload, current_values=current_values))
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)
 
     def insert_audio_row(self, metadata, count):
         tag = "even" if count % 2 == 0 else "odd"
-        row_id = self.tree.insert("", "end", values=(
-            metadata.get("Filename", ""),
-            metadata.get("Artist", ""),
-            metadata.get("Title", ""),
-            metadata.get("MixArtist", ""),
-            metadata.get("Album", ""),
-            metadata.get("Genre", ""),
-            metadata.get("Publisher", ""),
-            metadata.get("Year", ""),
-            metadata.get("Comment", ""),
-            metadata.get("Comment2", ""),
-            metadata.get("Cover", "No")
-        ), tags=(tag,))
+        row_values = self.build_row_values({
+            "Filename": metadata.get("Filename", ""),
+            "Artist": metadata.get("Artist", ""),
+            "Title": metadata.get("Title", ""),
+            "MixArtist": metadata.get("MixArtist", ""),
+            "Album": metadata.get("Album", ""),
+            "Genre": metadata.get("Genre", ""),
+            "Publisher": metadata.get("Publisher", ""),
+            "Year": metadata.get("Year", ""),
+            "Comment": metadata.get("Comment", ""),
+            "Cover": metadata.get("Cover", "No"),
+        })
+        row_id = self.tree.insert("", "end", values=row_values, tags=(tag,))
         return row_id
 
     def _on_tree_delete_press(self, event):
@@ -1044,7 +1150,7 @@ class GridPanel:
         if not focused_row:
             return "break"
 
-        editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment")]
         target_col = editable_cols[0]
 
         self._start_tree_cell_edit(focused_row, target_col, open_dropdown=True)
@@ -1068,7 +1174,7 @@ class GridPanel:
 
         self._nav_lock = True
         try:
-            editable_cols = [idx for idx, col in enumerate(self.columns) if col != "Cover"]
+            editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment")]
 
             if reverse:
                 target_col = editable_cols[-1]
@@ -1238,19 +1344,19 @@ class GridPanel:
             "Album": "ÁLBUM",
             "Genre": "GÉNERO",
             "Publisher": "ETIQUETA",
-            "Comment": "COMENTARIO-1",
-            "Comment2": "COMENTARIO-2",
             "Year": "AÑO",
             "Cover": "CARÁTULA"
         }
 
         display_cols = list(self.tree.cget("displaycolumns"))
         if display_cols == ["#all"] or not display_cols:
-            display_cols = list(self.columns)
+            display_cols = [c for c in self.columns if c != "Comment"]
 
         header_menu.vars = []
 
         for col in self.columns:
+            if col == "Comment":
+                continue
             is_visible = col in display_cols
             title = col_titles.get(col, col)
 
@@ -1273,7 +1379,7 @@ class GridPanel:
     def _toggle_column_visibility(self, col_name, current_visible):
         display_cols = list(self.tree.cget("displaycolumns"))
         if display_cols == ["#all"] or not display_cols:
-            display_cols = list(self.columns)
+            display_cols = [c for c in self.columns if c != "Comment"]
 
         if current_visible:
             if len(display_cols) > 1:

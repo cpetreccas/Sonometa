@@ -32,18 +32,17 @@ class App(ctk.CTk):
     KEEP_VALUE = "<Mantener>"
 
     PANEL_FIELD_COL_MAP = {
-        "entry_artist":    ("Artist",    1),
-        "entry_title":     ("Title",     2),
-        "entry_mixartist": ("MixArtist", 3),
-        "entry_album":     ("Album",     4),
-        "entry_genre":     ("Genre",     5),
-        "entry_publisher": ("Publisher", 6),
-        "entry_comment":   ("Comment",   7),
-        "entry_comment2":  ("Comment2",  8),
-        "entry_year":      ("Year",      9),
+        "entry_artist":    ("Artist", "Artist"),
+        "entry_title":     ("Title", "Title"),
+        "entry_mixartist": ("MixArtist", "MixArtist"),
+        "entry_album":     ("Album", "Album"),
+        "entry_genre":     ("Genre", "Genre"),
+        "entry_publisher": ("Publisher", "Publisher"),
+        "entry_year":      ("Year", "Year"),
+        "entry_comment":   ("Comment", "Comment"),
     }
 
-    CATALOG_KEYS = ("Album", "Genre", "Publisher")
+    CATALOG_KEYS = ("Album", "Genre", "Publisher", "Comment")
 
     def __init__(self):
         super().__init__()
@@ -187,6 +186,36 @@ class App(ctk.CTk):
     @property
     def tree(self):
         return self.grid_panel.tree
+
+    def get_tree_columns(self):
+        if hasattr(self, "grid_panel") and hasattr(self.grid_panel, "tree"):
+            return list(self.grid_panel.tree["columns"])
+        return []
+
+    def get_tree_column_index(self, column_name):
+        columns = self.get_tree_columns()
+        return columns.index(column_name) if column_name in columns else None
+
+    def map_tree_values(self, values):
+        columns = self.get_tree_columns()
+        row_map = {}
+        for idx, col_name in enumerate(columns):
+            row_map[col_name] = values[idx] if idx < len(values) else ""
+        return row_map
+
+    def get_tree_value(self, values, column_name, default=""):
+        idx = self.get_tree_column_index(column_name)
+        if idx is None or idx >= len(values):
+            return default
+        val = values[idx]
+        return default if val is None else val
+
+    def set_tree_value(self, values, column_name, new_value):
+        idx = self.get_tree_column_index(column_name)
+        if idx is None or idx >= len(values):
+            return False
+        values[idx] = new_value
+        return True
 
     @property
     def catalog_values(self):
@@ -369,16 +398,20 @@ class App(ctk.CTk):
         if getattr(self, "_is_redirecting_key", False):
             return
 
-        if hasattr(self, "grid_panel") and self.grid_panel.cell_entry:
+        # Si hay una celda en edición activa en el GridPanel, no redirigir teclas
+        if hasattr(self, "grid_panel") and getattr(self.grid_panel, "cell_entry", None):
             return
 
         try:
             focused_widget = self.focus_get()
-        except (KeyError, AttributeError):
+        except (KeyError, AttributeError, Exception):
             return
 
         if focused_widget is not None:
-            widget_class = focused_widget.winfo_class().lower()
+            try:
+                widget_class = focused_widget.winfo_class().lower()
+            except AttributeError:
+                widget_class = ""
 
             if any(k in widget_class for k in ["entry", "text", "spinbox", "combobox"]):
                 return
@@ -402,6 +435,8 @@ class App(ctk.CTk):
                 keycode=event.keycode,
                 state=event.state
             )
+        except Exception:
+            pass
         finally:
             self._is_redirecting_key = False
 
