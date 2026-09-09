@@ -4,7 +4,6 @@ FUNCIONALIDADES GENERALES:
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Integrar búsquedas en Google para el nombre y carátulas
 - Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
-- Añadir exportar listado.
 
 Panel de filtros avanzados:
 - No se combina los filtros avanzados con el buscador.
