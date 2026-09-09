@@ -3,27 +3,42 @@ import os
 import logging
 import xml.etree.ElementTree as ET
 import threading
+from collections import OrderedDict
+from typing import Any, Dict, Optional, Tuple
 
 # Logger unificado de Sonometa
 logger = logging.getLogger("Sonometa")
+
+MetadataDict = Dict[str, Any]
+MetadataCacheKey = Tuple[str, int, int]
+MAX_METADATA_CACHE = 8000
 
 
 class AudioManager:
     """Responsable exclusivamente de la lectura, modificación y eliminación
     de etiquetas de audio mediante mutagen. No contiene ninguna lógica de UI."""
 
-    def __init__(self):
-        self._metadata_cache = {}
+    def __init__(self) -> None:
+        self._metadata_cache: "OrderedDict[MetadataCacheKey, MetadataDict]" = OrderedDict()
         self._cache_lock = threading.Lock()
 
-    def _build_file_cache_key(self, file_path):
+    @staticmethod
+    def _safe_close_audio(audio_obj) -> None:
+        close_fn = getattr(audio_obj, "close", None)
+        if callable(close_fn):
+            try:
+                close_fn()
+            except Exception:
+                pass
+
+    def _build_file_cache_key(self, file_path: str) -> Optional[MetadataCacheKey]:
         try:
             stat = os.stat(file_path)
             return (os.path.abspath(file_path), stat.st_mtime_ns, stat.st_size)
         except Exception:
             return None
 
-    def _get_cached_metadata(self, file_path):
+    def _get_cached_metadata(self, file_path: str) -> Optional[MetadataDict]:
         key = self._build_file_cache_key(file_path)
         if not key:
             return None
@@ -32,26 +47,29 @@ class AudioManager:
             cached = self._metadata_cache.get(key)
             if cached is None:
                 return None
+            self._metadata_cache.move_to_end(key)
             return dict(cached)
 
-    def _set_cached_metadata(self, file_path, metadata_dict):
+    def _set_cached_metadata(self, file_path: str, metadata_dict: MetadataDict) -> None:
         key = self._build_file_cache_key(file_path)
         if not key:
             return
 
         with self._cache_lock:
-            if len(self._metadata_cache) > 8000:
-                self._metadata_cache.clear()
+            if key in self._metadata_cache:
+                self._metadata_cache.move_to_end(key)
             self._metadata_cache[key] = dict(metadata_dict)
+            while len(self._metadata_cache) > MAX_METADATA_CACHE:
+                self._metadata_cache.popitem(last=False)
 
-    def _invalidate_metadata_cache(self, file_path):
+    def _invalidate_metadata_cache(self, file_path: str) -> None:
         abs_target = os.path.abspath(file_path)
         with self._cache_lock:
             stale_keys = [k for k in self._metadata_cache.keys() if k[0] == abs_target]
             for key in stale_keys:
                 self._metadata_cache.pop(key, None)
 
-    def clear_runtime_caches(self):
+    def clear_runtime_caches(self) -> None:
         with self._cache_lock:
             self._metadata_cache.clear()
 
@@ -59,7 +77,7 @@ class AudioManager:
     # Lectura de metadatos
     # ------------------------------------------------------------------
 
-    def extract_metadata(self, file_path, filename):
+    def extract_metadata(self, file_path: str, filename: str) -> MetadataDict:
         """Lee todas las etiquetas de texto de un archivo de audio incluyendo la duración.
 
         Returns:
@@ -91,11 +109,13 @@ class AudioManager:
             "Cover": "No",
         }
 
+        open_audio_objects = []
         try:
             ext = os.path.splitext(file_path)[1].lower()
 
             if ext == ".wav":
                 audio = WAVE(file_path)
+                open_audio_objects.append(audio)
                 if audio.tags:
                     data["Title"]     = str(audio.tags.get("TIT2", ""))
                     data["Artist"]    = str(audio.tags.get("TPE1", ""))
@@ -113,6 +133,7 @@ class AudioManager:
             elif ext == ".mp3":
                 try:
                     audio_id3 = ID3(file_path)
+                    open_audio_objects.append(audio_id3)
                     data["Title"]     = str(audio_id3.get("TIT2", ""))
                     data["Artist"]    = str(audio_id3.get("TPE1", ""))
                     data["Album"]     = str(audio_id3.get("TALB", ""))
@@ -136,6 +157,7 @@ class AudioManager:
 
             elif ext == ".flac":
                 audio = FLAC(file_path)
+                open_audio_objects.append(audio)
                 data["Title"]     = audio.get("title", [""])[0]
                 data["Artist"]    = audio.get("artist", [""])[0]
                 data["MixArtist"] = (audio.get("REMIXEDBY") or audio.get("MIXARTIST") or audio.get("REMIX") or [""])[0]
@@ -147,6 +169,7 @@ class AudioManager:
 
             elif ext in (".m4a", ".mp4"):
                 audio = MP4(file_path)
+                open_audio_objects.append(audio)
                 data["Title"]     = audio.get("\xa9nam", [""])[0]
                 data["Artist"]    = audio.get("\xa9ART", [""])[0]
                 data["Album"]     = audio.get("\xa9alb", [""])[0]
@@ -163,6 +186,8 @@ class AudioManager:
             else:
                 audio = MutagenFile(file_path, easy=True)
                 if audio is not None:
+                    open_audio_objects.append(audio)
+                if audio is not None:
                     def get_tag(tag_name):
                         val = audio.get(tag_name, [""])
                         return val[0] if val else ""
@@ -178,6 +203,8 @@ class AudioManager:
 
             # Extracción y formateo seguro de la duración (info.length)
             raw_audio = MutagenFile(file_path)
+            if raw_audio is not None:
+                open_audio_objects.append(raw_audio)
             if raw_audio and hasattr(raw_audio, "info") and getattr(raw_audio.info, "length", None):
                 total_seconds = int(raw_audio.info.length)
                 mins, secs = divmod(total_seconds, 60)
@@ -190,6 +217,9 @@ class AudioManager:
 
         except Exception as e:
             logger.error(f"Error extrayendo metadatos de {filename}: {str(e)}")
+        finally:
+            for audio_obj in open_audio_objects:
+                self._safe_close_audio(audio_obj)
 
         self._set_cached_metadata(file_path, data)
         return data
@@ -202,6 +232,7 @@ class AudioManager:
 
         try:
             audio = MutagenFile(file_path)
+            self_audio_ref = audio
             if audio is None:
                 return 0
 
@@ -253,6 +284,8 @@ class AudioManager:
 
         except Exception as e:
             logger.debug(f"Error parseando Traktor CUEs en {os.path.basename(file_path)}: {str(e)}")
+        finally:
+            self._safe_close_audio(locals().get("self_audio_ref"))
 
         return 0
 
@@ -262,6 +295,7 @@ class AudioManager:
 
         try:
             audio = MutagenFile(file_path)
+            self_audio_ref = audio
             if audio is None:
                 return None
 
@@ -280,6 +314,8 @@ class AudioManager:
 
         except Exception as e:
             logger.debug(f"Error al leer bytes de portada en {os.path.basename(file_path)}: {str(e)}")
+        finally:
+            self._safe_close_audio(locals().get("self_audio_ref"))
 
         return None
 

@@ -17,6 +17,7 @@ class UiUtils:
     def enter(self, event=None):
         self.id = self.widget.after(400, self.showtip)
 
+    @staticmethod
     def maximize_window(window):
         """Maximiza una ventana de CustomTkinter/Tkinter correctamente."""
         try:
@@ -86,7 +87,8 @@ class UiUtils:
         # Cargar icono de aplicación (para iconphoto/iconbitmap)
         logo_pil = None
         if os.path.exists(icon_path):
-            logo_pil = Image.open(icon_path)
+            with Image.open(icon_path) as icon_img:
+                logo_pil = icon_img.copy()
             img_icon = ImageTk.PhotoImage(logo_pil)
             app.app_icon_photo = img_icon
             try:
@@ -97,11 +99,13 @@ class UiUtils:
         # Cargar logo de cabecera
         header_logo_pil = None
         if os.path.exists(header_logo_path):
-            header_logo_pil = Image.open(header_logo_path)
+            with Image.open(header_logo_path) as header_img:
+                header_logo_pil = header_img.copy()
 
         broom_icon = None
         if os.path.exists(broom_path):
-            icon_broom_img = Image.open(broom_path)
+            with Image.open(broom_path) as broom_img:
+                icon_broom_img = broom_img.copy()
             broom_icon = ctk.CTkImage(
                 light_image=icon_broom_img,
                 dark_image=icon_broom_img,
@@ -110,7 +114,8 @@ class UiUtils:
 
         process_icon = None
         if os.path.exists(white_logo_path):
-            icon_white_img = Image.open(white_logo_path)
+            with Image.open(white_logo_path) as process_img:
+                icon_white_img = process_img.copy()
             process_icon = ctk.CTkImage(
                 light_image=icon_white_img,
                 dark_image=icon_white_img,

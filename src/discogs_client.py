@@ -3,29 +3,32 @@ import logging
 import threading
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from http import HTTPStatus
+from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("Sonometa")
+MAX_DISCOGS_CACHE = 3000
 
 
 class DiscogsClient:
 
-    def __init__(self, token_getter):
+    def __init__(self, token_getter: Callable[[], str]):
         self._get_token = token_getter
         self._cache_lock = threading.Lock()
-        self._search_cache = {}
-        self._images_cache = {}
+        self._search_cache: "OrderedDict[str, Tuple[str, str, str, str]]" = OrderedDict()
+        self._images_cache: "OrderedDict[Tuple[str, int], Tuple[str, ...]]" = OrderedDict()
 
     @staticmethod
-    def _normalize_query(query):
+    def _normalize_query(query: str) -> str:
         return " ".join(str(query or "").strip().lower().split())
 
-    def clear_runtime_cache(self):
+    def clear_runtime_cache(self) -> None:
         with self._cache_lock:
             self._search_cache.clear()
             self._images_cache.clear()
 
-    def _get_headers(self):
+    def _get_headers(self) -> Dict[str, str]:
         headers = {
             "User-Agent": "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)"
         }
@@ -34,12 +37,14 @@ class DiscogsClient:
             headers["Authorization"] = f"Discogs token={token}"
         return headers
 
-    def search_release(self, query):
+    def search_release(self, query: str) -> Tuple[str, str, str, str]:
         """Busca un lanzamiento en Discogs y devuelve (artist, title, year, cover_url)."""
         norm_query = self._normalize_query(query)
         if norm_query:
             with self._cache_lock:
                 cached = self._search_cache.get(norm_query)
+                if cached is not None:
+                    self._search_cache.move_to_end(norm_query)
             if cached is not None:
                 return cached
 
@@ -76,9 +81,11 @@ class DiscogsClient:
                     result = (artist, title, str(year), cover_url)
                     if norm_query:
                         with self._cache_lock:
-                            if len(self._search_cache) > 3000:
-                                self._search_cache.clear()
+                            if norm_query in self._search_cache:
+                                self._search_cache.move_to_end(norm_query)
                             self._search_cache[norm_query] = result
+                            while len(self._search_cache) > MAX_DISCOGS_CACHE:
+                                self._search_cache.popitem(last=False)
                     return result
 
                 logger.warning(
@@ -103,7 +110,7 @@ class DiscogsClient:
 
         return "", "", "", ""
 
-    def download_image_bytes(self, image_url):
+    def download_image_bytes(self, image_url: str) -> Optional[bytes]:
         """Descarga los bytes de una imagen utilizando las cabeceras autenticadas."""
         try:
             req = urllib.request.Request(image_url, headers=self._get_headers())
@@ -114,13 +121,15 @@ class DiscogsClient:
             logger.error(f"[DISCOGS] Error descargando imagen ({image_url}): {str(e)}")
         return None
 
-    def get_release_images(self, query, max_images=8):
+    def get_release_images(self, query: str, max_images: int = 8) -> List[str]:
         """Devuelve una lista con las URLs de las carátulas disponibles."""
         norm_query = self._normalize_query(query)
         cache_key = (norm_query, int(max_images))
         if norm_query:
             with self._cache_lock:
                 cached = self._images_cache.get(cache_key)
+                if isinstance(cached, tuple):
+                    self._images_cache.move_to_end(cache_key)
             if isinstance(cached, tuple):
                 return list(cached)
 
@@ -142,9 +151,11 @@ class DiscogsClient:
                             break
                     if norm_query:
                         with self._cache_lock:
-                            if len(self._images_cache) > 3000:
-                                self._images_cache.clear()
+                            if cache_key in self._images_cache:
+                                self._images_cache.move_to_end(cache_key)
                             self._images_cache[cache_key] = tuple(images)
+                            while len(self._images_cache) > MAX_DISCOGS_CACHE:
+                                self._images_cache.popitem(last=False)
                     return images
         except Exception as e:
             logger.error(f"[DISCOGS] Error obteniendo lista de imágenes: {str(e)}")

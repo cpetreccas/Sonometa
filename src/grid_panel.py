@@ -7,6 +7,8 @@ import customtkinter as ctk
 from undo_manager import HistoryAction
 from log_handler import LogManager
 from advanced_filter_panel import AdvancedFilterPanel
+from models import AdvancedFilterCriteria
+from tree_row_utils import build_column_index, get_row_value, set_row_value, map_row_values, build_row_values
 
 
 class GridPanel:
@@ -107,7 +109,12 @@ class GridPanel:
         Filtra dinámicamente las filas del Treeview evaluando texto libre,
         combos de catálogo y toggles de campos faltantes. Compatible con filas desasociadas.
         """
-        self.active_filters = criteria
+        if isinstance(criteria, AdvancedFilterCriteria):
+            criteria_obj = criteria
+        else:
+            criteria_obj = AdvancedFilterCriteria.from_dict(criteria)
+
+        self.active_filters = criteria_obj.to_dict()
 
         # Usar el mapa de rutas maestro para obtener TODOS los row_ids existentes (visibles e invisibles)
         if hasattr(self.app, "file_paths_map") and self.app.file_paths_map:
@@ -116,11 +123,11 @@ class GridPanel:
             all_rows = getattr(self.app.search_manager, "_all_tree_items", list(self.tree.get_children('')))
 
         cols = list(self.tree["columns"])
-        col_index = {name: idx for idx, name in enumerate(cols)}
+        col_index = build_column_index(cols)
 
-        text_filters = criteria.get("text", {})
-        combo_filters = criteria.get("combo", {})
-        toggles = criteria.get("toggles", {})
+        text_filters = criteria_obj.text
+        combo_filters = criteria_obj.combo
+        toggles = criteria_obj.toggles
 
         visible_rows = []
 
@@ -716,34 +723,19 @@ class GridPanel:
         return list(self.tree["columns"])
 
     def get_column_index(self, col_name):
-        cols = self._get_tree_columns()
-        return cols.index(col_name) if col_name in cols else None
+        return build_column_index(self._get_tree_columns()).get(col_name)
 
     def get_value_by_column(self, values, col_name, default=""):
-        idx = self.get_column_index(col_name)
-        if idx is None or idx >= len(values):
-            return default
-        val = values[idx]
-        return default if val is None else val
+        return get_row_value(values, build_column_index(self._get_tree_columns()), col_name, default)
 
     def set_value_by_column(self, values, col_name, new_value):
-        idx = self.get_column_index(col_name)
-        if idx is None or idx >= len(values):
-            return False
-        values[idx] = new_value
-        return True
+        return set_row_value(values, build_column_index(self._get_tree_columns()), col_name, new_value)
 
     def map_row_values(self, values):
-        cols = self._get_tree_columns()
-        row_map = {}
-        for idx, col_name in enumerate(cols):
-            row_map[col_name] = values[idx] if idx < len(values) else ""
-        return row_map
+        return map_row_values(values, self._get_tree_columns())
 
     def build_row_values(self, metadata, current_values=None):
-        cols = self._get_tree_columns()
-        current_map = self.map_row_values(current_values or [])
-        return tuple(metadata.get(col, current_map.get(col, "")) for col in cols)
+        return build_row_values(metadata, self._get_tree_columns(), current_values=current_values)
 
     def _start_tree_cell_edit(self, row_id, col_index, open_dropdown=True):
         if col_index < 0 or col_index >= len(self.columns):

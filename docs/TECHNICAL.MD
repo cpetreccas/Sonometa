@@ -75,6 +75,35 @@ Puntos tecnicos:
 - Usa `ThreadPoolExecutor` para paralelizar archivos.
 - Sincroniza secciones criticas con `threading.Lock`.
 - Gestiona revision manual de caratulas con `DialogManager` cuando hay multiples opciones.
+- Consume snapshots tipados (`ProcessingSnapshot`) para desacoplar workers del estado UI.
+
+### `src/models.py` - Modelos tipados
+
+Modulo de contratos internos livianos para reducir acoplamiento entre componentes:
+
+- `ProcessingSnapshot`: fotografia inmutable de fila para procesamiento en background.
+- `AdvancedFilterCriteria`: contrato de criterios de filtro entre `AdvancedFilterPanel` y `GridPanel`.
+
+### `src/tree_row_utils.py` - Utilidades de filas
+
+Funciones reutilizables para acceso por columna y composicion de filas:
+
+- `build_column_index`
+- `get_row_value` / `set_row_value`
+- `map_row_values`
+- `build_row_values`
+
+Objetivo: evitar logica duplicada de mapeo entre `GridPanel` y `ProcessManager`.
+
+### `src/app_state_adapter.py` - Adaptador de estado App
+
+Puente para que los managers no dependan directamente de toda la superficie de `App`.
+
+- Expone helpers de acceso a `Treeview` (filas, valores, indices de columna).
+- Encapsula acceso a `file_paths_map` y escritura de tags.
+- Centraliza notificaciones UI (`refresh_catalog_comboboxes`, `on_row_select`).
+
+`CatalogManager` ya utiliza este adaptador para reducir acoplamiento directo.
 
 ### `src/audio_manager.py` - `AudioManager`
 

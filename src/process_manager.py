@@ -1,11 +1,15 @@
 import os
 import re
+import queue
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dialogs import DialogManager
 from catalog_manager import CatalogManager
 from audio_manager import AudioManager
 from log_handler import LogManager
+from models import ProcessingSnapshot
+from tree_row_utils import build_column_index, get_row_value, set_row_value, map_row_values
+from ui_utils import UiUtils
 
 
 class ProcessManager:
@@ -14,18 +18,67 @@ class ProcessManager:
         self.logger = app.logger
         self._lock = threading.Lock()  # Sincronización para acceso concurrente
         self._tree_columns_cache = None
+        self._tree_col_index_cache = None
+        self._ui_queue = queue.Queue()
+        self._ui_pump_after_id = None
+        self._processing_active = False
+
+    def _enqueue_ui(self, action, payload=None):
+        self._ui_queue.put((action, payload))
+
+    def _start_ui_pump(self):
+        if not hasattr(self.app, "winfo_exists") or not self.app.winfo_exists():
+            return
+        if self._ui_pump_after_id is None:
+            self._ui_pump_after_id = self.app.after(20, self._drain_ui_queue)
+
+    def _drain_ui_queue(self):
+        self._ui_pump_after_id = None
+        if not hasattr(self.app, "winfo_exists") or not self.app.winfo_exists():
+            self._processing_active = False
+            return
+        processed = 0
+
+        while processed < 200:
+            try:
+                action, payload = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            processed += 1
+
+            try:
+                if action == "update_row":
+                    row_id = payload.get("row_id")
+                    values = payload.get("values", [])
+                    file_path = payload.get("file_path")
+
+                    if file_path:
+                        self.app.file_paths_map[row_id] = file_path
+
+                    if self.app.tree.exists(row_id):
+                        self.app.tree.item(row_id, values=values)
+                        cover_val = self._get_value(values, "Cover", "No")
+                        self.app.grid_panel.update_row_cover_status(row_id, cover_val)
+
+                elif action == "progress":
+                    progress = float(payload or 0)
+                    self.app.progress_bar.set(progress)
+
+                elif action == "finish":
+                    self._handle_manual_covers_and_finish(payload or [])
+
+            except Exception as e:
+                self.logger.error(f"Error en actualización de UI del procesado: {e}")
+
+        if self._processing_active or not self._ui_queue.empty():
+            self._ui_pump_after_id = self.app.after(20, self._drain_ui_queue)
 
     def _get_default_cover_bytes(self):
         """Obtiene los bytes de la carátula por defecto buscando de forma robusta."""
         default_path = getattr(self.app, "DEFAULT_COVER_PATH", None)
-
         if not default_path or not os.path.exists(default_path):
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            default_path = os.path.join(base_dir, "assets", "no_cover_art.jpg")
-
-        if not os.path.exists(default_path):
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            default_path = os.path.join(os.path.dirname(base_dir), "assets", "no_cover_art.jpg")
+            default_path = UiUtils.get_resource_path("assets/no_cover_art.jpg")
 
         if default_path and os.path.exists(default_path):
             try:
@@ -58,6 +111,8 @@ class ProcessManager:
         total_files = len(snapshots)
         columns_snapshot = self.app.get_tree_columns() if hasattr(self.app, "get_tree_columns") else list(self.app.tree["columns"])
         self.logger.info(f"Iniciando procesado multihilo para {total_files} archivo(s)...")
+        self._processing_active = True
+        self._start_ui_pump()
 
         # Lanzar la canalización en un hilo secundario para mantener la interfaz fluida
         threading.Thread(
@@ -96,38 +151,34 @@ class ProcessManager:
             if not values:
                 continue
 
-            snapshots.append({
-                "row_id": row_id,
-                "file_path": file_path,
-                "values": values,
-            })
+            snapshots.append(
+                ProcessingSnapshot(
+                    row_id=str(row_id),
+                    file_path=str(file_path),
+                    values=tuple(str(v) if v is not None else "" for v in values),
+                )
+            )
 
         return snapshots
 
     def _get_col_index(self, col_name):
-        cols = self._get_tree_columns()
-        return cols.index(col_name) if col_name in cols else None
+        if self._tree_col_index_cache is None:
+            self._tree_col_index_cache = build_column_index(self._get_tree_columns())
+        return self._tree_col_index_cache.get(col_name)
 
     def _get_value(self, values, col_name, default=""):
-        idx = self._get_col_index(col_name)
-        if idx is None or idx >= len(values):
-            return default
-        val = values[idx]
-        return default if val is None else val
+        if self._tree_col_index_cache is None:
+            self._tree_col_index_cache = build_column_index(self._get_tree_columns())
+        return get_row_value(values, self._tree_col_index_cache, col_name, default)
 
     def _set_value(self, values, col_name, new_value):
-        idx = self._get_col_index(col_name)
-        if idx is None or idx >= len(values):
-            return False
-        values[idx] = new_value
-        return True
+        if self._tree_col_index_cache is None:
+            self._tree_col_index_cache = build_column_index(self._get_tree_columns())
+        return set_row_value(values, self._tree_col_index_cache, col_name, new_value)
 
     def _parse_row_values(self, row_id, values, file_path):
-        row_map = {}
-        cols = self._get_tree_columns()
-        for idx, col_name in enumerate(cols):
-            val = values[idx] if idx < len(values) else ""
-            row_map[col_name] = str(val) if val is not None else ""
+        row_map = map_row_values(values, self._get_tree_columns())
+        row_map = {k: str(v) if v is not None else "" for k, v in row_map.items()}
 
         filename = os.path.basename(file_path) if file_path else ""
         parsed = {
@@ -146,6 +197,7 @@ class ProcessManager:
 
     def _run_processing_pipeline(self, snapshots, total_files, columns_snapshot):
         self._tree_columns_cache = list(columns_snapshot or [])
+        self._tree_col_index_cache = build_column_index(self._tree_columns_cache)
         processed_count = 0
         words_to_omit = [
             r'\bfeat\.\b', r'\bfeat\b',
@@ -159,217 +211,228 @@ class ProcessManager:
 
         def _process_single_file(snapshot):
             nonlocal processed_count
+            try:
+                row_id = snapshot.row_id
+                file_path = snapshot.file_path
+                values = list(snapshot.values)
 
-            row_id = snapshot.get("row_id")
-            file_path = snapshot.get("file_path")
-            values = list(snapshot.get("values") or [])
+                if not file_path or not os.path.exists(file_path) or not values:
+                    return
 
-            if not file_path or not os.path.exists(file_path) or not values:
-                return
+                prev_vals = self._parse_row_values(row_id, values, file_path)
 
-            prev_vals = self._parse_row_values(row_id, values, file_path)
+                # 1. Validación de campos de catálogo por nombre de columna
+                catalog_fields = ("Album", "Genre", "Publisher")
+                invalid_catalog_fields = []
+                for field_name in catalog_fields:
+                    current_value = str(self._get_value(values, field_name, "")).strip()
+                    if not current_value:
+                        continue
 
-            # 1. Validación de campos de catálogo por nombre de columna
-            catalog_fields = ("Album", "Genre", "Publisher")
-            invalid_catalog_fields = []
-            for field_name in catalog_fields:
-                current_value = str(self._get_value(values, field_name, "")).strip()
-                if not current_value:
-                    continue
+                    normalized_value = CatalogManager.normalize_catalog_text(current_value)
+                    allowed_values = {
+                        CatalogManager.normalize_catalog_text(v)
+                        for v in self.app.catalog_values.get(field_name, [])
+                        if str(v).strip()
+                    }
+                    if normalized_value not in allowed_values:
+                        self._set_value(values, field_name, "")
+                        self.app.audio_manager.save_single_tag(file_path, field_name, "")
+                        invalid_catalog_fields.append(field_name)
 
-                normalized_value = CatalogManager.normalize_catalog_text(current_value)
-                allowed_values = {
-                    CatalogManager.normalize_catalog_text(v)
-                    for v in self.app.catalog_values.get(field_name, [])
-                    if str(v).strip()
-                }
-                if normalized_value not in allowed_values:
-                    self._set_value(values, field_name, "")
-                    self.app.audio_manager.save_single_tag(file_path, field_name, "")
-                    invalid_catalog_fields.append(field_name)
-
-            if invalid_catalog_fields:
-                clean_prev = {k: prev_vals[k] for k in invalid_catalog_fields}
-                clean_new = {k: "" for k in invalid_catalog_fields}
-                log_msg = LogManager.format_tree_log(
-                    context="PROCESS",
-                    action="Limpieza de Catálogo",
-                    filename=os.path.basename(file_path),
-                    prev_vals=clean_prev,
-                    new_vals=clean_new
-                )
-                self.logger.info(log_msg)
-
-                for k in invalid_catalog_fields:
-                    prev_vals[k] = ""
-
-            # 2. Parseo y Normalización Local
-            old_filename = os.path.basename(file_path)
-            ext = os.path.splitext(old_filename)[1]
-
-            parsed_data = None
-            if hasattr(self.app.filename_formatter, 'parse_and_format'):
-                parsed_data = self.app.filename_formatter.parse_and_format(old_filename)
-
-            if parsed_data:
-                artist_parsed = parsed_data.get("artist", "").strip()
-                title_parsed = parsed_data.get("title", "").strip()
-                mixartist_parsed = parsed_data.get("mixartist", "").strip()
-            else:
-                new_filename_temp = self.app.filename_formatter.format_filename_pattern(old_filename)
-                clean_name_fallback = os.path.splitext(new_filename_temp)[0]
-                artist_parsed = ""
-                title_parsed = clean_name_fallback
-                mixartist_parsed = ""
-
-                parentheses = re.findall(r'\((.*?)\)', clean_name_fallback)
-                if parentheses:
-                    mixartist_parsed = " ".join(parentheses).strip()
-                    clean_name_fallback = re.sub(r'\(.*?\)', '', clean_name_fallback).strip()
-
-                if " - " in clean_name_fallback:
-                    parts = clean_name_fallback.split(" - ", 1)
-                    artist_parsed = parts[0].strip()
-                    title_parsed = parts[1].strip()
-                elif "-" in clean_name_fallback:
-                    parts = clean_name_fallback.split("-", 1)
-                    artist_parsed = parts[0].strip()
-                    title_parsed = parts[1].strip()
-
-            new_filename_base = f"{artist_parsed} - {title_parsed}" if artist_parsed else title_parsed
-            if mixartist_parsed:
-                new_filename_base += f" ({mixartist_parsed})"
-            new_filename = f"{new_filename_base}{ext}"
-
-            dir_name = os.path.dirname(file_path)
-            new_file_path = os.path.join(dir_name, new_filename)
-
-            if old_filename != new_filename:
-                try:
-                    os.rename(file_path, new_file_path)
-                    with self._lock:
-                        self.app.file_paths_map[row_id] = new_file_path
-                    file_path = new_file_path
-                    self._set_value(values, "Filename", new_filename)
+                if invalid_catalog_fields:
+                    clean_prev = {k: prev_vals[k] for k in invalid_catalog_fields}
+                    clean_new = {k: "" for k in invalid_catalog_fields}
                     log_msg = LogManager.format_tree_log(
                         context="PROCESS",
-                        action="Renombrado",
-                        filename=new_filename,
-                        prev_vals={"Filename": old_filename},
-                        new_vals={"Filename": new_filename}
+                        action="Limpieza de Catálogo",
+                        filename=os.path.basename(file_path),
+                        prev_vals=clean_prev,
+                        new_vals=clean_new
                     )
                     self.logger.info(log_msg)
-                except Exception as e:
-                    self.logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
 
-            metadata_mappings = (
-                ("Artist", artist_parsed),
-                ("Title", title_parsed),
-                ("MixArtist", mixartist_parsed),
-            )
-            for tag_name, new_value in metadata_mappings:
-                self._set_value(values, tag_name, new_value)
-                self.app.audio_manager.save_single_tag(file_path, tag_name, new_value)
+                    for k in invalid_catalog_fields:
+                        prev_vals[k] = ""
 
-            cover_val = str(self._get_value(values, "Cover", "No")).strip().lower()
-            already_has_cover = cover_val in ("sí", "si", "yes", "true", "1")
+                # 2. Parseo y Normalización Local
+                old_filename = os.path.basename(file_path)
+                ext = os.path.splitext(old_filename)[1]
 
-            has_year = bool(str(self._get_value(values, "Year", "")).strip())
-            all_images = []
+                parsed_data = None
+                if hasattr(self.app.filename_formatter, 'parse_and_format'):
+                    parsed_data = self.app.filename_formatter.parse_and_format(old_filename)
 
-            # Modificación de metadatos mediante Discogs
-            if already_has_cover and has_year:
-                self.logger.info(f"[PROCESS] Omitida consulta Discogs para '{new_filename}' (ya posee carátula y año).")
-                self._set_value(values, "Cover", "Sí")
-            else:
-                query_term = f"{artist_parsed} {title_parsed}".strip()
-                query_term = omit_pattern.sub('', query_term)
-                query_term = query_term.replace('_', ' ')
-                query_term = re.sub(r'\s+[._-]\s+', ' ', query_term)
-                query_term = re.sub(r'\s+', ' ', query_term).strip()
+                if parsed_data:
+                    artist_parsed = parsed_data.get("artist", "").strip()
+                    title_parsed = parsed_data.get("title", "").strip()
+                    mixartist_parsed = parsed_data.get("mixartist", "").strip()
+                else:
+                    new_filename_temp = self.app.filename_formatter.format_filename_pattern(old_filename)
+                    clean_name_fallback = os.path.splitext(new_filename_temp)[0]
+                    artist_parsed = ""
+                    title_parsed = clean_name_fallback
+                    mixartist_parsed = ""
 
-                _, _, year, cover_url = self.app.discogs_client.search_release(query_term)
-                all_images = self.app.discogs_client.get_release_images(query_term) if hasattr(self.app.discogs_client, 'get_release_images') else []
-                if not all_images and cover_url:
-                    all_images = [cover_url]
+                    parentheses = re.findall(r'\((.*?)\)', clean_name_fallback)
+                    if parentheses:
+                        mixartist_parsed = " ".join(parentheses).strip()
+                        clean_name_fallback = re.sub(r'\(.*?\)', '', clean_name_fallback).strip()
 
-                if year:
-                    self._set_value(values, "Year", str(year))
-                    self.app.audio_manager.save_single_tag(file_path, "Year", str(year))
+                    if " - " in clean_name_fallback:
+                        parts = clean_name_fallback.split(" - ", 1)
+                        artist_parsed = parts[0].strip()
+                        title_parsed = parts[1].strip()
+                    elif "-" in clean_name_fallback:
+                        parts = clean_name_fallback.split("-", 1)
+                        artist_parsed = parts[0].strip()
+                        title_parsed = parts[1].strip()
 
-                if already_has_cover:
+                new_filename_base = f"{artist_parsed} - {title_parsed}" if artist_parsed else title_parsed
+                if mixartist_parsed:
+                    new_filename_base += f" ({mixartist_parsed})"
+                new_filename = f"{new_filename_base}{ext}"
+
+                dir_name = os.path.dirname(file_path)
+                new_file_path = os.path.join(dir_name, new_filename)
+
+                if old_filename != new_filename:
+                    try:
+                        os.rename(file_path, new_file_path)
+                        file_path = new_file_path
+                        self._set_value(values, "Filename", new_filename)
+                        log_msg = LogManager.format_tree_log(
+                            context="PROCESS",
+                            action="Renombrado",
+                            filename=new_filename,
+                            prev_vals={"Filename": old_filename},
+                            new_vals={"Filename": new_filename}
+                        )
+                        self.logger.info(log_msg)
+                    except Exception as e:
+                        self.logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
+
+                metadata_mappings = (
+                    ("Artist", artist_parsed),
+                    ("Title", title_parsed),
+                    ("MixArtist", mixartist_parsed),
+                )
+                for tag_name, new_value in metadata_mappings:
+                    self._set_value(values, tag_name, new_value)
+                    self.app.audio_manager.save_single_tag(file_path, tag_name, new_value)
+
+                cover_val = str(self._get_value(values, "Cover", "No")).strip().lower()
+                already_has_cover = cover_val in ("sí", "si", "yes", "true", "1")
+
+                has_year = bool(str(self._get_value(values, "Year", "")).strip())
+                all_images = []
+
+                # Modificación de metadatos mediante Discogs
+                if already_has_cover and has_year:
+                    self.logger.info(f"[PROCESS] Omitida consulta Discogs para '{new_filename}' (ya posee carátula y año).")
                     self._set_value(values, "Cover", "Sí")
                 else:
-                    if all_images and not manual_mode:
-                        chosen_cover_url = all_images[0]
-                        image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
-                        if image_data:
-                            image_data = AudioManager.normalize_cover_image_bytes(image_data)
-                            if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                                self._set_value(values, "Cover", "Sí")
-                            else:
-                                self._set_value(values, "Cover", "No")
-                        else:
-                            self._set_value(values, "Cover", "No")
-                    elif len(all_images) == 1 and manual_mode:
-                        chosen_cover_url = all_images[0]
-                        image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
-                        if image_data:
-                            image_data = AudioManager.normalize_cover_image_bytes(image_data)
-                            if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
-                                self._set_value(values, "Cover", "Sí")
-                            else:
-                                self._set_value(values, "Cover", "No")
-                        else:
-                            self._set_value(values, "Cover", "No")
-                    elif len(all_images) > 1 and manual_mode:
-                        with self._lock:
-                            pending_cover_reviews.append({
-                                "row_id": row_id,
-                                "filename": new_filename,
-                                "file_path": file_path,
-                                "images": all_images,
-                                "values": values,
-                                "prev_vals": prev_vals
-                            })
+                    query_term = f"{artist_parsed} {title_parsed}".strip()
+                    query_term = omit_pattern.sub('', query_term)
+                    query_term = query_term.replace('_', ' ')
+                    query_term = re.sub(r'\s+[._-]\s+', ' ', query_term)
+                    query_term = re.sub(r'\s+', ' ', query_term).strip()
+
+                    _, _, year, cover_url = self.app.discogs_client.search_release(query_term)
+                    all_images = self.app.discogs_client.get_release_images(query_term) if hasattr(self.app.discogs_client, 'get_release_images') else []
+                    if not all_images and cover_url:
+                        all_images = [cover_url]
+
+                    if year:
+                        self._set_value(values, "Year", str(year))
+                        self.app.audio_manager.save_single_tag(file_path, "Year", str(year))
+
+                    if already_has_cover:
+                        self._set_value(values, "Cover", "Sí")
                     else:
-                        self._set_value(values, "Cover", "No")
+                        if all_images and not manual_mode:
+                            chosen_cover_url = all_images[0]
+                            image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
+                            if image_data:
+                                image_data = AudioManager.normalize_cover_image_bytes(image_data)
+                                if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
+                                    self._set_value(values, "Cover", "Sí")
+                                else:
+                                    self._set_value(values, "Cover", "No")
+                            else:
+                                self._set_value(values, "Cover", "No")
+                        elif len(all_images) == 1 and manual_mode:
+                            chosen_cover_url = all_images[0]
+                            image_data = self.app.discogs_client.download_image_bytes(chosen_cover_url)
+                            if image_data:
+                                image_data = AudioManager.normalize_cover_image_bytes(image_data)
+                                if self.app.audio_manager.embed_cover_art_verified(file_path, image_data):
+                                    self._set_value(values, "Cover", "Sí")
+                                else:
+                                    self._set_value(values, "Cover", "No")
+                            else:
+                                self._set_value(values, "Cover", "No")
+                        elif len(all_images) > 1 and manual_mode:
+                            with self._lock:
+                                pending_cover_reviews.append({
+                                    "row_id": row_id,
+                                    "filename": new_filename,
+                                    "file_path": file_path,
+                                    "images": all_images,
+                                    "values": values,
+                                    "prev_vals": prev_vals
+                                })
+                        else:
+                            self._set_value(values, "Cover", "No")
 
-            new_vals = self._parse_row_values(row_id, values, file_path)
+                new_vals = self._parse_row_values(row_id, values, file_path)
 
-            diff_prev = {k: v for k, v in prev_vals.items() if prev_vals[k] != new_vals[k]}
-            diff_new = {k: v for k, v in new_vals.items() if prev_vals[k] != new_vals[k]}
+                diff_prev = {k: v for k, v in prev_vals.items() if prev_vals[k] != new_vals[k]}
+                diff_new = {k: v for k, v in new_vals.items() if prev_vals[k] != new_vals[k]}
 
-            if diff_new and not (len(all_images) > 1 and manual_mode):
-                log_msg = LogManager.format_tree_log(
-                    context="PROCESS",
-                    action="Procesado",
-                    filename=new_filename,
-                    prev_vals=diff_prev,
-                    new_vals=diff_new
+                if diff_new and not (len(all_images) > 1 and manual_mode):
+                    log_msg = LogManager.format_tree_log(
+                        context="PROCESS",
+                        action="Procesado",
+                        filename=new_filename,
+                        prev_vals=diff_prev,
+                        new_vals=diff_new
+                    )
+                    self.logger.info(log_msg)
+
+                self._enqueue_ui(
+                    "update_row",
+                    {"row_id": row_id, "values": values, "file_path": file_path}
                 )
-                self.logger.info(log_msg)
 
-            def _update_ui():
-                if self.app.tree.exists(row_id):
-                    self.app.tree.item(row_id, values=values)
-                    cover_val = self._get_value(values, "Cover", "No")
-                    self.app.grid_panel.update_row_cover_status(row_id, cover_val)
+            except Exception as e:
+                self.logger.error(f"Error procesando '{os.path.basename(snapshot.file_path)}': {e}")
+            finally:
+                with self._lock:
+                    processed_count += 1
+                    current_count = processed_count
 
-            self.app.after(0, _update_ui)
+                if current_count % 10 == 0 or current_count == total_files:
+                    progress = current_count / total_files if total_files else 0
+                    self._enqueue_ui("progress", progress)
 
-            with self._lock:
-                processed_count += 1
-                current_count = processed_count
+        try:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(_process_single_file, snapshot) for snapshot in snapshots]
+                for future in futures:
+                    try:
+                        future.result(timeout=20)
+                    except TimeoutError:
+                        self.logger.error("Un worker excedio el tiempo maximo de espera durante el procesado.")
+                    except Exception as e:
+                        self.logger.error(f"Excepcion no controlada en worker: {e}")
+        except Exception as e:
+            self.logger.error(f"Error en la ejecución multihilo del procesado: {e}")
 
-            if current_count % 10 == 0 or current_count == total_files:
-                progress = current_count / total_files
-                self.app.after(0, lambda p=progress: self.app.progress_bar.set(p))
+        self._enqueue_ui("finish", pending_cover_reviews)
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            executor.map(_process_single_file, snapshots)
-
-        def _handle_manual_covers_and_finish():
+    def _handle_manual_covers_and_finish(self, pending_cover_reviews):
+        try:
             if pending_cover_reviews:
                 self.logger.info(f"Iniciando revisión única para {len(pending_cover_reviews)} archivo(s)...")
                 selections = DialogManager.process_pending_covers_dialog(self.app, pending_cover_reviews)
@@ -398,8 +461,9 @@ class ProcessManager:
                     else:
                         values[cover_index] = "No"
 
-                    self.app.tree.item(row_id, values=values)
-                    self.app.grid_panel.update_row_cover_status(row_id, values[cover_index])
+                    if self.app.tree.exists(row_id):
+                        self.app.tree.item(row_id, values=values)
+                        self.app.grid_panel.update_row_cover_status(row_id, values[cover_index])
 
                     new_vals = self._parse_row_values(row_id, values, file_path)
 
@@ -415,7 +479,7 @@ class ProcessManager:
                             new_vals=diff_new
                         )
                         self.logger.info(log_msg)
-
+        finally:
             if hasattr(self.app, 'detail_panel') and hasattr(self.app.detail_panel, 'btn_process'):
                 self.app.detail_panel.btn_process.configure(state="normal", text="Procesar")
 
@@ -423,10 +487,10 @@ class ProcessManager:
                 self.app.detail_panel.refresh_catalog_comboboxes()
                 self.app.detail_panel.on_row_select(None)
 
-            self.logger.info("Procesamiento multihilo finalizado con éxito.")
+            self.logger.info("Procesamiento multihilo finalizado.")
             self._tree_columns_cache = None
-
-        self.app.after(0, _handle_manual_covers_and_finish)
+            self._tree_col_index_cache = None
+            self._processing_active = False
 
     def _apply_default_cover(self, file_path):
         """Lee la imagen por defecto, la incrusta físicamente en el archivo de audio y devuelve el estado."""
@@ -491,8 +555,6 @@ class ProcessManager:
                 filename = os.path.basename(file_path)
                 values = list(self.app.tree.item(row_id, "values"))
 
-                # BORRAR
-                print(f"DEBUG Treeview [len={len(values)}]: {values}")
 
                 # Usar el parser centralizado para mapear correctamente las claves
                 parsed_prev = self._parse_row_values(row_id, values, file_path)

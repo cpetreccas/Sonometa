@@ -3,12 +3,14 @@ import os
 import re
 import sys
 import ctypes
+import queue
 import threading
 import urllib.request
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 from PIL import Image
 from catalog_manager import CatalogManager
+from ui_utils import UiUtils
 import customtkinter as ctk
 
 
@@ -324,16 +326,21 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         self.selections = {}
         self.cards_ui = {}
         self.no_cover_vars = {}
+        self._ui_queue = queue.Queue()
+        self._loader_done = False
+        self._ui_pump_after_id = None
 
         for item in self.pending_reviews:
             self.selections[item["row_id"]] = item["images"][0] if item["images"] else None
             self.no_cover_vars[item["row_id"]] = tk.BooleanVar(value=False)
 
         self._setup_ui()
+        self._start_ui_image_pump()
         self._load_images_async()
 
         # Atajo ESC para cancelar/omitir y cerrar
         self.bind("<Escape>", lambda event: self._on_cancel())
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
         self.withdraw()
         DialogManager.center_popup_on_parent(self, self.app, width=900, height=620)
@@ -584,27 +591,50 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                             pil_img = Image.open(io.BytesIO(raw_data))
                             pil_img.thumbnail((110, 110), Image.Resampling.LANCZOS)
                             ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=pil_img.size)
-
-                            def _update_ui(w=widget, img=ctk_img):
-                                try:
-                                    if w.winfo_exists():
-                                        w.configure(image=img, text="")
-                                except Exception:
-                                    pass
-
-                            self.after(0, _update_ui)
+                            self._ui_queue.put(("image", widget, ctk_img))
                     except Exception:
-                        def _update_error(w=widget):
-                            try:
-                                if w.winfo_exists():
-                                    w.configure(text="Error")
-                            except Exception:
-                                pass
-                        self.after(0, _update_error)
+                        self._ui_queue.put(("error", widget, None))
 
-            self.after(0, self._on_loading_finished)
+            self._ui_queue.put(("done", None, None))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _start_ui_image_pump(self):
+        if self._ui_pump_after_id is None:
+            self._ui_pump_after_id = self.after(20, self._drain_ui_image_queue)
+
+    def _drain_ui_image_queue(self):
+        self._ui_pump_after_id = None
+        processed = 0
+
+        while processed < 80:
+            try:
+                action, widget, payload = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            processed += 1
+
+            if action == "image":
+                try:
+                    if widget and widget.winfo_exists():
+                        widget.configure(image=payload, text="")
+                except Exception:
+                    pass
+            elif action == "error":
+                try:
+                    if widget and widget.winfo_exists():
+                        widget.configure(text="Error")
+                except Exception:
+                    pass
+            elif action == "done":
+                self._loader_done = True
+
+        if self._loader_done and self._ui_queue.empty():
+            self._on_loading_finished()
+            return
+
+        self._ui_pump_after_id = self.after(20, self._drain_ui_image_queue)
 
     def _on_loading_finished(self):
         if self.btn_confirm.winfo_exists():
@@ -618,11 +648,23 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
             )
 
     def _on_confirm(self):
+        if self._ui_pump_after_id:
+            try:
+                self.after_cancel(self._ui_pump_after_id)
+            except Exception:
+                pass
+            self._ui_pump_after_id = None
         self.grab_release()
         self.destroy()
 
     def _on_cancel(self):
         self.selections = {item["row_id"]: None for item in self.pending_reviews}
+        if self._ui_pump_after_id:
+            try:
+                self.after_cancel(self._ui_pump_after_id)
+            except Exception:
+                pass
+            self._ui_pump_after_id = None
         self.grab_release()
         self.destroy()
 
@@ -818,12 +860,13 @@ class DialogManager:
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
         # --- CARGA DEL LOGO (Mantenimiento de Aspect Ratio) ---
-        logo_path = os.path.join("assets", "logo_completo.png")
+        logo_path = UiUtils.get_resource_path("assets/logo_completo.png")
         logo_image = None
 
         if os.path.exists(logo_path):
             try:
-                pil_img = Image.open(logo_path)
+                with Image.open(logo_path) as logo_file:
+                    pil_img = logo_file.copy()
 
                 # Definir ancho objetivo y calcular alto proporcional
                 target_width = 240

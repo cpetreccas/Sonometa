@@ -1,4 +1,5 @@
 import customtkinter as ctk
+from models import AdvancedFilterCriteria
 
 
 class AdvancedFilterPanel(ctk.CTkFrame):
@@ -246,11 +247,11 @@ class AdvancedFilterPanel(ctk.CTkFrame):
                 pass
             self._filter_debounce_id = None
 
-        criteria = {
-            "text": {k: v.get().strip().lower() for k, v in self.text_vars.items() if v.get().strip()},
-            "combo": {k: v.get() for k, v in self.combo_vars.items() if v.get() != "[ Todos ]"},
-            "toggles": {k: v.get() for k, v in self.toggle_vars.items()}
-        }
+        criteria = AdvancedFilterCriteria(
+            text={k: v.get().strip().lower() for k, v in self.text_vars.items() if v.get().strip()},
+            combo={k: v.get() for k, v in self.combo_vars.items() if v.get() != "[ Todos ]"},
+            toggles={k: v.get() for k, v in self.toggle_vars.items()},
+        )
         self.on_filter_change(criteria)
 
     def reset_filters(self):

@@ -79,8 +79,7 @@ class App(ctk.CTk):
         self.audio_manager = AudioManager()
         self.filename_formatter = FilenameFormatter()
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.DEFAULT_COVER_PATH = os.path.join(base_dir, "assets", "no_cover_art.jpg")
+        self.DEFAULT_COVER_PATH = UiUtils.get_resource_path("assets/no_cover_art.jpg")
 
         self.discogs_token = os.getenv("DISCOGS_TOKEN", "RYvclJgMalquxdkpdHutNJEQqGjlaiqtuBvipCfq").strip()
 
@@ -363,6 +362,8 @@ class App(ctk.CTk):
             self.audio_manager.clear_runtime_caches()
         if hasattr(self, "discogs_client") and hasattr(self.discogs_client, "clear_runtime_cache"):
             self.discogs_client.clear_runtime_cache()
+        if hasattr(self, "detail_panel") and hasattr(self.detail_panel, "clear_runtime_caches"):
+            self.detail_panel.clear_runtime_caches()
 
         if self._multi_select_mode:
             self.detail_panel.exit_multi_mode()
@@ -381,6 +382,8 @@ class App(ctk.CTk):
     def on_close(self):
         if hasattr(self, "detail_panel") and self.detail_panel.audio_player:
             self.detail_panel.audio_player.stop_and_unload()
+        if hasattr(self, "detail_panel") and hasattr(self.detail_panel, "clear_runtime_caches"):
+            self.detail_panel.clear_runtime_caches()
         if hasattr(self, "audio_manager") and hasattr(self.audio_manager, "clear_runtime_caches"):
             self.audio_manager.clear_runtime_caches()
         if hasattr(self, "discogs_client") and hasattr(self.discogs_client, "clear_runtime_cache"):
@@ -392,6 +395,8 @@ class App(ctk.CTk):
     def load_audio_files(self, folder):
         if hasattr(self, "audio_manager") and hasattr(self.audio_manager, "clear_runtime_caches"):
             self.audio_manager.clear_runtime_caches()
+        if hasattr(self, "detail_panel") and hasattr(self.detail_panel, "clear_runtime_caches"):
+            self.detail_panel.clear_runtime_caches()
 
         for row in self.tree.get_children():
             self.tree.delete(row)

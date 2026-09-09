@@ -9,6 +9,7 @@ class LogManager(logging.Handler):
         self._buffer_lock = threading.Lock()
         self._pending_ui_logs = []
         self._flush_scheduled = False
+        self._flush_after_id = None
 
     def emit(self, record):
         msg = self.format(record)
@@ -28,11 +29,20 @@ class LogManager(logging.Handler):
                 self._flush_scheduled = True
 
             # Flush por lote: evita saturar el hilo UI cuando hay muchas trazas.
-            self.app_instance.after(80, self._flush_ui_logs)
+            self._flush_after_id = self.app_instance.after(80, self._flush_ui_logs)
         except Exception:
-            pass
+            with self._buffer_lock:
+                self._flush_scheduled = False
 
     def _flush_ui_logs(self):
+        self._flush_after_id = None
+
+        if not hasattr(self.app_instance, "winfo_exists") or not self.app_instance.winfo_exists():
+            with self._buffer_lock:
+                self._pending_ui_logs.clear()
+                self._flush_scheduled = False
+            return
+
         with self._buffer_lock:
             batch = list(self._pending_ui_logs)
             self._pending_ui_logs.clear()
