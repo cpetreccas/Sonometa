@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Propuesta Gestor de Catálogos - Sonometa</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #121212; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+
+        /* Modal Container */
+        .modal {
+            width: 780px;
+            background-color: #1A1A1A;
+            border: 1px solid #333333;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+            color: #E5E7EB;
+            overflow: hidden;
+        }
+
+        /* Header Window Bar */
+        .window-bar {
+            background-color: #242424;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #9CA3AF;
+            border-bottom: 1px solid #2A2A2A;
+        }
+        .window-controls span { margin-left: 8px; cursor: pointer; }
+
+        /* Modal Body */
+        .modal-body { padding: 20px; }
+
+        .title { font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 4px; }
+        .subtitle { font-size: 12px; color: #9CA3AF; margin-bottom: 20px; }
+
+        /* Segmented Button (Tabs) */
+        .segmented-control {
+            display: flex;
+            background-color: #262626;
+            padding: 3px;
+            border-radius: 8px;
+            width: 320px;
+            margin-bottom: 12px;
+        }
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 6px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: #A3A3A3;
+            cursor: pointer;
+            border-radius: 6px;
+        }
+        .tab.active { background-color: #6B21A8; color: #FFFFFF; }
+
+        /* Two Columns Layout */
+        .grid-layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+
+        .panel-box {
+            background-color: #212121;
+            border: 1px solid #333333;
+            border-radius: 8px;
+            height: 250px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Left List Items */
+        .list-item {
+            padding: 10px 14px;
+            font-size: 13px;
+            border-bottom: 1px solid #2A2A2A;
+            cursor: pointer;
+            color: #D1D5DB;
+        }
+        .list-item:hover { background-color: #2A2A2A; }
+        .list-item.selected { background-color: #3B0764; color: #FFFFFF; border-left: 3px solid #A855F7; }
+
+        /* Right Panel Content */
+        .panel-header {
+            padding: 10px 12px;
+            background-color: #262626;
+            border-bottom: 1px solid #333333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-title { font-size: 12px; font-weight: 600; color: #E5E7EB; }
+
+        .btn-mini {
+            background-color: #374151;
+            color: #E5E7EB;
+            border: none;
+            padding: 4px 8px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-mini:hover { background-color: #4B5563; }
+
+        .checkbox-list { padding: 12px; overflow-y: auto; }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            margin-bottom: 8px;
+            color: #D1D5DB;
+        }
+
+        /* Action Row Below Panels */
+        .actions-row {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 16px;
+            margin-top: 12px;
+        }
+
+        .btn-group-left { display: flex; gap: 8px; }
+
+        .btn {
+            border: none;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-neutral { background-color: #374151; color: #FFFFFF; flex: 1; }
+        .btn-neutral:hover { background-color: #4B5563; }
+
+        .btn-danger-subtle { background-color: transparent; border: 1px solid #DC2626; color: #EF4444; width: 40px; }
+        .btn-danger-subtle:hover { background-color: #450A0A; }
+
+        .btn-primary { background-color: #6B21A8; color: #FFFFFF; width: 100%; }
+        .btn-primary:hover { background-color: #581C87; }
+
+        /* Footer Bar */
+        .footer-bar {
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 1px solid #2A2A2A;
+            display: flex;
+            justify-content: flex-end;
+        }
+        .btn-close { background-color: #262626; color: #9CA3AF; border: 1px solid #333333; }
+        .btn-close:hover { background-color: #333333; color: #FFFFFF; }
+    </style>
+</head>
+<body>
+
+<div class="modal">
+    <div class="window-bar">
+        <span>Gestor Unificado de Catálogos</span>
+        <div class="window-controls">
+            <span>—</span> <span>Square</span> <span>✕</span>
+        </div>
+    </div>
+
+    <div class="modal-body">
+        <div class="title">Gestión de Catálogos y Relaciones</div>
+        <div class="subtitle">Añade, edita o elimina valores y asigna jerarquías entre ellos.</div>
+
+        <!-- Pestañas alineadas con el ancho del primer panel -->
+        <div class="segmented-control">
+            <div class="tab active">Álbumes</div>
+            <div class="tab">Géneros</div>
+            <div class="tab">Etiquetas</div>
+            <div class="tab">Comentarios</div>
+        </div>
+
+        <!-- Layout 2 Columnas -->
+        <div class="grid-layout">
+            <!-- Columna Izquierda: Elementos -->
+            <div class="panel-box">
+                <div class="list-item selected">Dani pj</div>
+                <div class="list-item">Karizdma</div>
+            </div>
+
+            <!-- Columna Derecha: Relaciones -->
+            <div class="panel-box">
+                <div class="panel-header">
+                    <span class="panel-title">Géneros asignados</span>
+                    <div>
+                        <button class="btn-mini">Sel. Todo</button>
+                        <button class="btn-mini">Desel. Todo</button>
+                    </div>
+                </div>
+                <div class="checkbox-list">
+                    <label class="checkbox-item"><input type="checkbox" checked> Hip Hop</label>
+                    <label class="checkbox-item"><input type="checkbox" checked> Underground</label>
+                    <label class="checkbox-item"><input type="checkbox"> Boom Bap</label>
+                    <label class="checkbox-item"><input type="checkbox"> Trap</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Barra de Acciones Operativas -->
+        <div class="actions-row">
+            <div class="btn-group-left">
+                <button class="btn btn-neutral">+ Añadir</button>
+                <button class="btn btn-neutral">Editar</button>
+                <button class="btn btn-danger-subtle" title="Eliminar">🗑</button>
+            </div>
+            <div>
+                <button class="btn btn-primary">Guardar Relaciones</button>
+            </div>
+        </div>
+
+        <!-- Footer / Salida -->
+        <div class="footer-bar">
+            <button class="btn btn-close">Cerrar Panel</button>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

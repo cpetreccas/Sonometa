@@ -1203,7 +1203,7 @@ class DialogManager:
 
         lbl_sub = ctk.CTkLabel(
             win,
-            text="Añade, edita o elimina valores y asigna jerarquías entre ellos.",
+            text="Añade o elimina valores y asigna jerarquías entre ellos.",
             text_color="#9CA3AF"
         )
         lbl_sub.pack(anchor="w", padx=16, pady=(0, 4))
@@ -1220,7 +1220,7 @@ class DialogManager:
             segmented_button_unselected_hover_color="#333333",
             text_color="#FFFFFF"
         )
-        tabview.pack(fill="both", expand=True, padx=16, pady=(4, 16))
+        tabview.pack(fill="both", expand=True, padx=16, pady=(4, 12))
 
         def prompt_for_value(title, prompt_text, default_value=""):
             result = [None]
@@ -1274,73 +1274,6 @@ class DialogManager:
 
             app.catalog_manager.add_catalog_value(k, value, persist=True, is_user_action=True)
             refresh_listbox(k, lb)
-
-        def update_value(k, lb, lname):
-            selected = lb.curselection()
-            if not selected:
-                DialogManager.show_themed_dialog(app, "Selección requerida", "Selecciona al menos un valor para modificar.", level="warning", parent=win)
-                return
-
-            old_values = [CatalogManager.normalize_catalog_text(app.catalog_manager.catalog_values[k][idx]) for idx in selected]
-
-            default_val = old_values[0] if len(old_values) == 1 else ""
-            prompt_msg = f"Reemplazar {len(old_values)} elemento(s) por:" if len(old_values) > 1 else f"Modificar '{default_val}':"
-
-            raw_val = prompt_for_value("Modificar Valor", prompt_msg, default_val)
-            if raw_val is None:
-                return
-
-            new_value = CatalogManager.normalize_catalog_text(raw_val)
-            if not new_value:
-                DialogManager.show_themed_dialog(app, "Valor no válido", "Debes introducir el nuevo valor.", level="warning", parent=win)
-                return
-
-            updated_count_total = 0
-            for old_value in old_values:
-                if new_value == old_value:
-                    continue
-
-                if k in ("Album", "Genre"):
-                    child_key = "Genre" if k == "Album" else "Publisher"
-                    if k == "Album":
-                        old_rels = app.catalog_manager.album_genres.get(old_value, [])
-                        new_rels = app.catalog_manager.album_genres.get(new_value, [])
-                    else:
-                        old_rels = app.catalog_manager.genre_publishers.get(old_value, [])
-                        new_rels = app.catalog_manager.genre_publishers.get(new_value, [])
-
-                    if not old_rels or not new_rels:
-                        merged = []
-                    else:
-                        c_old = [] if old_rels == ["__NONE__"] else old_rels
-                        c_new = [] if new_rels == ["__NONE__"] else new_rels
-                        merged = list(set(c_old + c_new))
-
-                        if not merged:
-                            merged = ["__NONE__"]
-                        elif len(merged) == len(app.catalog_manager.catalog_values.get(child_key, [])):
-                            merged = []
-
-                    if k == "Album":
-                        app.catalog_manager.set_album_genres(new_value, merged)
-                        if old_value in app.catalog_manager.album_genres:
-                            del app.catalog_manager.album_genres[old_value]
-                    else:
-                        app.catalog_manager.set_genre_publishers(new_value, merged)
-                        if old_value in app.catalog_manager.genre_publishers:
-                            del app.catalog_manager.genre_publishers[old_value]
-
-                updated_count, _ = app.catalog_manager.rename_catalog_value(k, old_value, new_value)
-                updated_count_total += updated_count
-
-            refresh_listbox(k, lb)
-            DialogManager.show_themed_dialog(
-                app,
-                "Actualización completa",
-                f"Se modificaron {len(old_values)} registro(s) hacia '{new_value}'.\nAfectados: {updated_count_total} archivo(s).",
-                level="info",
-                parent=win
-            )
 
         def delete_value(k, lb, lname):
             selected = lb.curselection()
@@ -1399,7 +1332,7 @@ class DialogManager:
             left_panel.pack(side="left", fill="both", expand=True, padx=(0, 6))
 
             listbox_frame = ctk.CTkFrame(left_panel, fg_color="#1E1E1E", corner_radius=6)
-            listbox_frame.pack(fill="both", expand=True, pady=(0, 15))
+            listbox_frame.pack(fill="both", expand=True, pady=(0, 10))
 
             lb = tk.Listbox(
                 listbox_frame,
@@ -1417,8 +1350,14 @@ class DialogManager:
             btns = ctk.CTkFrame(left_panel, fg_color="transparent")
             btns.pack(fill="x", pady=(0, 5))
 
-            ctk.CTkButton(btns, text="Añadir", font=font_btn, command=lambda k=catalog_key, l=lb, ln=label_name: add_value(k, l, ln), fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=(0, 2))
-            ctk.CTkButton(btns, text="Modificar", font=font_btn, command=lambda k=catalog_key, l=lb, ln=label_name: update_value(k, l, ln), fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER).pack(side="left", expand=True, fill="x", padx=2)
+            ctk.CTkButton(
+                btns,
+                text="Añadir",
+                font=font_btn,
+                command=lambda k=catalog_key, l=lb, ln=label_name: add_value(k, l, ln),
+                fg_color=app.CORP_COLOR,
+                hover_color=app.CORP_HOVER
+            ).pack(side="left", expand=True, fill="x", padx=(0, 4))
 
             ctk.CTkButton(
                 btns,
@@ -1430,7 +1369,7 @@ class DialogManager:
                 border_color="#EF4444",
                 text_color="#FFFFFF",
                 hover_color="#7F1D1D"
-            ).pack(side="left", expand=True, fill="x", padx=(2, 0))
+            ).pack(side="left", expand=True, fill="x", padx=(4, 0))
 
             refresh_listbox(catalog_key, lb)
 
@@ -1514,16 +1453,24 @@ class DialogManager:
                 btn_save_rel.pack(fill="x", padx=12, pady=12)
                 load_relations()
 
+        # Footer / Salida
+        footer_bar = ctk.CTkFrame(win, fg_color="transparent")
+        footer_bar.pack(fill="x", padx=16, pady=(0, 16))
+
         btn_close_panel = ctk.CTkButton(
-            win,
+            footer_bar,
             text="Cerrar Panel",
             font=font_btn,
             command=win.destroy,
-            fg_color=app.CORP_COLOR,
-            hover_color=app.CORP_HOVER,
-            height=36
+            fg_color="#262626",
+            border_color="#333333",
+            border_width=1,
+            text_color="#9CA3AF",
+            hover_color="#333333",
+            height=32,
+            width=120
         )
-        btn_close_panel.pack(fill="x", padx=16, pady=(0, 16))
+        btn_close_panel.pack(side="right")
         btn_close_panel.focus_force()
 
     @staticmethod
