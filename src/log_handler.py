@@ -1,10 +1,14 @@
 import logging
+import threading
 
 
 class LogManager(logging.Handler):
     def __init__(self, app_instance):
         super().__init__()
         self.app_instance = app_instance
+        self._buffer_lock = threading.Lock()
+        self._pending_ui_logs = []
+        self._flush_scheduled = False
 
     def emit(self, record):
         msg = self.format(record)
@@ -16,14 +20,36 @@ class LogManager(logging.Handler):
             return
 
         try:
-            # Programar la actualización UI en el hilo principal
             message_text = record.getMessage()
-            self.app_instance.after(
-                0,
-                lambda: self._update_ui_log(message_text, record.levelname, msg)
-            )
+            with self._buffer_lock:
+                self._pending_ui_logs.append((message_text, record.levelname, msg))
+                if self._flush_scheduled:
+                    return
+                self._flush_scheduled = True
+
+            # Flush por lote: evita saturar el hilo UI cuando hay muchas trazas.
+            self.app_instance.after(80, self._flush_ui_logs)
         except Exception:
             pass
+
+    def _flush_ui_logs(self):
+        with self._buffer_lock:
+            batch = list(self._pending_ui_logs)
+            self._pending_ui_logs.clear()
+            self._flush_scheduled = False
+
+        if not batch:
+            return
+
+        status_msg, _, _ = batch[-1]
+        if hasattr(self.app_instance, "label_status") and self.app_instance.label_status:
+            try:
+                self.app_instance.label_status.configure(text=status_msg.split('\n')[0])
+            except Exception:
+                pass
+
+        for _, level, full_msg in batch:
+            LogManager.append_log_to_dialog(self.app_instance, level, full_msg)
 
     def _update_ui_log(self, status_msg, level, full_msg):
         """Actualiza la barra de estado y el cuadro de texto del diálogo si existen."""

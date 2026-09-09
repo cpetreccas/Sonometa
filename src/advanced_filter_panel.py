@@ -29,6 +29,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             "no_comment": ctk.BooleanVar(value=False),
         }
 
+        self._filter_debounce_id = None
+
         self._build_ui()
 
     def _build_ui(self):
@@ -180,6 +182,17 @@ class AdvancedFilterPanel(ctk.CTkFrame):
 
     def _on_text_changed(self, *args):
         """Manejador explícito para cambios en las variables de texto."""
+        if self._filter_debounce_id:
+            try:
+                self.after_cancel(self._filter_debounce_id)
+            except Exception:
+                pass
+
+        # Debounce breve para mantener la grilla fluida al escribir.
+        self._filter_debounce_id = self.after(120, self._trigger_filter_debounced)
+
+    def _trigger_filter_debounced(self):
+        self._filter_debounce_id = None
         self._trigger_filter()
 
     def update_catalog_options(self):
@@ -226,6 +239,13 @@ class AdvancedFilterPanel(ctk.CTkFrame):
                 combo_widget.configure(values=options)
 
     def _trigger_filter(self):
+        if self._filter_debounce_id:
+            try:
+                self.after_cancel(self._filter_debounce_id)
+            except Exception:
+                pass
+            self._filter_debounce_id = None
+
         criteria = {
             "text": {k: v.get().strip().lower() for k, v in self.text_vars.items() if v.get().strip()},
             "combo": {k: v.get() for k, v in self.combo_vars.items() if v.get() != "[ Todos ]"},

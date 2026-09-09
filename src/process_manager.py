@@ -13,6 +13,7 @@ class ProcessManager:
         self.app = app
         self.logger = app.logger
         self._lock = threading.Lock()  # Sincronización para acceso concurrente
+        self._tree_columns_cache = None
 
     def _get_default_cover_bytes(self):
         """Obtiene los bytes de la carátula por defecto buscando de forma robusta."""
@@ -42,20 +43,23 @@ class ProcessManager:
         if not target_rows:
             target_rows = self.app.tree.get_children()
 
-        if not target_rows:
+        snapshots = self._build_processing_snapshots(target_rows)
+
+        if not snapshots:
             DialogManager.show_themed_dialog(self.app, "Advertencia", "No hay archivos cargados en la tabla.", level="warning")
             return
 
         if hasattr(self.app, 'detail_panel') and hasattr(self.app.detail_panel, 'btn_process'):
             self.app.detail_panel.btn_process.configure(state="disabled", text="Procesando...")
 
-        total_files = len(target_rows)
+        total_files = len(snapshots)
+        columns_snapshot = self.app.get_tree_columns() if hasattr(self.app, "get_tree_columns") else list(self.app.tree["columns"])
         self.logger.info(f"Iniciando procesado multihilo para {total_files} archivo(s)...")
 
         # Lanzar la canalización en un hilo secundario para mantener la interfaz fluida
         threading.Thread(
             target=self._run_processing_pipeline,
-            args=(target_rows, total_files),
+            args=(snapshots, total_files, columns_snapshot),
             daemon=True
         ).start()
 
@@ -68,9 +72,34 @@ class ProcessManager:
         return True
 
     def _get_tree_columns(self):
+        if self._tree_columns_cache:
+            return self._tree_columns_cache
         if hasattr(self.app, "get_tree_columns"):
             return self.app.get_tree_columns()
         return list(self.app.tree["columns"])
+
+    def _build_processing_snapshots(self, row_ids):
+        """Toma una foto de filas en hilo UI para procesar sin tocar Tk en workers."""
+        snapshots = []
+        for row_id in row_ids:
+            if not self.app.tree.exists(row_id):
+                continue
+
+            file_path = self.app.file_paths_map.get(row_id)
+            if not file_path:
+                continue
+
+            values = list(self.app.tree.item(row_id, "values"))
+            if not values:
+                continue
+
+            snapshots.append({
+                "row_id": row_id,
+                "file_path": file_path,
+                "values": values,
+            })
+
+        return snapshots
 
     def _get_col_index(self, col_name):
         cols = self._get_tree_columns()
@@ -112,7 +141,8 @@ class ProcessManager:
         }
         return parsed
 
-    def _run_processing_pipeline(self, target_rows, total_files):
+    def _run_processing_pipeline(self, snapshots, total_files, columns_snapshot):
+        self._tree_columns_cache = list(columns_snapshot or [])
         processed_count = 0
         words_to_omit = [
             r'\bfeat\.\b', r'\bfeat\b',
@@ -124,12 +154,12 @@ class ProcessManager:
         pending_cover_reviews = []
         manual_mode = self._should_review_covers()
 
-        def _process_single_file(row_id):
+        def _process_single_file(snapshot):
             nonlocal processed_count
 
-            with self._lock:
-                file_path = self.app.file_paths_map.get(row_id)
-                values = list(self.app.tree.item(row_id, "values")) if self.app.tree.exists(row_id) else None
+            row_id = snapshot.get("row_id")
+            file_path = snapshot.get("file_path")
+            values = list(snapshot.get("values") or [])
 
             if not file_path or not os.path.exists(file_path) or not values:
                 return
@@ -169,11 +199,6 @@ class ProcessManager:
 
                 for k in invalid_catalog_fields:
                     prev_vals[k] = ""
-
-                def _update_catalog_ui():
-                    if self.app.tree.exists(row_id):
-                        self.app.tree.item(row_id, values=values)
-                self.app.after(0, _update_catalog_ui)
 
             # 2. Parseo y Normalización Local
             old_filename = os.path.basename(file_path)
@@ -243,8 +268,8 @@ class ProcessManager:
                 self._set_value(values, tag_name, new_value)
                 self.app.audio_manager.save_single_tag(file_path, tag_name, new_value)
 
-            with self._lock:
-                already_has_cover = self.app.grid_panel.row_has_cover(row_id)
+            cover_val = str(self._get_value(values, "Cover", "No")).strip().lower()
+            already_has_cover = cover_val in ("sí", "si", "yes", "true", "1")
 
             has_year = bool(str(self._get_value(values, "Year", "")).strip())
             all_images = []
@@ -332,11 +357,14 @@ class ProcessManager:
 
             with self._lock:
                 processed_count += 1
-                progress = processed_count / total_files
+                current_count = processed_count
+
+            if current_count % 10 == 0 or current_count == total_files:
+                progress = current_count / total_files
                 self.app.after(0, lambda p=progress: self.app.progress_bar.set(p))
 
         with ThreadPoolExecutor(max_workers=4) as executor:
-            executor.map(_process_single_file, target_rows)
+            executor.map(_process_single_file, snapshots)
 
         def _handle_manual_covers_and_finish():
             if pending_cover_reviews:
@@ -393,6 +421,7 @@ class ProcessManager:
                 self.app.detail_panel.on_row_select(None)
 
             self.logger.info("Procesamiento multihilo finalizado con éxito.")
+            self._tree_columns_cache = None
 
         self.app.after(0, _handle_manual_covers_and_finish)
 

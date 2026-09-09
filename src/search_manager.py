@@ -30,6 +30,7 @@ class SearchManager:
         self._search_trace_id = None
         self._search_visible = False
         self._all_tree_items = []
+        self._debounce_after_id = None
 
         self._setup_search_bar()
 
@@ -76,6 +77,13 @@ class SearchManager:
         self.apply_search_filter()
 
     def hide_search_bar(self):
+        if self._debounce_after_id:
+            try:
+                self.app.after_cancel(self._debounce_after_id)
+            except Exception:
+                pass
+            self._debounce_after_id = None
+
         if self._search_visible:
             self.frame_search.pack_forget()
             self._search_visible = False
@@ -91,8 +99,21 @@ class SearchManager:
         return None
 
     def _on_search_text_changed(self, *_args):
-        if self._search_visible:
-            self.apply_search_filter()
+        if not self._search_visible:
+            return
+
+        if self._debounce_after_id:
+            try:
+                self.app.after_cancel(self._debounce_after_id)
+            except Exception:
+                pass
+
+        # Debounce para reducir costo de detach/reattach por pulsacion.
+        self._debounce_after_id = self.app.after(140, self._apply_search_filter_debounced)
+
+    def _apply_search_filter_debounced(self):
+        self._debounce_after_id = None
+        self.apply_search_filter()
 
     def _build_row_search_text(self, values):
         columns = list(self.tree["columns"])

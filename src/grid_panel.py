@@ -113,14 +113,15 @@ class GridPanel:
         if hasattr(self.app, "file_paths_map") and self.app.file_paths_map:
             all_rows = list(self.app.file_paths_map.keys())
         else:
-            # Sincronización alternativa si no hay file_paths_map
             all_rows = getattr(self.app.search_manager, "_all_tree_items", list(self.tree.get_children('')))
+
+        cols = list(self.tree["columns"])
+        col_index = {name: idx for idx, name in enumerate(cols)}
 
         text_filters = criteria.get("text", {})
         combo_filters = criteria.get("combo", {})
         toggles = criteria.get("toggles", {})
 
-        visible_count = 0
         visible_rows = []
 
         for row_id in all_rows:
@@ -131,12 +132,12 @@ class GridPanel:
             if not values:
                 continue
 
-            row_map = self.map_row_values(values)
             matches = True
 
             # 1. Filtros de Texto Libre (Artist, Title, MixArtist)
             for col_name, search_val in text_filters.items():
-                cell_val = str(row_map.get(col_name, "")).lower()
+                idx = col_index.get(col_name)
+                cell_val = str(values[idx]).lower() if idx is not None and idx < len(values) else ""
                 if search_val not in cell_val:
                     matches = False
                     break
@@ -144,7 +145,8 @@ class GridPanel:
             # 2. Filtros de Catálogo (Album, Genre, Publisher)
             if matches:
                 for col_name, selected_val in combo_filters.items():
-                    cell_val = str(row_map.get(col_name, "")).strip()
+                    idx = col_index.get(col_name)
+                    cell_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
                     if selected_val == "[ Vacío ]":
                         if cell_val != "":
                             matches = False
@@ -156,29 +158,37 @@ class GridPanel:
 
             # 3. Toggles Rápido de Estado (Sin Año, Sin Carátula, Sin Comentarios)
             if matches and toggles.get("no_year"):
-                year_val = str(row_map.get("Year", "")).strip()
+                idx = col_index.get("Year")
+                year_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
                 if year_val not in ("", "0", "None"):
                     matches = False
 
             if matches and toggles.get("no_cover"):
-                cover_val = str(row_map.get("Cover", "")).strip().lower()
+                idx = col_index.get("Cover")
+                cover_val = str(values[idx]).strip().lower() if idx is not None and idx < len(values) else ""
                 if cover_val in ("sí", "si", "yes", "true", "1"):
                     matches = False
 
             if matches and toggles.get("no_comment"):
-                comment_val = str(row_map.get("Comment", "")).strip()
+                idx = col_index.get("Comment")
+                comment_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
                 if comment_val != "":
                     matches = False
 
-            # Aplicar visibilidad reinsertando o desasociando de la vista
+            # Solo guardar filas visibles; los movimientos se aplican en bloque al final.
             if matches:
-                tag = "even" if visible_count % 2 == 0 else "odd"
-                self.tree.item(row_id, tags=(tag,))
-                self.tree.reattach(row_id, '', visible_count)
                 visible_rows.append(row_id)
-                visible_count += 1
-            else:
-                self.tree.detach(row_id)
+
+        visible_set = set(visible_rows)
+        current_rows = list(self.tree.get_children(''))
+        to_detach = [row_id for row_id in current_rows if row_id not in visible_set]
+        if to_detach:
+            self.tree.detach(*to_detach)
+
+        for idx, row_id in enumerate(visible_rows):
+            tag = "even" if idx % 2 == 0 else "odd"
+            self.tree.item(row_id, tags=(tag,))
+            self.tree.reattach(row_id, '', idx)
 
         # Purgar selecciones de filas que acaban de ser ocultadas
         current_selection = [r for r in self.tree.selection() if r in visible_rows]
@@ -188,7 +198,7 @@ class GridPanel:
             self.app.detail_panel.refresh_process_button_text(len(current_selection))
             self.app.detail_panel.on_row_select(None)
 
-        self.logger.info(f"Filtro avanzado aplicado: {visible_count} de {len(all_rows)} registros visibles.")
+        self.logger.info(f"Filtro avanzado aplicado: {len(visible_rows)} de {len(all_rows)} registros visibles.")
 
     def _install_editor_bindtag_guard(self):
         # Captura TAB antes del binding de clase TCombobox/TEntry.
