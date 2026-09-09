@@ -7,14 +7,3 @@ FUNCIONALIDADES GENERALES:
 Panel de filtros avanzados:
 - No se combina los filtros avanzados con el buscador.
 - Se pierde la ordenación cuando seleccionas un álbum y luego le das a TODOS
-
-LOGS:
-Logs de colores.
-
-ACERCA DE SONOMETA:
-Enseñar el logo corporativo.
-Poner datos de contacto para soporte o comercial?
-
-FOOTER:
-Si no hay ningún proceso la barra desaparecerá (o se verá siempre vacía)???
-La acción de desplazarse entre filas debe dejar el log del footer con el texto 'Listo'

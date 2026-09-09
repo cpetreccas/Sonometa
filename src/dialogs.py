@@ -802,14 +802,99 @@ class DialogManager:
 
     @staticmethod
     def show_about_dialog(app):
-        DialogManager.show_themed_dialog(
-            app,
-            "Acerca de Sonometa",
-            "Sonometa v0.09 - Audio Tag Suite\n\n"
-            "Herramienta avanzada para la automatización y gestión de metadatos de audio.\n"
-            "Integración con API Discogs para vinilos y soporte nativo de ID3, FLAC y MP4.",
-            level="info"
+        """Muestra el diálogo modal de 'Acerca de' estilizado con el logo oficial respetando su aspecto original."""
+        dialog = ctk.CTkToplevel(app)
+        dialog.title("Acerca de Sonometa")
+        dialog.geometry("460x300")
+        dialog.resizable(False, False)
+
+        # Atajo ESC para cerrar
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+        DialogManager.center_popup_on_parent(dialog, app, width=460, height=300)
+        DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=app)
+
+        main_frame = ctk.CTkFrame(dialog, fg_color="#1E1E1E")
+        main_frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        # --- CARGA DEL LOGO (Mantenimiento de Aspect Ratio) ---
+        logo_path = os.path.join("assets", "logo_completo.png")
+        logo_image = None
+
+        if os.path.exists(logo_path):
+            try:
+                pil_img = Image.open(logo_path)
+
+                # Definir ancho objetivo y calcular alto proporcional
+                target_width = 240
+                aspect_ratio = pil_img.height / pil_img.width
+                target_height = int(target_width * aspect_ratio)
+
+                logo_image = ctk.CTkImage(
+                    light_image=pil_img,
+                    dark_image=pil_img,
+                    size=(target_width, target_height)
+                )
+            except Exception:
+                logo_image = None
+
+        if logo_image:
+            lbl_logo = ctk.CTkLabel(main_frame, image=logo_image, text="")
+            lbl_logo.pack(pady=(12, 10))
+        else:
+            # Fallback en caso de no disponer de la imagen
+            lbl_logo = ctk.CTkLabel(
+                main_frame,
+                text="🎵 SONOMETA",
+                font=ctk.CTkFont(size=22, weight="bold"),
+                text_color="#F3F4F6"
+            )
+            lbl_logo.pack(pady=(12, 10))
+
+        # --- SUBTÍTULO Y DESCRIPCIÓN ---
+        lbl_subtitle = ctk.CTkLabel(
+            main_frame,
+            text="Audio Tag Suite & Metadata Automation",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#9CA3AF"
         )
+        lbl_subtitle.pack(pady=(0, 12))
+
+        desc_text = (
+            "Herramienta avanzada para la automatización, edición y gestión de "
+            "metadatos de audio.\n\n"
+            "• Integración directa con Discogs API para vinilos y lanzamientos.\n"
+            "• Soporte nativo para etiquetas ID3v2, FLAC y MP4 / AAC."
+        )
+
+        lbl_desc = ctk.CTkLabel(
+            main_frame,
+            text=desc_text,
+            justify="center",
+            wraplength=400,
+            font=ctk.CTkFont(size=11),
+            text_color="#D1D5DB"
+        )
+        lbl_desc.pack(fill="x", pady=(0, 18))
+
+        # --- BOTÓN DE CIERRE ---
+        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
+        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+
+        btn_close = ctk.CTkButton(
+            main_frame,
+            text="Aceptar",
+            fg_color=corp_color,
+            hover_color=corp_hover,
+            width=120,
+            command=dialog.destroy
+        )
+        btn_close.pack(side="bottom")
+        btn_close.focus_force()
+
+        dialog.wait_window()
+        if app and app.winfo_exists():
+            app.focus_force()
 
     @staticmethod
     def show_keyboard_shortcuts_dialog(app):
@@ -1011,12 +1096,12 @@ class DialogManager:
         app.log_textbox = ctk.CTkTextbox(app.log_window, wrap="none", font=("Consolas", 11))
         app.log_textbox.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Configuración de tags de formato de texto en el widget tk subyacente
+        # Configuración de tags de formato de texto (sin negrita)
         raw_textbox = app.log_textbox._textbox
-        raw_textbox.tag_config("lvl_info", foreground="#22C55E", font=("Consolas", 11, "bold"))      # Verde
-        raw_textbox.tag_config("lvl_warning", foreground="#EAB308", font=("Consolas", 11, "bold"))   # Amarillo
-        raw_textbox.tag_config("lvl_error", foreground="#EF4444", font=("Consolas", 11, "bold"))     # Rojo
-        raw_textbox.tag_config("lvl_tree", foreground="#A855F7", font=("Consolas", 11))             # Púrpura
+        raw_textbox.tag_config("lvl_info", foreground="#22C55E", font=("Consolas", 11))      # Verde
+        raw_textbox.tag_config("lvl_warning", foreground="#EAB308", font=("Consolas", 11))   # Amarillo
+        raw_textbox.tag_config("lvl_error", foreground="#EF4444", font=("Consolas", 11))     # Rojo
+        raw_textbox.tag_config("lvl_purple", foreground="#A855F7", font=("Consolas", 11))    # Morado
 
         # Renderizar historial de logs actual
         DialogManager._filter_and_render_logs(app)
@@ -1090,7 +1175,7 @@ class DialogManager:
 
     @staticmethod
     def _filter_and_render_logs(app):
-        """Redibuja el cuadro de logs filtrando el historial según el nivel seleccionado."""
+        """Redibuja el cuadro de logs eliminando el timestamp y mejorando la legibilidad de diccionarios."""
         log_box = getattr(app, "log_textbox", None)
         if not log_box or not log_box.winfo_exists():
             return
@@ -1100,6 +1185,28 @@ class DialogManager:
 
         log_box.configure(state="normal")
         log_box.delete("1.0", "end")
+
+        raw_textbox = log_box._textbox
+
+        # --- Configuración de etiquetas de estilo ---
+        raw_textbox.tag_config("lvl_info", foreground="#22C55E", font=("Consolas", 11))       # Verde
+        raw_textbox.tag_config("lvl_warning", foreground="#EAB308", font=("Consolas", 11))    # Amarillo
+        raw_textbox.tag_config("lvl_error", foreground="#EF4444", font=("Consolas", 11))      # Rojo
+        raw_textbox.tag_config("tag_purple", foreground="#A855F7", font=("Consolas", 11))     # Morado corporativo
+        raw_textbox.tag_config("tag_delete", foreground="#F97316", font=("Consolas", 11))     # Naranja
+        raw_textbox.tag_config("tree_branch", foreground="#4B5563", font=("Consolas", 11))    # Gris oscuro
+        raw_textbox.tag_config("json_key", foreground="#38BDF8", font=("Consolas", 11))       # Cyan para claves ('Artist':)
+        raw_textbox.tag_config("json_val", foreground="#F3F4F6", font=("Consolas", 11))       # Blanco destacado para valores
+        raw_textbox.tag_config("text_body", foreground="#D1D5DB", font=("Consolas", 11))      # Blanco/Gris base
+
+        # Pattern para identificar tokens sin incluir horas/fechas
+        token_pattern = re.compile(
+            r"(\[(?:INFO|WARN|WARNING|ERROR)\])"                # Grp 1: Severidad
+            r"|(\[(?:PROCESS|DISCOGS|DETAIL|GRID|DELETE|200 OK)\])" # Grp 2: Sub-etiquetas
+            r"|(\s*├──\s*|\s*└──\s*)"                           # Grp 3: Árbol
+            r"|('(?:[^'\\]|\\.)*'\s*:)"                          # Grp 4: Claves de diccionario ('Artist':)
+            r"|('(?:[^'\\]|\\.)*')"                             # Grp 5: Valores entre comillas ('Bandido')
+        )
 
         for item in list(getattr(app, "log_history", [])):
             if isinstance(item, tuple):
@@ -1111,12 +1218,39 @@ class DialogManager:
             if selected_filter != "TODOS" and selected_filter != level:
                 continue
 
-            line = msg if msg.endswith("\n") else f"{msg}\n"
-            tag = "lvl_tree" if ("├──" in line or "└──" in line) else f"lvl_{level.lower()}"
-            try:
-                log_box._textbox.insert("end", line, tag)
-            except Exception:
-                log_box.insert("end", line)
+            # Eliminar fecha y hora iniciales (formato YYYY-MM-DD HH:MM:SS o HH:MM:SS)
+            line = re.sub(r"^(\d{4}-\d{2}-\d{2}\s+)?\d{2}:\d{2}:\d{2}\s*", "", msg)
+            line = line if line.endswith("\n") else f"{line}\n"
+
+            parts = token_pattern.split(line)
+
+            for part in parts:
+                if not part:
+                    continue
+
+                if part in ("[INFO]",):
+                    tag = "lvl_info"
+                elif part in ("[WARN]", "[WARNING]"):
+                    tag = "lvl_warning"
+                elif part == "[ERROR]":
+                    tag = "lvl_error"
+                elif part in ("[PROCESS]", "[DISCOGS]", "[DETAIL]", "[GRID]", "[200 OK]"):
+                    tag = "tag_purple"
+                elif part == "[DELETE]":
+                    tag = "tag_delete"
+                elif "├──" in part or "└──" in part:
+                    tag = "tree_branch"
+                elif re.match(r"^'(?:[^'\\]|\\.)*'\s*:$", part):
+                    tag = "json_key"
+                elif re.match(r"^'(?:[^'\\]|\\.)*'$", part):
+                    tag = "json_val"
+                else:
+                    tag = "text_body"
+
+                try:
+                    raw_textbox.insert("end", part, tag)
+                except Exception:
+                    log_box.insert("end", part)
 
         log_box.see("end")
         log_box.configure(state="disabled")

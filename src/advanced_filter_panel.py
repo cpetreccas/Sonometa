@@ -32,22 +32,6 @@ class AdvancedFilterPanel(ctk.CTkFrame):
         self._build_ui()
 
     def _build_ui(self):
-        # Mapeos de etiquetas UI manteniendo las claves de variables del modelo
-        field_labels = {
-            "Artist": "INTÉRPRETE",
-            "Title": "TÍTULO",
-            "MixArtist": "REMIX",
-            "Album": "ÁLBUM",
-            "Genre": "GÉNERO",
-            "Publisher": "ETIQUETA"
-        }
-
-        field_placeholders = {
-            "Artist": "Buscar Intérprete...",
-            "Title": "Buscar Título...",
-            "MixArtist": "Buscar Remix...",
-        }
-
         # Fila 1: Campos de Texto Libre
         frame_text = ctk.CTkFrame(self, fg_color="transparent")
         frame_text.pack(fill="x", padx=10, pady=(8, 4))
@@ -56,18 +40,13 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             sub_frame = ctk.CTkFrame(frame_text, fg_color="transparent")
             sub_frame.pack(side="left", expand=True, fill="x", padx=4)
 
-            lbl = ctk.CTkLabel(
-                sub_frame,
-                text=field_labels[col_name],
-                font=("Segoe UI", 10, "bold"),
-                text_color="#A0A0A0"
-            )
+            lbl = ctk.CTkLabel(sub_frame, text=col_name.upper(), font=("Segoe UI", 10, "bold"), text_color="#A0A0A0")
             lbl.pack(anchor="w", pady=(0, 2))
 
             entry = ctk.CTkEntry(
                 sub_frame,
                 textvariable=self.text_vars[col_name],
-                placeholder_text=field_placeholders[col_name],
+                placeholder_text=f"Buscar {col_name}...",
                 height=28,
                 fg_color="#2B2B2B",
                 border_color="#3A3A3A"
@@ -88,12 +67,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             sub_frame = ctk.CTkFrame(frame_combos, fg_color="transparent")
             sub_frame.pack(side="left", expand=True, fill="x", padx=4)
 
-            lbl = ctk.CTkLabel(
-                sub_frame,
-                text=field_labels[col_name],
-                font=("Segoe UI", 10, "bold"),
-                text_color="#A0A0A0"
-            )
+            lbl = ctk.CTkLabel(sub_frame, text=col_name.upper(), font=("Segoe UI", 10, "bold"), text_color="#A0A0A0")
             lbl.pack(anchor="w", pady=(0, 2))
 
             combo = ctk.CTkComboBox(
@@ -151,17 +125,10 @@ class AdvancedFilterPanel(ctk.CTkFrame):
         btn_reset = ctk.CTkButton(
             frame_toggles,
             text="Limpiar Filtros",
-            image=getattr(self.app, "broom_icon", None),
-            compound="left",
-            width=120,
-            height=28,
-            fg_color="transparent",
-            border_color="#DC2626",
-            border_width=1,
-            text_color="#FFFFFF",
-            hover_color=("#FEE2E2", "#450A0A"),
-            corner_radius=8,
-            font=("Segoe UI", 11, "bold"),
+            width=110,
+            height=26,
+            fg_color="#3A3A3A",
+            hover_color="#4A4A4A",
             command=self.reset_filters
         )
         btn_reset.pack(side="right", padx=4)
