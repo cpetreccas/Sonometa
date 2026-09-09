@@ -1,5 +1,4 @@
 FUNCIONALIDADES GENERALES:
-- Generar botones corporativos con una guia de estilo unificada.
 - Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Integrar búsquedas en Google para el nombre y carátulas

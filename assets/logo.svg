@@ -26,8 +26,8 @@
   </g>
 
   <!-- LOGOTIPO (TEXTO) -->
-  <text x="120" y="68" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="42" font-weight="800" fill="#0F172A" letter-spacing="-0.5">
-    Sono<tspan fill="url(#sonometaGrad)">meta</tspan>
+  <text x="120" y="68" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="42" font-weight="800" fill="url(#sonometaGrad)" letter-spacing="-0.5">
+    Sono<tspan fill="url(#sonometaGrad)">meta v0.17</tspan>
   </text>
   
   <!-- Subtítulo / Descriptor de la Suite -->
