@@ -6,6 +6,7 @@ from tkinter import ttk
 import customtkinter as ctk
 from undo_manager import HistoryAction
 from log_handler import LogManager
+from advanced_filter_panel import AdvancedFilterPanel
 
 
 class GridPanel:
@@ -24,6 +25,10 @@ class GridPanel:
         # Variables para el reordenamiento de columnas por arrastre (Drag & Drop)
         self._drag_col = None
         self._drag_x = 0
+
+        # Estado del Panel de Filtro Avanzado
+        self.filter_panel_visible = False
+        self.active_filters = {}
 
         # Configuración del nivel de zoom base
         self.zoom_level = 1.0
@@ -56,11 +61,24 @@ class GridPanel:
         }
 
         self.frame_grid = ctk.CTkFrame(self.parent)
-        self.frame_grid.pack(side="right", fill="both", expand=True, padx=(0, 0), pady=0)
-        self.frame_grid.grid_rowconfigure(0, weight=1)
-        self.frame_grid.grid_columnconfigure(0, weight=1)
+        self.frame_grid.pack(side="top", fill="both", expand=True, padx=0, pady=0)
 
+        # Usar pack para permitir intercalar el panel desplegable arriba de la grilla
         self._setup_styles()
+
+        # Instanciación del Panel de Filtro Avanzado
+        self.filter_panel = AdvancedFilterPanel(
+            parent=self.frame_grid,
+            app=self.app,
+            on_filter_change_callback=self.apply_advanced_filters
+        )
+
+        # Contenedor para Treeview y Scrollbars
+        self.tree_container = ctk.CTkFrame(self.frame_grid, fg_color="transparent")
+        self.tree_container.pack(fill="both", expand=True)
+        self.tree_container.grid_rowconfigure(0, weight=1)
+        self.tree_container.grid_columnconfigure(0, weight=1)
+
         self._build_treeview()
         self._setup_context_menu()
         self.cell_entry = None
@@ -68,6 +86,109 @@ class GridPanel:
         self._editor_bindtag = "SonometaGridCellEditor"
         self._install_editor_bindtag_guard()
         self._install_global_tab_edit_guard()
+
+    def toggle_filter_panel(self):
+        """Muestra u oculta el panel de filtro avanzado sin tocar el contenedor del Treeview."""
+        if self.filter_panel_visible:
+            self.filter_panel.pack_forget()
+            self.filter_panel_visible = False
+        else:
+            # Insertar el panel justo antes de la tabla para mantener intacta su jerarquia y eventos.
+            self.filter_panel.pack(side="top", fill="x", padx=6, pady=(6, 2), before=self.tree_container)
+
+            self.filter_panel_visible = True
+            self.filter_panel.update_catalog_options()
+            self.filter_panel.after(50, self.filter_panel.focus_artist_field)
+
+        return "break"
+
+    def apply_advanced_filters(self, criteria: dict):
+        """
+        Filtra dinámicamente las filas del Treeview evaluando texto libre,
+        combos de catálogo y toggles de campos faltantes. Compatible con filas desasociadas.
+        """
+        self.active_filters = criteria
+
+        # Usar el mapa de rutas maestro para obtener TODOS los row_ids existentes (visibles e invisibles)
+        if hasattr(self.app, "file_paths_map") and self.app.file_paths_map:
+            all_rows = list(self.app.file_paths_map.keys())
+        else:
+            # Sincronización alternativa si no hay file_paths_map
+            all_rows = getattr(self.app.search_manager, "_all_tree_items", list(self.tree.get_children('')))
+
+        text_filters = criteria.get("text", {})
+        combo_filters = criteria.get("combo", {})
+        toggles = criteria.get("toggles", {})
+
+        visible_count = 0
+        visible_rows = []
+
+        for row_id in all_rows:
+            if not self.tree.exists(row_id):
+                continue
+
+            values = self.tree.item(row_id, "values")
+            if not values:
+                continue
+
+            row_map = self.map_row_values(values)
+            matches = True
+
+            # 1. Filtros de Texto Libre (Artist, Title, MixArtist)
+            for col_name, search_val in text_filters.items():
+                cell_val = str(row_map.get(col_name, "")).lower()
+                if search_val not in cell_val:
+                    matches = False
+                    break
+
+            # 2. Filtros de Catálogo (Album, Genre, Publisher)
+            if matches:
+                for col_name, selected_val in combo_filters.items():
+                    cell_val = str(row_map.get(col_name, "")).strip()
+                    if selected_val == "[ Vacío ]":
+                        if cell_val != "":
+                            matches = False
+                            break
+                    else:
+                        if cell_val != selected_val:
+                            matches = False
+                            break
+
+            # 3. Toggles Rápido de Estado (Sin Año, Sin Carátula, Sin Comentarios)
+            if matches and toggles.get("no_year"):
+                year_val = str(row_map.get("Year", "")).strip()
+                if year_val not in ("", "0", "None"):
+                    matches = False
+
+            if matches and toggles.get("no_cover"):
+                cover_val = str(row_map.get("Cover", "")).strip().lower()
+                if cover_val in ("sí", "si", "yes", "true", "1"):
+                    matches = False
+
+            if matches and toggles.get("no_comment"):
+                comment_val = str(row_map.get("Comment", "")).strip()
+                if comment_val != "":
+                    matches = False
+
+            # Aplicar visibilidad reinsertando o desasociando de la vista
+            if matches:
+                tag = "even" if visible_count % 2 == 0 else "odd"
+                self.tree.item(row_id, tags=(tag,))
+                self.tree.reattach(row_id, '', visible_count)
+                visible_rows.append(row_id)
+                visible_count += 1
+            else:
+                self.tree.detach(row_id)
+
+        # Purgar selecciones de filas que acaban de ser ocultadas
+        current_selection = [r for r in self.tree.selection() if r in visible_rows]
+        self.tree.selection_set(current_selection)
+
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.refresh_process_button_text(len(current_selection))
+            self.app.detail_panel.on_row_select(None)
+
+        self.logger.info(f"Filtro avanzado aplicado: {visible_count} de {len(all_rows)} registros visibles.")
 
     def _install_editor_bindtag_guard(self):
         # Captura TAB antes del binding de clase TCombobox/TEntry.
@@ -233,7 +354,7 @@ class GridPanel:
         # Declaramos las 10 columnas en la tupla interna de datos
         self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cover")
 
-        self.tree = ttk.Treeview(self.frame_grid, columns=self.columns, show="headings", selectmode="extended")
+        self.tree = ttk.Treeview(self.tree_container, columns=self.columns, show="headings", selectmode="extended")
 
         # Ocultamos Comment de la representación visual pero la mantenemos en la tupla
         visible_cols = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
@@ -301,8 +422,8 @@ class GridPanel:
         self.tree.bind("<Shift-Prior>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="up", select_range=True))
         self.tree.bind("<Shift-Next>", lambda e: self._safe_grid_action(e, self._handle_page_navigation, direction="down", select_range=True))
 
-        self.vsb = ttk.Scrollbar(self.frame_grid, orient="vertical", command=self.tree.yview)
-        self.hsb = ttk.Scrollbar(self.frame_grid, orient="horizontal", command=self.tree.xview)
+        self.vsb = ttk.Scrollbar(self.tree_container, orient="vertical", command=self.tree.yview)
+        self.hsb = ttk.Scrollbar(self.tree_container, orient="horizontal", command=self.tree.xview)
 
         self.tree.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
 
@@ -376,6 +497,10 @@ class GridPanel:
             command=self._open_custom_tag_picker
         )
         self._tree_context_menu.add_command(
+            label="Filtrar...",
+            command=self.toggle_filter_panel
+        )
+        self._tree_context_menu.add_command(
             label="Limpiar",
             command=lambda: self.app.process_manager.clear_selected_metadata()
         )
@@ -401,17 +526,14 @@ class GridPanel:
 
             file_paths.append(file_path)
 
-            # 1. Obtener comentario del Treeview
             values = list(self.tree.item(row_id, "values"))
             current_comment = ""
             if len(values) > comment_col_idx and values[comment_col_idx] is not None:
                 current_comment = str(values[comment_col_idx]).strip()
 
-            # 2. Si estaba vacío en la grilla, intentar leerlo de audio_manager
             if not current_comment and hasattr(self.app, "audio_manager"):
                 current_comment = self.app.audio_manager.get_tag_value(file_path, "Comment") or ""
 
-            # Extraer etiquetas del archivo y acumular la UNIÓN manteniendo el orden
             tags = [t.strip() for t in current_comment.split(",") if t.strip()]
             for tag in tags:
                 if tag not in union_tags:
@@ -430,11 +552,6 @@ class GridPanel:
         )
 
     def _on_custom_tags_saved(self, row_ids: list, file_paths: list, active_tags: set, removed_tags: set) -> None:
-        """
-        Aplica los cambios en lote:
-        - active_tags (Marcados): Se aseguran en TODOS los archivos seleccionados.
-        - removed_tags (Desmarcados): Se eliminan de TODOS los archivos seleccionados.
-        """
         if not row_ids:
             return
 
@@ -455,26 +572,21 @@ class GridPanel:
             prev_comment = str(values[comment_col_idx]).strip() if values[comment_col_idx] is not None else ""
             current_tags = [t.strip() for t in prev_comment.split(",") if t.strip()]
 
-            # 1. Añadir/mantener tags marcados
             for tag in active_tags:
                 if tag not in current_tags:
                     current_tags.append(tag)
 
-            # 2. Eliminar tags desmarcados
             current_tags = [t for t in current_tags if t not in removed_tags]
 
             new_comment = ", ".join(current_tags)
 
             if prev_comment != new_comment:
-                # Actualizar archivo físico
                 if hasattr(self.app, "audio_manager"):
                     self.app.audio_manager.save_single_tag(file_path, "Comment", new_comment, app=self.app)
 
-                # Actualizar celda en la grilla
                 values[comment_col_idx] = new_comment
                 self.tree.item(row_id, values=values)
 
-                # Registrar Log
                 log_msg = LogManager.format_tree_log(
                     context="CUSTOM_TAGS",
                     action="Modificado",

@@ -1025,11 +1025,21 @@ class DialogManager:
         btn_bar = ctk.CTkFrame(app.log_window, fg_color="transparent")
         btn_bar.pack(fill="x", padx=10, pady=(0, 10))
 
+        broom_icon = getattr(app, "broom_icon", None)
+
         btn_clear = ctk.CTkButton(
             btn_bar,
-            text="Limpiar Consola",
-            fg_color="#EF4444",
-            hover_color="#B91C1C",
+            text="Limpiar consola",
+            image=broom_icon,
+            compound="left",
+            fg_color="transparent",
+            border_color="#DC2626",
+            border_width=1,
+            text_color="#FFFFFF",
+            hover_color=("#FEE2E2", "#450A0A"),
+            corner_radius=8,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            height=30,
             command=lambda: DialogManager._clear_console(app)
         )
         btn_clear.pack(side="left", padx=(5, 0))

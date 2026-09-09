@@ -1,14 +1,13 @@
 FUNCIONALIDADES GENERALES:
-- Ver cómo gestionar comments2 para poder añadir múltiples tags.
-- Analizar ¿un modal? para permitir filtros avanzados con checkboxes, etc.
 - Generar botones corporativos con una guia de estilo unificada.
 - Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
 - Añadir exportar listado.
 
-GRID:
-Eliminar la ultima fila vacía.
+Panel de filtros avanzados:
+- No se combina los filtros avanzados con el buscador.
+- Se pierde la ordenación cuando seleccionas un álbum y luego le das a TODOS
 
 LOGS:
 Logs de colores.

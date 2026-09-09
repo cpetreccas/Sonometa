@@ -197,6 +197,7 @@ class ToolPanel(ctk.CTkFrame):
                 {"type": "separator"},
                 {"type": "command", "label": "Buscar…", "accelerator": "Ctrl+F", "command": lambda: app.focus_header_search()},
                 {"type": "command", "label": "Reemplazar…", "accelerator": "Ctrl+R", "command": lambda: app.open_replace_dialog()},
+                {"type": "command", "label": "Filtros Avanzados", "accelerator": "Ctrl+Shift+F", "command": lambda: app.advanced_filter_panel.toggle_panel()},
                 {"type": "separator"},
                 {"type": "command", "label": "Seleccionar Todo", "accelerator": "Ctrl+A", "command": lambda: app.grid_panel.select_all_rows()},
                 {"type": "command", "label": "Deseleccionar Todo", "accelerator": "Esc", "command": lambda: app.grid_panel.tree.selection_remove(app.grid_panel.tree.selection())}

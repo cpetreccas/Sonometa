@@ -1,10 +1,8 @@
 import os
 import ctypes
-import threading
 import tkinter as tk
 from collections import deque
 import customtkinter as ctk
-from PIL import Image, ImageTk
 from customtkinter import filedialog
 
 from grid_panel import GridPanel
@@ -113,29 +111,45 @@ class App(ctk.CTk):
             except Exception as e:
                 self.logger.warning(f"No se pudo establecer el icono de la app: {e}")
 
+    def _on_advanced_filter_changed(self, criteria):
+        """Procesa los criterios del panel avanzado y aplica el filtro en SearchManager."""
+        if hasattr(self, "search_manager"):
+            if hasattr(self.search_manager, "apply_advanced_filter"):
+                self.search_manager.apply_advanced_filter(criteria)
+            else:
+                self.search_manager.apply_search_filter()
+
     def _setup_ui(self):
         self.tool_panel = ToolPanel(self)
         self.tool_panel.pack(side="top", fill="x")
 
         self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.header_logo_pil)
 
-        self.frame_main = ctk.CTkFrame(self)
+        self.frame_main = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_main.pack(fill="both", expand=True, padx=15, pady=5)
 
+        # 1. Panel Lateral Izquierdo (DetailPanel)
         self.detail_panel = DetailPanel(
             app=self,
             parent=self.frame_main,
             logger=self.logger,
             get_resource_path=UiUtils.get_resource_path
         )
-        self.grid_panel = GridPanel(app=self, parent=self.frame_main, logger=self.logger)
-
-        # Mostrar el panel lateral según el estado inicial
         self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
+
+        # 2. Contenedor Derecho (Estructura Vertical)
+        self.frame_right = ctk.CTkFrame(self.frame_main, fg_color="transparent")
+        self.frame_right.pack(side="left", fill="both", expand=True)
+
+        # 3. Instanciar tabla (Padre: self.frame_right)
+        self.grid_panel = GridPanel(app=self, parent=self.frame_right, logger=self.logger)
+
+        # Reusar la instancia de filtro que vive dentro de GridPanel.
+        self.advanced_filter_panel = self.grid_panel.filter_panel
 
         self._setup_footer()
 
-        # Instanciación e integración con SearchManager
+        # SearchManager
         self.search_manager = SearchManager(
             app=self,
             tree=self.grid_panel.tree,
@@ -253,8 +267,8 @@ class App(ctk.CTk):
         self.bind("<Control-A>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-f>", lambda e: self.focus_header_search())
         self.bind("<Control-F>", lambda e: self.focus_header_search())
-
-        # Diálogo de reemplazo masivo de texto en nombres de archivo
+        self.bind("<Control-Shift-F>", lambda e: self.advanced_filter_panel.toggle_panel())
+        self.bind("<Control-Shift-f>", lambda e: self.advanced_filter_panel.toggle_panel())
         self.bind("<Control-r>", lambda e: self.open_replace_dialog())
         self.bind("<Control-R>", lambda e: self.open_replace_dialog())
 
