@@ -42,6 +42,17 @@ class HTMLExporter:
             return None
 
     @staticmethod
+    def _get_chartjs_code(relative_path="scripts/chart.min.js"):
+        """Lee el código fuente de Chart.js local para inyectarlo directamente en el HTML."""
+        if not relative_path or not os.path.exists(relative_path):
+            return None
+        try:
+            with open(relative_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            return None
+
+    @staticmethod
     def _extract_cover_from_audio(audio_path):
         """Extrae la carátula y la comprime a miniatura de baja resolución."""
         if not audio_path or not os.path.exists(audio_path):
@@ -281,6 +292,13 @@ class HTMLExporter:
 
         chart_data_json = json.dumps(chart_data)
 
+        # Cargar Chart.js local o fallback al CDN en caso de ausencia
+        chart_js_code = HTMLExporter._get_chartjs_code("scripts/chart.min.js")
+        if chart_js_code:
+            chart_script_tag = f"<script>{chart_js_code}</script>"
+        else:
+            chart_script_tag = '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>'
+
         logo_b64 = HTMLExporter._get_logo_base64(logo_path)
         if logo_b64:
             logo_brand_html = f'<img src="{logo_b64}" class="brand-logo-full" alt="Sonometa Audio Tag Suite"/>'
@@ -300,8 +318,12 @@ class HTMLExporter:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Habilita el modo App nativa en iOS (Pantalla Completa) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sonometa">
     <title>Sonometa - Mi Colección</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    {chart_script_tag}
     <style>
         :root {{
             /* Tonos ajustados estilo CustomTkinter/App Escritorio */
