@@ -39,6 +39,9 @@ class ProcessManager:
         return None
 
     def process_discogs_data(self):
+        if hasattr(self.app, "discogs_client") and hasattr(self.app.discogs_client, "clear_runtime_cache"):
+            self.app.discogs_client.clear_runtime_cache()
+
         target_rows = self.app.tree.selection()
         if not target_rows:
             target_rows = self.app.tree.get_children()

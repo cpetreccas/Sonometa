@@ -115,6 +115,21 @@ pyinstaller --noconfirm --windowed --name Sonometa --icon .\assets\logo_relleno.
 
 > Nota: en Windows, `--add-data` usa separador `;`.
 
+## Benchmark rapido (filtros)
+
+Se incluye un harness liviano para estimar el costo del motor de filtros con 4,000 filas sinteticas:
+
+```powershell
+python .\scripts\benchmark_filter_engine.py --rows 4000 --iterations 120
+```
+
+Pruebas opcionales:
+
+```powershell
+python .\scripts\benchmark_filter_engine.py --rows 4000 --iterations 300 --seed 42
+python .\scripts\benchmark_filter_engine.py --rows 8000 --iterations 120 --seed 42
+```
+
 ## Estado del proyecto
 
 El proyecto esta organizado por paneles de UI y managers de dominio, con foco en trazabilidad (logs), productividad de edicion y automatizacion de metadatos. Para contexto rapido de IA, revisar `AGENTS.MD`.

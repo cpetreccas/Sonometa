@@ -359,6 +359,11 @@ class App(ctk.CTk):
         self.load_audio_files(self.folder_path)
 
     def clear_all(self):
+        if hasattr(self, "audio_manager") and hasattr(self.audio_manager, "clear_runtime_caches"):
+            self.audio_manager.clear_runtime_caches()
+        if hasattr(self, "discogs_client") and hasattr(self.discogs_client, "clear_runtime_cache"):
+            self.discogs_client.clear_runtime_cache()
+
         if self._multi_select_mode:
             self.detail_panel.exit_multi_mode()
         for row in self.tree.get_children():
@@ -376,11 +381,18 @@ class App(ctk.CTk):
     def on_close(self):
         if hasattr(self, "detail_panel") and self.detail_panel.audio_player:
             self.detail_panel.audio_player.stop_and_unload()
+        if hasattr(self, "audio_manager") and hasattr(self.audio_manager, "clear_runtime_caches"):
+            self.audio_manager.clear_runtime_caches()
+        if hasattr(self, "discogs_client") and hasattr(self.discogs_client, "clear_runtime_cache"):
+            self.discogs_client.clear_runtime_cache()
         self.catalog_manager.save_catalog_values()
         self.catalog_manager.save_settings()
         self.destroy()
 
     def load_audio_files(self, folder):
+        if hasattr(self, "audio_manager") and hasattr(self.audio_manager, "clear_runtime_caches"):
+            self.audio_manager.clear_runtime_caches()
+
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.file_paths_map.clear()

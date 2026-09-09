@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import urllib.parse
 import urllib.request
 from http import HTTPStatus
@@ -11,6 +12,18 @@ class DiscogsClient:
 
     def __init__(self, token_getter):
         self._get_token = token_getter
+        self._cache_lock = threading.Lock()
+        self._search_cache = {}
+        self._images_cache = {}
+
+    @staticmethod
+    def _normalize_query(query):
+        return " ".join(str(query or "").strip().lower().split())
+
+    def clear_runtime_cache(self):
+        with self._cache_lock:
+            self._search_cache.clear()
+            self._images_cache.clear()
 
     def _get_headers(self):
         headers = {
@@ -23,6 +36,13 @@ class DiscogsClient:
 
     def search_release(self, query):
         """Busca un lanzamiento en Discogs y devuelve (artist, title, year, cover_url)."""
+        norm_query = self._normalize_query(query)
+        if norm_query:
+            with self._cache_lock:
+                cached = self._search_cache.get(norm_query)
+            if cached is not None:
+                return cached
+
         try:
             encoded_query = urllib.parse.quote(query)
             url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release"
@@ -53,7 +73,13 @@ class DiscogsClient:
                         f"[DISCOGS] [{status_code} {status_phrase}] '{query}' | "
                         f"Año: {year} | Covers: {covers_count}"
                     )
-                    return artist, title, str(year), cover_url
+                    result = (artist, title, str(year), cover_url)
+                    if norm_query:
+                        with self._cache_lock:
+                            if len(self._search_cache) > 3000:
+                                self._search_cache.clear()
+                            self._search_cache[norm_query] = result
+                    return result
 
                 logger.warning(
                     f"[DISCOGS] [{status_code} {status_phrase}] '{query}' | "
@@ -90,6 +116,14 @@ class DiscogsClient:
 
     def get_release_images(self, query, max_images=8):
         """Devuelve una lista con las URLs de las carátulas disponibles."""
+        norm_query = self._normalize_query(query)
+        cache_key = (norm_query, int(max_images))
+        if norm_query:
+            with self._cache_lock:
+                cached = self._images_cache.get(cache_key)
+            if isinstance(cached, tuple):
+                return list(cached)
+
         try:
             encoded_query = urllib.parse.quote(query)
             url = f"https://api.discogs.com/database/search?q={encoded_query}&format=Vinyl&type=release&per_page={max_images}"
@@ -106,6 +140,11 @@ class DiscogsClient:
                             images.append(img)
                         if len(images) >= max_images:
                             break
+                    if norm_query:
+                        with self._cache_lock:
+                            if len(self._images_cache) > 3000:
+                                self._images_cache.clear()
+                            self._images_cache[cache_key] = tuple(images)
                     return images
         except Exception as e:
             logger.error(f"[DISCOGS] Error obteniendo lista de imágenes: {str(e)}")

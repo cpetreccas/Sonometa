@@ -32,6 +32,8 @@ class DetailPanel:
         # Guarda la imagen PIL en memoria para redimensionarla dinámicamente según la altura
         self._current_raw_cover_pil = None
         self._resize_timer = None
+        self._deferred_row_sync_after_id = None
+        self._deferred_row_sync_token = 0
 
         # Guarda el ID de la fila que se estaba editando antes de cambiar de selección
         self._editing_row_id = None
@@ -522,6 +524,44 @@ class DetailPanel:
             self.app.after_cancel(self._resize_timer)
         self._resize_timer = self.app.after(30, self._apply_dynamic_cover_resize)
 
+    def _schedule_row_media_sync(self, item_id, file_path):
+        if self._deferred_row_sync_after_id:
+            try:
+                self.app.after_cancel(self._deferred_row_sync_after_id)
+            except Exception:
+                pass
+
+        self._deferred_row_sync_token += 1
+        token = self._deferred_row_sync_token
+        self._deferred_row_sync_after_id = self.app.after(
+            70,
+            lambda t=token, r=item_id, p=file_path: self._sync_row_media_if_current(t, r, p)
+        )
+
+    def _sync_row_media_if_current(self, token, item_id, file_path):
+        self._deferred_row_sync_after_id = None
+        if token != self._deferred_row_sync_token:
+            return
+
+        selected = self.app.tree.selection()
+        if not selected or selected[0] != item_id:
+            return
+
+        if not file_path or not os.path.exists(file_path):
+            return
+
+        self.display_cover_art(file_path)
+
+        total_duration = self.get_fast_audio_duration(file_path)
+
+        if self.audio_player:
+            self.audio_player.load_track(file_path)
+            if total_duration > 0:
+                self.audio_player.total_length = total_duration
+
+        if total_duration > 0:
+            self.update_audio_time_display(0, total_duration)
+
     def _apply_dynamic_cover_resize(self):
         """Ajusta la imagen y la caja entre 60px y 230px según el alto libre del contenedor."""
         if not self.frame_cover_container:
@@ -958,6 +998,13 @@ class DetailPanel:
 
     def clear_fields(self):
         """Limpia la interfaz sin destruir la duración del reproductor para la fila seleccionada."""
+        if self._deferred_row_sync_after_id:
+            try:
+                self.app.after_cancel(self._deferred_row_sync_after_id)
+            except Exception:
+                pass
+            self._deferred_row_sync_after_id = None
+
         selected = self.app.tree.selection()
         current_file = self.app.file_paths_map.get(selected[0]) if selected else None
 
@@ -1023,21 +1070,7 @@ class DetailPanel:
         self.refresh_catalog_comboboxes()
 
         file_path = self.app.file_paths_map.get(item_id)
-        if file_path and os.path.exists(file_path):
-            self.display_cover_art(file_path)
-
-            # 1. Leer la duración exacta directamente de la cabecera del archivo de audio
-            total_duration = self.get_fast_audio_duration(file_path)
-
-            # 2. Cargar la pista en el reproductor manteniendo el buffer listo
-            if self.audio_player:
-                self.audio_player.load_track(file_path)
-                if total_duration > 0:
-                    self.audio_player.total_length = total_duration
-
-            # 3. Forzar el refresco de la etiqueta de tiempo al final del ciclo
-            if total_duration > 0:
-                self.update_audio_time_display(0, total_duration)
+        self._schedule_row_media_sync(item_id, file_path)
 
     def paste_cover_from_clipboard(self, event=None):
         try:

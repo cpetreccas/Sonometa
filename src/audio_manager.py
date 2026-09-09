@@ -2,6 +2,7 @@ import io
 import os
 import logging
 import xml.etree.ElementTree as ET
+import threading
 
 # Logger unificado de Sonometa
 logger = logging.getLogger("Sonometa")
@@ -10,6 +11,49 @@ logger = logging.getLogger("Sonometa")
 class AudioManager:
     """Responsable exclusivamente de la lectura, modificación y eliminación
     de etiquetas de audio mediante mutagen. No contiene ninguna lógica de UI."""
+
+    def __init__(self):
+        self._metadata_cache = {}
+        self._cache_lock = threading.Lock()
+
+    def _build_file_cache_key(self, file_path):
+        try:
+            stat = os.stat(file_path)
+            return (os.path.abspath(file_path), stat.st_mtime_ns, stat.st_size)
+        except Exception:
+            return None
+
+    def _get_cached_metadata(self, file_path):
+        key = self._build_file_cache_key(file_path)
+        if not key:
+            return None
+
+        with self._cache_lock:
+            cached = self._metadata_cache.get(key)
+            if cached is None:
+                return None
+            return dict(cached)
+
+    def _set_cached_metadata(self, file_path, metadata_dict):
+        key = self._build_file_cache_key(file_path)
+        if not key:
+            return
+
+        with self._cache_lock:
+            if len(self._metadata_cache) > 8000:
+                self._metadata_cache.clear()
+            self._metadata_cache[key] = dict(metadata_dict)
+
+    def _invalidate_metadata_cache(self, file_path):
+        abs_target = os.path.abspath(file_path)
+        with self._cache_lock:
+            stale_keys = [k for k in self._metadata_cache.keys() if k[0] == abs_target]
+            for key in stale_keys:
+                self._metadata_cache.pop(key, None)
+
+    def clear_runtime_caches(self):
+        with self._cache_lock:
+            self._metadata_cache.clear()
 
     # ------------------------------------------------------------------
     # Lectura de metadatos
@@ -27,6 +71,10 @@ class AudioManager:
         from mutagen.mp4 import MP4
         from mutagen.id3 import ID3
         from mutagen import File as MutagenFile
+
+        cached = self._get_cached_metadata(file_path)
+        if cached is not None:
+            return cached
 
         data = {
             "Filename": filename,
@@ -143,6 +191,7 @@ class AudioManager:
         except Exception as e:
             logger.error(f"Error extrayendo metadatos de {filename}: {str(e)}")
 
+        self._set_cached_metadata(file_path, data)
         return data
 
     def count_traktor_cues(self, file_path):
@@ -397,6 +446,7 @@ class AudioManager:
             logger.error(f"Error al guardar etiqueta '{field_name}' en {os.path.basename(file_path)}: {str(e)}")
 
         finally:
+            self._invalidate_metadata_cache(file_path)
             if app and hasattr(app, "detail_panel") and app.detail_panel.audio_player:
                 app.detail_panel.audio_player.resume_after_file_write(file_path, was_playing, saved_pos)
 
@@ -468,6 +518,7 @@ class AudioManager:
                 )
                 return False
 
+            self._invalidate_metadata_cache(file_path)
             return True
 
         except Exception as e:
@@ -545,6 +596,7 @@ class AudioManager:
                     audio.save()
 
             logger.info(f"Carátula eliminada con éxito de: {os.path.basename(file_path)}")
+            self._invalidate_metadata_cache(file_path)
 
         except Exception as e:
             logger.error(f"Error al eliminar carátula de {os.path.basename(file_path)}: {str(e)}")
@@ -641,6 +693,7 @@ class AudioManager:
                         del audio.tags[k]
                     audio.save()
 
+            self._invalidate_metadata_cache(file_path)
             return True
 
         except Exception as e:
