@@ -53,6 +53,8 @@ body {
 .brand-version { font-size: 12px; font-weight: 600; color: #8B5CF6; }
 .brand-subtitle { font-size: 8px; font-weight: 600; letter-spacing: 1.2px; color: var(--text-muted); margin-top: 2px; }
 
+.header-actions { display: flex; align-items: center; gap: 8px; }
+
 .btn-primary {
     background-color: var(--primary-purple);
     color: white;
@@ -67,6 +69,12 @@ body {
 }
 .btn-primary:hover { background-color: var(--primary-hover); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-header {
+    width: 150px;
+    text-align: center;
+    white-space: nowrap;
+}
 
 .btn-reset {
     background-color: transparent;

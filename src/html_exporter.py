@@ -41,6 +41,8 @@ class SQLiteManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_album ON tracks(album);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_publisher ON tracks(publisher);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_year ON tracks(year);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_filename ON tracks(filename);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_artist_title ON tracks(artist, title);")
 
         cursor.executemany("""
             INSERT INTO tracks (filename, artist, title, remix, album, genre, publisher, year, cover_blob)
@@ -88,14 +90,14 @@ class TemplateProvider:
             <div class="brand-text">
                 <div class="brand-title-row">
                     <span class="brand-title">Sonometa</span>
-                    <span class="brand-version">v0.17</span>
+                    <span class="brand-version">v1.2</span>
                 </div>
                 <span class="brand-subtitle">AUDIO TAG SUITE</span>
             </div>
         </div>
-        <div>
-            <button id="btnDashboard" class="btn-primary" style="display:none;" onclick="switchView('dashboard')">Dashboard</button>
-            <button id="btnTable" class="btn-primary" onclick="switchView('table')">Ver mi colección</button>
+        <div class="header-actions">
+            <button id="btnDashboard" class="btn-primary btn-header" style="display:none;" onclick="switchView('dashboard')">Ver dashboards</button>
+            <button id="btnTable" class="btn-primary btn-header" onclick="switchView('table')">Ver mi colección</button>
         </div>
     </div>
 
@@ -239,6 +241,8 @@ body {
 .brand-version { font-size: 12px; font-weight: 600; color: #8B5CF6; }
 .brand-subtitle { font-size: 8px; font-weight: 600; letter-spacing: 1.2px; color: var(--text-muted); margin-top: 2px; }
 
+.header-actions { display: flex; align-items: center; gap: 8px; }
+
 .btn-primary {
     background-color: var(--primary-purple);
     color: white;
@@ -253,6 +257,12 @@ body {
 }
 .btn-primary:hover { background-color: var(--primary-hover); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-header {
+    width: 150px;
+    text-align: center;
+    white-space: nowrap;
+}
 
 .btn-reset {
     background-color: transparent;
@@ -306,9 +316,15 @@ body {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 .chart-card h3 {
-    margin-top: 0; margin-bottom: 12px; font-size: 12px; font-weight: 600;
-    letter-spacing: 0.5px; color: var(--text-main); text-transform: uppercase;
-    border-bottom: 1px solid var(--border-color); padding-bottom: 8px;
+    margin-top: 0; 
+    margin-bottom: 14px; 
+    font-size: 11px; 
+    font-weight: 700;
+    letter-spacing: 0.8px; 
+    color: var(--text-subtle);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border-color); 
+    padding-bottom: 10px;
 }
 
 .chart-flex-wrapper { display: flex; flex-direction: column; gap: 12px; align-items: center; }
@@ -601,7 +617,7 @@ function initDashboard() {
     buildChart('albumChart', 'albumLegend', "SELECT CASE WHEN album IS NULL OR album = '' THEN 'Sin Álbum' ELSE album END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'pie');
     buildChart('genreChart', 'genreLegend', "SELECT CASE WHEN genre IS NULL OR genre = '' THEN 'Sin Género' ELSE genre END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'pie');
     buildChart('publisherChart', 'publisherLegend', "SELECT CASE WHEN publisher IS NULL OR publisher = '' THEN 'Sin Etiqueta' ELSE publisher END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'bar');
-    buildChart('yearChart', 'yearLegend', "SELECT CASE WHEN year IS NULL OR year = '' THEN 'Sin Año' ELSE year END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'bar');
+    buildChart('yearChart', 'yearLegend', "SELECT CASE WHEN year IS NULL OR year = '' THEN 'Sin Año' ELSE year END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY 1 ASC", 'bar');
 }
 
 function populateSelectFilters() {
@@ -635,6 +651,13 @@ function updateFilterStyles() {
     const filters = ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'];
     let anyActive = false;
 
+    // Verificar si hay texto en el campo de búsqueda
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput && searchInput.value.trim() !== '') {
+        anyActive = true;
+    }
+
+    // Verificar selects de filtros
     filters.forEach(id => {
         const elem = document.getElementById(id);
         if (elem) {
@@ -659,10 +682,16 @@ function handleFilterChange() {
 }
 
 function resetAllFilters() {
+    // Limpiar input de búsqueda
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = '';
+
+    // Limpiar selects
     ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'].forEach(id => {
         const elem = document.getElementById(id);
         if (elem) elem.value = '';
     });
+
     updateFilterStyles();
     resetAndSearch();
 }
@@ -724,7 +753,13 @@ function loadTableData() {
     }
 
     const offset = currentPage * PAGE_SIZE;
-    const query = `SELECT cover_blob, filename, artist, title, remix, album, genre, publisher, year FROM tracks ${whereSql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+
+    // Criterio de ordenación dinámico según la vista activa
+    const orderBySql = verDetalle 
+        ? "ORDER BY LOWER(COALESCE(NULLIF(artist, ''), filename)) ASC, LOWER(title) ASC" 
+        : "ORDER BY LOWER(filename) ASC";
+
+    const query = `SELECT cover_blob, filename, artist, title, remix, album, genre, publisher, year FROM tracks ${whereSql} ${orderBySql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
     
     let res = [];
     try {
@@ -873,6 +908,7 @@ function toggleVerDetalle() {
 
 let searchTimeout;
 function debouncedSearch() {
+    updateFilterStyles();
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(resetAndSearch, 150);
 }
@@ -980,7 +1016,7 @@ class HTMLExporter:
             elif any(k in h_lower for k in ["remix"]): idx["remix"] = i
             elif any(k in h_lower for k in ["álbum", "album"]): idx["album"] = i
             elif any(k in h_lower for k in ["género", "genre"]): idx["genre"] = i
-            elif any(k in h_lower for k in ["sello", "publisher"]): idx["publisher"] = i
+            elif any(k in h_lower for k in ["etiqueta", "sello", "publisher", "label"]): idx["publisher"] = i
             elif any(k in h_lower for k in ["año", "year"]): idx["year"] = i
 
         tracks_data = []

@@ -103,7 +103,7 @@ function initDashboard() {
     buildChart('albumChart', 'albumLegend', "SELECT CASE WHEN album IS NULL OR album = '' THEN 'Sin Álbum' ELSE album END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'pie');
     buildChart('genreChart', 'genreLegend', "SELECT CASE WHEN genre IS NULL OR genre = '' THEN 'Sin Género' ELSE genre END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'pie');
     buildChart('publisherChart', 'publisherLegend', "SELECT CASE WHEN publisher IS NULL OR publisher = '' THEN 'Sin Etiqueta' ELSE publisher END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'bar');
-    buildChart('yearChart', 'yearLegend', "SELECT CASE WHEN year IS NULL OR year = '' THEN 'Sin Año' ELSE year END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'bar');
+    buildChart('yearChart', 'yearLegend', "SELECT CASE WHEN year IS NULL OR year = '' THEN 'Sin Año' ELSE year END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY 1 ASC", 'bar');
 }
 
 function populateSelectFilters() {
@@ -137,6 +137,13 @@ function updateFilterStyles() {
     const filters = ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'];
     let anyActive = false;
 
+    // Verificar si hay texto en el campo de búsqueda
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput && searchInput.value.trim() !== '') {
+        anyActive = true;
+    }
+
+    // Verificar selects de filtros
     filters.forEach(id => {
         const elem = document.getElementById(id);
         if (elem) {
@@ -161,10 +168,16 @@ function handleFilterChange() {
 }
 
 function resetAllFilters() {
+    // Limpiar input de búsqueda
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = '';
+
+    // Limpiar selects
     ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'].forEach(id => {
         const elem = document.getElementById(id);
         if (elem) elem.value = '';
     });
+
     updateFilterStyles();
     resetAndSearch();
 }
@@ -226,7 +239,13 @@ function loadTableData() {
     }
 
     const offset = currentPage * PAGE_SIZE;
-    const query = `SELECT cover_blob, filename, artist, title, remix, album, genre, publisher, year FROM tracks ${whereSql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+
+    // Criterio de ordenación dinámico según la vista activa
+    const orderBySql = verDetalle 
+        ? "ORDER BY LOWER(COALESCE(NULLIF(artist, ''), filename)) ASC, LOWER(title) ASC" 
+        : "ORDER BY LOWER(filename) ASC";
+
+    const query = `SELECT cover_blob, filename, artist, title, remix, album, genre, publisher, year FROM tracks ${whereSql} ${orderBySql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
     
     let res = [];
     try {
@@ -375,6 +394,7 @@ function toggleVerDetalle() {
 
 let searchTimeout;
 function debouncedSearch() {
+    updateFilterStyles();
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(resetAndSearch, 150);
 }
