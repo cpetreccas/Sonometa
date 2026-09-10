@@ -151,6 +151,10 @@ class SearchManager:
         self.sync_all_tree_items()
         query = remove_accents(self.search_var.get().strip())
 
+        if self.grid_panel and hasattr(self.grid_panel, "apply_combined_filters"):
+            self.grid_panel.apply_combined_filters(search_query=query)
+            return
+
         matching_rows = []
         for row_id in self._all_tree_items:
             if not self.tree.exists(row_id):

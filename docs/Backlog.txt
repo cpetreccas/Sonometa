@@ -5,5 +5,4 @@ FUNCIONALIDADES GENERALES:
 - Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
 
 Panel de filtros avanzados:
-- No se combina los filtros avanzados con el buscador.
 - Se pierde la ordenación cuando seleccionas un álbum y luego le das a TODOS

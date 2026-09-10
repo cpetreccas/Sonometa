@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import tkinter as tk
+import unicodedata
 from tkinter import ttk
 import customtkinter as ctk
 from undo_manager import HistoryAction
@@ -31,6 +32,7 @@ class GridPanel:
         # Estado del Panel de Filtro Avanzado
         self.filter_panel_visible = False
         self.active_filters = {}
+        self._advanced_criteria = AdvancedFilterCriteria()
 
         # Configuración del nivel de zoom base
         self.zoom_level = 1.0
@@ -105,30 +107,105 @@ class GridPanel:
         return "break"
 
     def apply_advanced_filters(self, criteria: dict):
-        """
-        Filtra dinámicamente las filas del Treeview evaluando texto libre,
-        combos de catálogo y toggles de campos faltantes. Compatible con filas desasociadas.
-        """
         if isinstance(criteria, AdvancedFilterCriteria):
             criteria_obj = criteria
         else:
             criteria_obj = AdvancedFilterCriteria.from_dict(criteria)
 
+        self._advanced_criteria = criteria_obj
         self.active_filters = criteria_obj.to_dict()
+        self.apply_combined_filters(criteria=criteria_obj)
 
-        # Usar el mapa de rutas maestro para obtener TODOS los row_ids existentes (visibles e invisibles)
-        if hasattr(self.app, "file_paths_map") and self.app.file_paths_map:
-            all_rows = list(self.app.file_paths_map.keys())
-        else:
-            all_rows = getattr(self.app.search_manager, "_all_tree_items", list(self.tree.get_children('')))
+    @staticmethod
+    def _remove_accents(text: str) -> str:
+        if not text:
+            return ""
+        normalized = unicodedata.normalize("NFD", str(text))
+        return "".join(c for c in normalized if unicodedata.category(c) != "Mn").lower()
 
-        cols = list(self.tree["columns"])
-        col_index = build_column_index(cols)
+    def _build_row_search_text(self, values, columns, col_index):
+        searchable_columns = (
+            "Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment"
+        )
+        parts = []
+        for col_name in searchable_columns:
+            idx = col_index.get(col_name)
+            if idx is None or idx >= len(values):
+                continue
+            cell_val = values[idx]
+            if cell_val is not None:
+                parts.append(str(cell_val))
+        return self._remove_accents(" ".join(parts))
 
+    def _matches_advanced_criteria(self, values, col_index, criteria_obj: AdvancedFilterCriteria) -> bool:
         text_filters = criteria_obj.text
         combo_filters = criteria_obj.combo
         toggles = criteria_obj.toggles
 
+        for col_name, search_val in text_filters.items():
+            idx = col_index.get(col_name)
+            cell_val = str(values[idx]).lower() if idx is not None and idx < len(values) else ""
+            if search_val not in cell_val:
+                return False
+
+        for col_name, selected_val in combo_filters.items():
+            idx = col_index.get(col_name)
+            cell_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
+            if selected_val == "[ Vacío ]":
+                if cell_val != "":
+                    return False
+            elif cell_val != selected_val:
+                return False
+
+        if toggles.get("no_year"):
+            idx = col_index.get("Year")
+            year_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
+            if year_val not in ("", "0", "None"):
+                return False
+
+        if toggles.get("no_cover"):
+            idx = col_index.get("Cover")
+            cover_val = str(values[idx]).strip().lower() if idx is not None and idx < len(values) else ""
+            if cover_val in ("sí", "si", "yes", "true", "1"):
+                return False
+
+        if toggles.get("no_comment"):
+            idx = col_index.get("Comment")
+            comment_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
+            if comment_val != "":
+                return False
+
+        return True
+
+    @staticmethod
+    def _has_active_advanced_filters(criteria_obj: AdvancedFilterCriteria) -> bool:
+        if criteria_obj.text or criteria_obj.combo:
+            return True
+        return any(bool(v) for v in criteria_obj.toggles.values())
+
+    def apply_combined_filters(self, search_query=None, criteria=None):
+        """Aplica búsqueda textual y filtro avanzado de forma unificada con AND lógico."""
+        criteria_obj = self._advanced_criteria
+        if criteria is not None:
+            criteria_obj = criteria if isinstance(criteria, AdvancedFilterCriteria) else AdvancedFilterCriteria.from_dict(criteria)
+            self._advanced_criteria = criteria_obj
+            self.active_filters = criteria_obj.to_dict()
+
+        if search_query is None:
+            raw_query = ""
+            if hasattr(self.app, "search_manager") and hasattr(self.app.search_manager, "search_var"):
+                raw_query = self.app.search_manager.search_var.get()
+            normalized_query = self._remove_accents(str(raw_query).strip())
+        else:
+            normalized_query = self._remove_accents(str(search_query).strip())
+
+        if hasattr(self.app, "file_paths_map") and self.app.file_paths_map:
+            all_rows = list(self.app.file_paths_map.keys())
+        else:
+            all_rows = getattr(getattr(self.app, "search_manager", None), "_all_tree_items", list(self.tree.get_children("")))
+
+        cols = list(self.tree["columns"])
+        col_index = build_column_index(cols)
         visible_rows = []
 
         for row_id in all_rows:
@@ -139,73 +216,63 @@ class GridPanel:
             if not values:
                 continue
 
-            matches = True
+            if normalized_query:
+                row_search_text = self._build_row_search_text(values, cols, col_index)
+                if normalized_query not in row_search_text:
+                    continue
 
-            # 1. Filtros de Texto Libre (Artist, Title, MixArtist)
-            for col_name, search_val in text_filters.items():
-                idx = col_index.get(col_name)
-                cell_val = str(values[idx]).lower() if idx is not None and idx < len(values) else ""
-                if search_val not in cell_val:
-                    matches = False
-                    break
+            if not self._matches_advanced_criteria(values, col_index, criteria_obj):
+                continue
 
-            # 2. Filtros de Catálogo (Album, Genre, Publisher)
-            if matches:
-                for col_name, selected_val in combo_filters.items():
-                    idx = col_index.get(col_name)
-                    cell_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
-                    if selected_val == "[ Vacío ]":
-                        if cell_val != "":
-                            matches = False
-                            break
-                    else:
-                        if cell_val != selected_val:
-                            matches = False
-                            break
-
-            # 3. Toggles Rápido de Estado (Sin Año, Sin Carátula, Sin Comentarios)
-            if matches and toggles.get("no_year"):
-                idx = col_index.get("Year")
-                year_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
-                if year_val not in ("", "0", "None"):
-                    matches = False
-
-            if matches and toggles.get("no_cover"):
-                idx = col_index.get("Cover")
-                cover_val = str(values[idx]).strip().lower() if idx is not None and idx < len(values) else ""
-                if cover_val in ("sí", "si", "yes", "true", "1"):
-                    matches = False
-
-            if matches and toggles.get("no_comment"):
-                idx = col_index.get("Comment")
-                comment_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
-                if comment_val != "":
-                    matches = False
-
-            # Solo guardar filas visibles; los movimientos se aplican en bloque al final.
-            if matches:
-                visible_rows.append(row_id)
+            visible_rows.append(row_id)
 
         visible_set = set(visible_rows)
-        current_rows = list(self.tree.get_children(''))
+        current_rows = list(self.tree.get_children(""))
+        current_set = set(current_rows)
+        changed_visibility = False
+
         to_detach = [row_id for row_id in current_rows if row_id not in visible_set]
         if to_detach:
             self.tree.detach(*to_detach)
+            changed_visibility = True
 
         for idx, row_id in enumerate(visible_rows):
-            tag = "even" if idx % 2 == 0 else "odd"
-            self.tree.item(row_id, tags=(tag,))
-            self.tree.reattach(row_id, '', idx)
+            should_tag = "even" if idx % 2 == 0 else "odd"
+            current_tags = self.tree.item(row_id, "tags")
+            if not current_tags or current_tags[0] != should_tag:
+                self.tree.item(row_id, tags=(should_tag,))
 
-        # Purgar selecciones de filas que acaban de ser ocultadas
-        current_selection = [r for r in self.tree.selection() if r in visible_rows]
-        self.tree.selection_set(current_selection)
+            if row_id not in current_set:
+                self.tree.reattach(row_id, "", idx)
+                changed_visibility = True
+                continue
 
-        if hasattr(self.app, "detail_panel"):
-            self.app.detail_panel.refresh_process_button_text(len(current_selection))
-            self.app.detail_panel.on_row_select(None)
+            try:
+                if self.tree.index(row_id) != idx:
+                    self.tree.reattach(row_id, "", idx)
+                    changed_visibility = True
+            except Exception:
+                self.tree.reattach(row_id, "", idx)
+                changed_visibility = True
 
-        self.logger.info(f"Filtro avanzado aplicado: {len(visible_rows)} de {len(all_rows)} registros visibles.")
+        current_selection = list(self.tree.selection())
+        selected_visible = [row_id for row_id in current_selection if row_id in visible_set]
+        selection_changed = selected_visible != current_selection
+        if selection_changed:
+            self.tree.selection_set(selected_visible)
+
+        if changed_visibility or selection_changed:
+            if hasattr(self.app, "detail_panel"):
+                self.app.detail_panel.refresh_process_button_text(len(selected_visible))
+                self.app.detail_panel.on_row_select(None)
+
+            if hasattr(self, "_update_tree_scrollbars"):
+                self._update_tree_scrollbars()
+
+        self.logger.info(
+            f"Filtro combinado aplicado: {len(visible_rows)} de {len(all_rows)} visibles "
+            f"(texto={'on' if normalized_query else 'off'}, avanzado={'on' if self._has_active_advanced_filters(criteria_obj) else 'off'})."
+        )
 
     def _install_editor_bindtag_guard(self):
         # Captura TAB antes del binding de clase TCombobox/TEntry.
