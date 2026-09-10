@@ -67,7 +67,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v1 - Audio Tag Suite")
+        self.title("Sonometa v1.1 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))

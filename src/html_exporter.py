@@ -21,7 +21,6 @@ class SQLiteManager:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # 1. Crear tabla de tracks (cover_blob definido como TEXT para Base64)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tracks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,14 +36,12 @@ class SQLiteManager:
             )
         """)
 
-        # 2. Crear índices B-Tree para optimizar búsquedas y consultas SQL en WASM
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_search ON tracks(artist, title, album, genre, publisher);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_genre ON tracks(genre);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_album ON tracks(album);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_publisher ON tracks(publisher);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_year ON tracks(year);")
 
-        # 3. Inserción masiva
         cursor.executemany("""
             INSERT INTO tracks (filename, artist, title, remix, album, genre, publisher, year, cover_blob)
             VALUES (:filename, :artist, :title, :remix, :album, :genre, :publisher, :year, :cover_blob)
@@ -144,20 +141,26 @@ class TemplateProvider:
     <!-- TABLE VIEW -->
     <div id="tableView" style="display:none;">
         <div class="controls-panel">
-            <div class="controls-row">
-                <div class="search-box">
-                    <input type="text" id="searchInput" class="search-input" placeholder="Buscar canción..." oninput="debouncedSearch()">
-                </div>
-                <label class="checkbox-label no-select">
-                    <input type="checkbox" id="chkVerDetalle" onchange="toggleVerDetalle()">
-                    <span>Ver detalle</span>
-                </label>
+            <div class="search-box">
+                <input type="text" id="searchInput" class="search-input" placeholder="Buscar canción..." oninput="debouncedSearch()">
             </div>
-            <div class="controls-row">
-                <select id="albumFilter" class="filter-select" onchange="resetAndSearch()"><option value="">Álbum: Todos</option></select>
-                <select id="genreFilter" class="filter-select" onchange="resetAndSearch()"><option value="">Género: Todos</option></select>
-                <select id="publisherFilter" class="filter-select" onchange="resetAndSearch()"><option value="">Etiqueta: Todas</option></select>
-                <select id="yearFilter" class="filter-select" onchange="resetAndSearch()"><option value="">Año: Todos</option></select>
+            <div class="controls-row-filters">
+                <select id="albumFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Álbum: Todos</option></select>
+                <select id="genreFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Género: Todos</option></select>
+                <select id="publisherFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Etiqueta: Todas</option></select>
+                <select id="yearFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Año: Todos</option></select>
+                <button id="btnResetFilters" class="btn-reset" onclick="resetAllFilters()" title="Limpiar todos los filtros" style="display:none;">✕ Limpiar filtros</button>
+            </div>
+        </div>
+
+        <div class="table-toolbar">
+            <div class="results-text" id="resultsCount">0 resultados</div>
+            <div class="toggle-container no-select">
+                <span class="toggle-label">Ver detalle</span>
+                <label class="switch">
+                    <input type="checkbox" id="chkVerDetalle" onchange="toggleVerDetalle()">
+                    <span class="slider round"></span>
+                </label>
             </div>
         </div>
 
@@ -168,9 +171,9 @@ class TemplateProvider:
             </table>
         </div>
 
-        <div class="pagination-controls">
+        <div class="pagination-controls" id="paginationControls" style="display:none;">
             <button id="prevBtn" class="btn-primary" onclick="changePage(-1)">Anterior</button>
-            <span id="pageInfo">Página 1</span>
+            <span id="pageInfo">Página 1 de 1</span>
             <button id="nextBtn" class="btn-primary" onclick="changePage(1)">Siguiente</button>
         </div>
     </div>
@@ -204,7 +207,7 @@ body {
     color: var(--text-main);
     font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     margin: 0;
-    padding: 16px;
+    padding: 12px;
     -webkit-font-smoothing: antialiased;
 }
 
@@ -222,41 +225,62 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 24px;
-    padding-bottom: 16px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
     border-bottom: 1px solid var(--border-color);
 }
 
-.brand-container { display: flex; align-items: center; gap: 12px; cursor: default; }
-.brand-logo-wrapper { width: 38px; height: 30px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.brand-container { display: flex; align-items: center; gap: 10px; cursor: default; }
+.brand-logo-wrapper { width: 34px; height: 28px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .brand-logo-svg { width: 100%; height: 100%; display: block; pointer-events: none; }
 .brand-text { display: flex; flex-direction: column; }
-.brand-title-row { display: flex; align-items: baseline; gap: 8px; }
-.brand-title { font-size: 20px; font-weight: 700; color: #FFFFFF; line-height: 1; }
-.brand-version { font-size: 13px; font-weight: 600; color: #8B5CF6; }
-.brand-subtitle { font-size: 9px; font-weight: 600; letter-spacing: 1.5px; color: var(--text-muted); margin-top: 3px; }
+.brand-title-row { display: flex; align-items: baseline; gap: 6px; }
+.brand-title { font-size: 18px; font-weight: 700; color: #FFFFFF; line-height: 1; }
+.brand-version { font-size: 12px; font-weight: 600; color: #8B5CF6; }
+.brand-subtitle { font-size: 8px; font-weight: 600; letter-spacing: 1.2px; color: var(--text-muted); margin-top: 2px; }
 
 .btn-primary {
     background-color: var(--primary-purple);
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 9px 18px;
+    padding: 8px 14px;
     border-radius: 8px;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
     box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
 }
 .btn-primary:hover { background-color: var(--primary-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-reset {
+    background-color: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+@media (min-width: 768px) { .btn-reset { width: auto; grid-column: auto; } }
+@media (max-width: 767px) { .btn-reset { grid-column: span 2; } }
+.btn-reset:hover {
+    color: #EF4444;
+    border-color: #EF4444;
+    background-color: rgba(239, 68, 68, 0.1);
+}
 
 .kpi-card {
     background: linear-gradient(180deg, #2D243A 0%, var(--surface-color) 100%);
     border: 1px solid var(--border-highlight);
     border-radius: 12px;
-    padding: 28px 20px;
+    padding: 20px 16px;
     text-align: center;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     position: relative;
     overflow: hidden;
@@ -266,93 +290,208 @@ body {
     background: linear-gradient(90deg, transparent, var(--primary-purple), transparent);
 }
 .kpi-value {
-    font-size: 60px; font-weight: 800; color: #FFFFFF; line-height: 1;
-    letter-spacing: -1.5px; margin-bottom: 8px; text-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
+    font-size: 48px; font-weight: 800; color: #FFFFFF; line-height: 1;
+    letter-spacing: -1px; margin-bottom: 6px; text-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
 }
-.kpi-label { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-muted); font-weight: 600; }
+.kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); font-weight: 600; }
 
-.charts-grid { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 20px; }
+.charts-grid { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
 @media (min-width: 1024px) { .charts-grid { grid-template-columns: repeat(2, 1fr); } }
 
 .chart-card {
     background-color: var(--surface-color);
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    padding: 20px;
+    padding: 16px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 .chart-card h3 {
-    margin-top: 0; margin-bottom: 16px; font-size: 13px; font-weight: 600;
+    margin-top: 0; margin-bottom: 12px; font-size: 12px; font-weight: 600;
     letter-spacing: 0.5px; color: var(--text-main); text-transform: uppercase;
-    border-bottom: 1px solid var(--border-color); padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color); padding-bottom: 8px;
 }
 
-.chart-flex-wrapper { display: flex; flex-direction: column; gap: 16px; align-items: center; }
+.chart-flex-wrapper { display: flex; flex-direction: column; gap: 12px; align-items: center; }
 @media (min-width: 600px) { .chart-flex-wrapper { flex-direction: row; justify-content: space-between; align-items: center; } }
 
-.canvas-pie-container, .canvas-bar-container { position: relative; height: 210px; width: 100%; max-width: 210px; flex-shrink: 0; }
-.canvas-bar-container { max-width: 240px; }
+.canvas-pie-container, .canvas-bar-container { position: relative; height: 180px; width: 100%; max-width: 180px; flex-shrink: 0; }
+.canvas-bar-container { max-width: 210px; }
 
-.custom-legend { width: 100%; font-size: 12px; max-height: 210px; overflow-y: auto; padding-right: 4px; }
+.custom-legend { width: 100%; font-size: 11px; max-height: 180px; overflow-y: auto; padding-right: 4px; }
 .custom-legend::-webkit-scrollbar { width: 4px; }
 .custom-legend::-webkit-scrollbar-thumb { background: var(--border-highlight); border-radius: 2px; }
 
 .legend-header {
     display: flex; justify-content: space-between; color: var(--text-muted);
-    font-size: 11px; font-weight: 700; text-transform: lowercase;
-    padding-bottom: 8px; margin-bottom: 6px; border-bottom: 1px solid var(--border-color);
+    font-size: 10px; font-weight: 700; text-transform: lowercase;
+    padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border-color);
 }
 .legend-header span:first-child { flex: 1; }
-.legend-header span.val-col { width: 55px; text-align: right; }
-.legend-header span.pct-col { width: 65px; text-align: right; }
+.legend-header span.val-col { width: 45px; text-align: right; }
+.legend-header span.pct-col { width: 55px; text-align: right; }
 
-.legend-item { display: flex; align-items: center; padding: 4px 0; color: #E4E4E7; border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
-.legend-color { width: 10px; height: 10px; border-radius: 2px; margin-right: 10px; display: inline-block; flex-shrink: 0; }
-.legend-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
-.legend-val { width: 55px; text-align: right; font-weight: 600; color: #FFFFFF; }
-.legend-pct { width: 65px; text-align: right; color: var(--text-muted); font-size: 11px; }
+.legend-item { display: flex; align-items: center; padding: 3px 0; color: #E4E4E7; border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+.legend-color { width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; display: inline-block; flex-shrink: 0; }
+.legend-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.legend-val { width: 45px; text-align: right; font-weight: 600; color: #FFFFFF; }
+.legend-pct { width: 55px; text-align: right; color: var(--text-muted); font-size: 10px; }
 
-.controls-panel { display: flex; flex-direction: column; gap: 12px; background-color: var(--surface-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-.controls-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.search-box { flex: 1; min-width: 200px; }
-
-.checkbox-label {
-    display: flex; align-items: center; gap: 8px; font-size: 13px;
-    color: var(--text-main); font-weight: 500; cursor: pointer;
-    background-color: var(--input-bg); padding: 10px 14px;
-    border-radius: 8px; border: 1px solid var(--border-color);
-}
-.checkbox-label input[type="checkbox"] {
-    accent-color: var(--primary-purple); width: 16px; height: 16px; cursor: pointer;
+/* PANEL DE FILTROS PURA BÚSQUEDA Y SELECCIÓN */
+.controls-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 8px;
 }
 
-.filter-select, .search-input { background-color: var(--input-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; color: var(--text-main); font-size: 13px; outline: none; flex: 1; min-width: 140px; }
+.search-box {
+    width: 100%;
+}
 
+/* BARRA INTERMEDIA DE RESULTADOS Y VER DETALLE */
+.table-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 6px 10px 6px;
+}
+
+.results-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.toggle-label { font-size: 12px; font-weight: 500; color: var(--text-main); white-space: nowrap; }
+.switch { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #3F3F46; transition: .3s; border-radius: 20px;
+}
+.slider:before {
+    position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px;
+    background-color: white; transition: .3s; border-radius: 50%;
+}
+input:checked + .slider { background-color: var(--primary-purple); }
+input:checked + .slider:before { transform: translateX(16px); }
+
+/* GRID DE FILTROS EN MÓVIL (2x2) */
+.controls-row-filters {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+@media (min-width: 768px) {
+    .controls-row-filters {
+        display: flex;
+        flex-wrap: wrap;
+    }
+}
+
+.filter-select, .search-input {
+    background-color: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: var(--text-main);
+    font-size: 12px;
+    outline: none;
+    width: 100%;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+@media (min-width: 768px) {
+    .filter-select {
+        flex: 1;
+        min-width: 140px;
+    }
+}
+
+.filter-select.active-filter {
+    border-color: var(--primary-purple);
+    box-shadow: 0 0 0 1px var(--primary-purple);
+    background-color: #272335;
+}
+
+/* TABLA OPTIMIZADA */
 .table-container { background-color: var(--surface-color); border: 1px solid var(--border-color); border-radius: 12px; overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
-th { background-color: #1B1B20; color: var(--text-muted); font-weight: 600; padding: 12px 16px; border-bottom: 1px solid var(--border-color); font-size: 11px; text-transform: uppercase; }
-td { padding: 10px 16px; border-bottom: 1px solid var(--border-color); color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+th { background-color: #1B1B20; color: var(--text-muted); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--border-color); font-size: 10px; text-transform: uppercase; white-space: nowrap; }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; vertical-align: middle; }
 tr:nth-child(even) { background-color: var(--row-even); }
-tr:hover { background-color: var(--surface-hover); }
 
-/* Estilo para los badges/botones N/A de Carátula */
-.col-cover { width: 80px; text-align: right; }
+tr {
+    transition: background-color 0.15s ease;
+    cursor: pointer;
+}
+
+tr:hover {
+    background-color: var(--surface-hover);
+}
+
+tr.selected-row, tr.selected-row td {
+    background-color: #2F2643 !important;
+}
+
+tr.selected-row td:first-child {
+    border-left: 3px solid var(--primary-purple);
+}
+
+tr.selected-row td {
+    border-top: 1px solid rgba(139, 92, 246, 0.4);
+    border-bottom: 1px solid rgba(139, 92, 246, 0.4);
+}
+
+.th-cover { width: 50px; text-align: center; }
+.td-cover { width: 50px; text-align: center; padding: 4px 8px; vertical-align: middle; }
+
 .cover-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 42px;
-    height: 42px;
+    width: 38px;
+    height: 38px;
     background-color: #1B1B20;
     border: 1px solid #363640;
-    border-radius: 8px;
+    border-radius: 6px;
     color: #52525B;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
 }
-.cover-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color); display: inline-block; }
 
-.pagination-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding: 0 4px; }
+.cover-thumb {
+    width: 38px;
+    height: 38px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    display: inline-block;
+    vertical-align: middle;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.cover-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    position: relative;
+    z-index: 2;
+}
+
+.col-center { text-align: center !important; }
+.text-subtle { color: var(--text-subtle) !important; font-weight: 400; }
+
+.pagination-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 0 4px; font-size: 12px; }
 """
 
     @staticmethod
@@ -360,7 +499,7 @@ tr:hover { background-color: var(--surface-hover); }
         return """
 let db = null;
 let currentPage = 0;
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 100;
 const COLORS = ['#10B981', '#F59E0B', '#3B82F6', '#EF4444', '#9333EA', '#EC4899', '#14B8A6', '#8B5CF6', '#64748B'];
 
 Chart.defaults.color = '#A1A1AA';
@@ -492,6 +631,42 @@ function populateSelectFilters() {
     populate('yearFilter', 'year', 'Sin Año');
 }
 
+function updateFilterStyles() {
+    const filters = ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'];
+    let anyActive = false;
+
+    filters.forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem) {
+            if (elem.value !== '') {
+                elem.classList.add('active-filter');
+                anyActive = true;
+            } else {
+                elem.classList.remove('active-filter');
+            }
+        }
+    });
+
+    const btnReset = document.getElementById('btnResetFilters');
+    if (btnReset) {
+        btnReset.style.display = anyActive ? 'inline-block' : 'none';
+    }
+}
+
+function handleFilterChange() {
+    updateFilterStyles();
+    resetAndSearch();
+}
+
+function resetAllFilters() {
+    ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'].forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem) elem.value = '';
+    });
+    updateFilterStyles();
+    resetAndSearch();
+}
+
 function loadTableData() {
     const searchInput = document.getElementById('searchInput');
     const albumFilter = document.getElementById('albumFilter');
@@ -499,6 +674,7 @@ function loadTableData() {
     const publisherFilter = document.getElementById('publisherFilter');
     const yearFilter = document.getElementById('yearFilter');
     const chkVerDetalle = document.getElementById('chkVerDetalle');
+    const resultsCountElem = document.getElementById('resultsCount');
 
     if (!searchInput || !albumFilter || !genreFilter || !publisherFilter || !yearFilter || !chkVerDetalle) {
         return;
@@ -530,8 +706,24 @@ function loadTableData() {
     applyFilter('year', year);
     
     const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
-    const offset = currentPage * PAGE_SIZE;
 
+    const countQuery = `SELECT COUNT(*) FROM tracks ${whereSql}`;
+    let totalRecords = 0;
+    try {
+        const countRes = db.exec(countQuery);
+        if (countRes.length && countRes[0].values.length) {
+            totalRecords = countRes[0].values[0][0];
+        }
+    } catch (err) {
+        console.error("Error al contar registros:", err);
+    }
+
+    const totalPages = Math.ceil(totalRecords / PAGE_SIZE);
+    if (currentPage >= totalPages && totalPages > 0) {
+        currentPage = totalPages - 1;
+    }
+
+    const offset = currentPage * PAGE_SIZE;
     const query = `SELECT cover_blob, filename, artist, title, remix, album, genre, publisher, year FROM tracks ${whereSql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
     
     let res = [];
@@ -551,29 +743,36 @@ function loadTableData() {
     if (verDetalle) {
         thead.innerHTML = `
             <tr>
-                <th>NOMBRE DE ARCHIVO</th>
+                <th class="th-cover">CARÁTULA</th>
                 <th>INTÉRPRETE</th>
                 <th>TÍTULO</th>
                 <th>REMIX</th>
                 <th>ÁLBUM</th>
                 <th>GÉNERO</th>
                 <th>ETIQUETA</th>
-                <th>AÑO</th>
-                <th style="text-align: right;">CARÁTULA</th>
+                <th class="col-center">AÑO</th>
             </tr>
         `;
     } else {
         thead.innerHTML = `
             <tr>
-                <th>NOMBRE</th>
-                <th style="text-align: right;">CARÁTULA</th>
+                <th class="th-cover">CARÁTULA</th>
+                <th>NOMBRE DE ARCHIVO</th>
             </tr>
         `;
     }
 
+    let recordsInPage = 0;
     if (res && res.length > 0 && res[0].values) {
+        recordsInPage = res[0].values.length;
         res[0].values.forEach(row => {
             const tr = document.createElement('tr');
+            
+            // Evento para resaltar fila activa en toque/click móvil
+            tr.onclick = function() {
+                document.querySelectorAll('#tableBody tr').forEach(r => r.classList.remove('selected-row'));
+                this.classList.add('selected-row');
+            };
             
             const coverData = row[0];
             const rawFilename = row[1] || '';
@@ -604,35 +803,67 @@ function loadTableData() {
             }
             
             let cleanFilename = rawFilename.replace(/\\.[^/.]+$/, "");
+            
+            const renderCell = (val, isCenter = false) => {
+                const hasValue = val && val.trim() !== '';
+                const displayValue = hasValue ? val : '—';
+                const classes = [];
+                
+                if (!hasValue) classes.push('text-subtle');
+                if (isCenter) classes.push('col-center');
+                
+                const classAttr = classes.length ? `class="${classes.join(' ')}"` : '';
+                return `<td ${classAttr} title="${displayValue}">${displayValue}</td>`;
+            };
 
             if (verDetalle) {
                 tr.innerHTML = `
-                    <td>${rawFilename}</td>
-                    <td>${artist}</td>
-                    <td>${title}</td>
-                    <td>${remixVal}</td>
-                    <td>${albumVal}</td>
-                    <td>${genreVal}</td>
-                    <td>${publisherVal}</td>
-                    <td>${yearVal}</td>
-                    <td style="text-align: right;">${imgTag}</td>
+                    <td class="td-cover">${imgTag}</td>
+                    ${renderCell(artist)}
+                    ${renderCell(title)}
+                    ${renderCell(remixVal)}
+                    ${renderCell(albumVal)}
+                    ${renderCell(genreVal)}
+                    ${renderCell(publisherVal)}
+                    ${renderCell(yearVal, true)}
                 `;
             } else {
                 tr.innerHTML = `
-                    <td>${cleanFilename}</td>
-                    <td style="text-align: right;">${imgTag}</td>
+                    <td class="td-cover">${imgTag}</td>
+                    <td title="${cleanFilename}">${cleanFilename}</td>
                 `;
             }
             tbody.appendChild(tr);
         });
     } else {
-        const colSpan = verDetalle ? 9 : 2;
-        tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;">No se encontraron registros.</td></tr>`;
+        const colSpan = verDetalle ? 8 : 2;
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;" class="text-subtle">No se encontraron registros.</td></tr>`;
     }
 
+    if (resultsCountElem) {
+        if (totalRecords === 0) {
+            resultsCountElem.textContent = '0 resultados';
+        } else {
+            const startRange = offset + 1;
+            const endRange = offset + recordsInPage;
+            resultsCountElem.textContent = `${startRange} - ${endRange} de ${totalRecords}`;
+        }
+    }
+
+    const paginationControls = document.getElementById('paginationControls');
     const pageInfo = document.getElementById('pageInfo');
-    if (pageInfo) {
-        pageInfo.textContent = `Página ${currentPage + 1}`;
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+
+    if (totalRecords > PAGE_SIZE) {
+        if (paginationControls) paginationControls.style.display = 'flex';
+        if (pageInfo) {
+            pageInfo.textContent = `Página ${currentPage + 1} de ${totalPages}`;
+        }
+        if (prevBtn) prevBtn.disabled = (currentPage === 0);
+        if (nextBtn) nextBtn.disabled = (currentPage >= totalPages - 1);
+    } else {
+        if (paginationControls) paginationControls.style.display = 'none';
     }
 }
 
@@ -652,10 +883,8 @@ function resetAndSearch() {
 }
 
 function changePage(delta) {
-    if (currentPage + delta >= 0) {
-        currentPage += delta;
-        loadTableData();
-    }
+    currentPage += delta;
+    loadTableData();
 }
 
 function switchView(view) {
@@ -715,6 +944,21 @@ class HTMLExporter:
         return None
 
     @staticmethod
+    def _resolve_audio_path(app, item_id, row_vals, file_idx):
+        """Resuelve ruta absoluta del audio priorizando el mapa interno de la app."""
+        file_map = getattr(app, "file_paths_map", {})
+        mapped = file_map.get(item_id) if isinstance(file_map, dict) else None
+        if mapped and os.path.exists(mapped):
+            return mapped
+
+        if file_idx != -1 and file_idx < len(row_vals):
+            candidate = str(row_vals[file_idx]).strip()
+            if candidate and os.path.exists(candidate):
+                return candidate
+
+        return None
+
+    @staticmethod
     def export_grid_to_html(app):
         """Orquesta la generación de la DB SQLite y el empaquetado final en un archivo .zip listo para Netlify."""
         grid = getattr(app, "grid_panel", None)
@@ -726,7 +970,6 @@ class HTMLExporter:
         visible_cols = [c for c in tree["displaycolumns"] if c != "#0"]
         headers = [tree.heading(c)["text"] for c in visible_cols]
 
-        # Mapeo de índices dinámico
         idx = {"file": 0, "cover": -1, "artist": -1, "title": -1, "remix": -1, "album": -1, "genre": -1, "publisher": -1, "year": -1}
         for i, h in enumerate(headers):
             h_lower = h.lower()
@@ -746,12 +989,10 @@ class HTMLExporter:
             col_indices = [tree["columns"].index(c) for c in visible_cols]
             row_vals = [values[i] if i < len(values) else "" for i in col_indices]
 
-            # Extracción de carátula
             b64_cover = None
-            if idx["cover"] != -1:
-                audio_path = str(item_id) if os.path.exists(str(item_id)) else row_vals[idx["file"]]
-                if os.path.exists(audio_path):
-                    b64_cover = HTMLExporter._extract_cover_from_audio(audio_path)
+            audio_path = HTMLExporter._resolve_audio_path(app, item_id, row_vals, idx["file"])
+            if audio_path:
+                b64_cover = HTMLExporter._extract_cover_from_audio(audio_path)
 
             def get_val(key):
                 i = idx[key]
@@ -766,7 +1007,7 @@ class HTMLExporter:
                 "genre": get_val("genre"),
                 "publisher": get_val("publisher"),
                 "year": get_val("year"),
-                "cover_blob": b64_cover
+                "cover_blob": b64_cover if isinstance(b64_cover, str) and b64_cover.strip() else None
             })
 
         if not tracks_data:
@@ -781,13 +1022,11 @@ class HTMLExporter:
         if not zip_path:
             return
 
-        # Generación en directorio temporal y empaquetado en .ZIP
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 db_file_path = os.path.join(tmp_dir, "data.db")
                 SQLiteManager.create_database(db_file_path, tracks_data)
 
-                # Guardar assets estáticos
                 with open(os.path.join(tmp_dir, "index.html"), "w", encoding="utf-8") as f:
                     f.write(TemplateProvider.get_index_html())
                 with open(os.path.join(tmp_dir, "styles.css"), "w", encoding="utf-8") as f:
@@ -795,7 +1034,6 @@ class HTMLExporter:
                 with open(os.path.join(tmp_dir, "app.js"), "w", encoding="utf-8") as f:
                     f.write(TemplateProvider.get_app_js())
 
-                # Crear archivo ZIP final
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_out:
                     for filename in ["index.html", "styles.css", "app.js", "data.db"]:
                         file_full_path = os.path.join(tmp_dir, filename)
