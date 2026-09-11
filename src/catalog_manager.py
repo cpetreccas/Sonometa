@@ -108,10 +108,6 @@ class CatalogManager:
             if hasattr(self.app, "review_covers_var") and self.app.review_covers_var is not None:
                 self.app.review_covers_var.set(self.manual_cover_selection)
 
-            if token:
-                logger.info("Token de Discogs cargado desde configuración.")
-            else:
-                logger.warning("settings.json encontrado pero sin token de Discogs.")
             return token
         except Exception as e:
             logger.warning(f"No se pudo cargar la configuración: {str(e)}")

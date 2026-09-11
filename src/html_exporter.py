@@ -90,7 +90,7 @@ class TemplateProvider:
             <div class="brand-text">
                 <div class="brand-title-row">
                     <span class="brand-title">Sonometa</span>
-                    <span class="brand-version">v1.2</span>
+                    <span class="brand-version">v1.3</span>
                 </div>
                 <span class="brand-subtitle">AUDIO TAG SUITE</span>
             </div>
@@ -99,6 +99,19 @@ class TemplateProvider:
             <button id="btnDashboard" class="btn-primary btn-header" style="display:none;" onclick="switchView('dashboard')">Ver dashboards</button>
             <button id="btnTable" class="btn-primary btn-header" onclick="switchView('table')">Ver mi colección</button>
         </div>
+    </div>
+
+    <!-- BARRA GLOBAL / RESUMEN DE FILTROS EN EL DASHBOARD -->
+    <div id="filterSummaryBar" class="filter-summary-bar">
+        <div class="filter-summary-info">
+            <button class="btn-filter-trigger" onclick="openFilterModal()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                <span>Filtrar colección</span>
+                <span id="activeFilterBadge" class="filter-badge" style="display:none;">0</span>
+            </button>
+            <span id="filterSummaryText" class="filter-summary-text">Sin filtros aplicados</span>
+        </div>
+        <button id="btnGlobalResetFilters" class="btn-reset-compact" onclick="resetAllFilters()" style="display:none;">✕ Limpiar</button>
     </div>
 
     <!-- DASHBOARD VIEW -->
@@ -142,17 +155,12 @@ class TemplateProvider:
 
     <!-- TABLE VIEW -->
     <div id="tableView" style="display:none;">
-        <div class="controls-panel">
+        <div class="controls-panel desktop-only-controls">
             <div class="search-box">
                 <input type="text" id="searchInput" class="search-input" placeholder="Buscar canción..." oninput="debouncedSearch()">
             </div>
-            <div class="controls-row-filters">
-                <select id="albumFilter" class="filter-select" onchange="handleFilterChange('album', 'albumFilter')"><option value="">Álbum: Todos</option></select>
-                <select id="genreFilter" class="filter-select" onchange="handleFilterChange('genre', 'genreFilter')"><option value="">Género: Todos</option></select>
-                <select id="publisherFilter" class="filter-select" onchange="handleFilterChange('publisher', 'publisherFilter')"><option value="">Etiqueta: Todas</option></select>
-                <select id="yearFilter" class="filter-select" onchange="handleFilterChange('year', 'yearFilter')"><option value="">Año: Todos</option></select>
-                <button id="btnResetFilters" class="btn-reset" onclick="resetAllFilters()" title="Limpiar todos los filtros" style="display:none;">✕ Limpiar filtros</button>
-            </div>
+            <!-- El contenedor de filtros del escritorio -->
+            <div id="desktopFilterContainer" class="controls-row-filters"></div>
         </div>
 
         <div class="table-toolbar">
@@ -177,6 +185,26 @@ class TemplateProvider:
             <button id="prevBtn" class="btn-primary" onclick="changePage(-1)">Anterior</button>
             <span id="pageInfo">Página 1 de 1</span>
             <button id="nextBtn" class="btn-primary" onclick="changePage(1)">Siguiente</button>
+        </div>
+    </div>
+
+    <!-- MODAL / BOTTOM SHEET DE FILTROS EN MÓVIL -->
+    <div id="filterOverlay" class="filter-overlay" onclick="closeFilterModal()"></div>
+    <div id="filterModal" class="filter-bottom-sheet">
+        <div class="sheet-header">
+            <div class="sheet-drag-handle"></div>
+            <h3>Filtrar Colección</h3>
+            <button class="sheet-close-btn" onclick="closeFilterModal()">✕</button>
+        </div>
+        <div class="sheet-body">
+            <div class="search-box" style="margin-bottom: 12px;">
+                <input type="text" id="searchInputMobile" class="search-input" placeholder="Buscar canción..." oninput="syncMobileSearch(this.value)">
+            </div>
+            <div id="mobileFilterContainer" class="mobile-filters-grid"></div>
+        </div>
+        <div class="sheet-footer">
+            <button class="btn-reset" onclick="resetAllFilters()">Limpiar todo</button>
+            <button class="btn-primary btn-apply" onclick="applyFiltersAndClose()">Aplicar filtros</button>
         </div>
     </div>
 
@@ -227,7 +255,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--border-color);
 }
@@ -259,10 +287,78 @@ body {
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-header {
-    width: 150px;
+    width: 140px;
     text-align: center;
     white-space: nowrap;
 }
+
+/* BARRA DE RESUMEN DE FILTROS EN CABECERA */
+.filter-summary-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    gap: 10px;
+}
+
+.filter-summary-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.btn-filter-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--input-bg);
+    color: var(--text-main);
+    border: 1px solid var(--border-highlight);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.2s;
+}
+.btn-filter-trigger:hover { background-color: var(--surface-hover); }
+
+.filter-badge {
+    background-color: var(--primary-purple);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 1px 6px;
+    line-height: 1.2;
+}
+
+.filter-summary-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.btn-reset-compact {
+    background: transparent;
+    border: none;
+    color: #EF4444;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+.btn-reset-compact:hover { background-color: rgba(239, 68, 68, 0.1); }
 
 .btn-reset {
     background-color: transparent;
@@ -274,10 +370,7 @@ body {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
-    width: 100%;
 }
-@media (min-width: 768px) { .btn-reset { width: auto; grid-column: auto; } }
-@media (max-width: 767px) { .btn-reset { grid-column: span 2; } }
 .btn-reset:hover {
     color: #EF4444;
     border-color: #EF4444;
@@ -337,7 +430,6 @@ body {
 .custom-legend::-webkit-scrollbar { width: 4px; }
 .custom-legend::-webkit-scrollbar-thumb { background: var(--border-highlight); border-radius: 2px; }
 
-/* LEYENDA Y ENCABEZADOS CON ESPACIADO AMPLIADO */
 .legend-header {
     display: flex; justify-content: space-between; color: var(--text-muted);
     font-size: 10px; font-weight: 700; text-transform: lowercase;
@@ -353,7 +445,7 @@ body {
 .legend-val { width: 65px; text-align: right; font-weight: 600; color: #FFFFFF; margin-right: 12px; }
 .legend-pct { width: 65px; text-align: right; color: var(--text-muted); font-size: 10px; }
 
-/* PANEL DE FILTROS PURA BÚSQUEDA Y SELECCIÓN */
+/* CONTROLES DE ESCRITORIO */
 .controls-panel {
     display: flex;
     flex-direction: column;
@@ -364,57 +456,16 @@ body {
     padding: 12px;
     margin-bottom: 8px;
 }
+.search-box { width: 100%; }
 
-.search-box {
-    width: 100%;
+@media (max-width: 767px) {
+    .desktop-only-controls { display: none; }
 }
 
-/* BARRA INTERMEDIA DE RESULTADOS Y VER DETALLE */
-.table-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 6px 10px 6px;
-}
-
-.results-text {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
-}
-
-.toggle-container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.toggle-label { font-size: 12px; font-weight: 500; color: var(--text-main); white-space: nowrap; }
-.switch { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider {
-    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-    background-color: #3F3F46; transition: .3s; border-radius: 20px;
-}
-.slider:before {
-    position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px;
-    background-color: white; transition: .3s; border-radius: 50%;
-}
-input:checked + .slider { background-color: var(--primary-purple); }
-input:checked + .slider:before { transform: translateX(16px); }
-
-/* GRID DE FILTROS EN MÓVIL (2x2) */
 .controls-row-filters {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px;
-}
-
-@media (min-width: 768px) {
-    .controls-row-filters {
-        display: flex;
-        flex-wrap: wrap;
-    }
 }
 
 .filter-select, .search-input {
@@ -430,10 +481,7 @@ input:checked + .slider:before { transform: translateX(16px); }
 }
 
 @media (min-width: 768px) {
-    .filter-select {
-        flex: 1;
-        min-width: 140px;
-    }
+    .filter-select { flex: 1; min-width: 140px; }
 }
 
 .filter-select.active-filter {
@@ -442,72 +490,107 @@ input:checked + .slider:before { transform: translateX(16px); }
     background-color: #272335;
 }
 
-/* TABLA OPTIMIZADA */
+/* MODAL Y BOTTOM SHEET MÓVIL */
+.filter-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
+    z-index: 999;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+.filter-overlay.active { opacity: 1; pointer-events: auto; }
+
+.filter-bottom-sheet {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background-color: var(--surface-color);
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
+    border: 1px solid var(--border-highlight);
+    border-bottom: none;
+    z-index: 1000;
+    padding: 16px;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+.filter-bottom-sheet.active { transform: translateY(0); }
+
+.sheet-header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 12px;
+}
+.sheet-drag-handle {
+    position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; background-color: var(--border-highlight);
+    border-radius: 2px;
+}
+.sheet-header h3 { margin: 0; font-size: 14px; font-weight: 700; color: #FFFFFF; }
+.sheet-close-btn { background: none; border: none; color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px; }
+
+.sheet-body { overflow-y: auto; flex: 1; padding-right: 2px; }
+.mobile-filters-grid { display: flex; flex-direction: column; gap: 10px; }
+
+.sheet-footer {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+.sheet-footer .btn-reset { flex: 1; }
+.sheet-footer .btn-apply { flex: 2; text-align: center; }
+
+/* TABLA Y HERRAMIENTAS */
+.table-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 6px 10px 6px;
+}
+.results-text { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+
+.toggle-container { display: flex; align-items: center; gap: 8px; }
+.toggle-label { font-size: 12px; font-weight: 500; color: var(--text-main); white-space: nowrap; }
+.switch { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #3F3F46; transition: .3s; border-radius: 20px;
+}
+.slider:before {
+    position: absolute; content: ""; height: 12px; width: 12px; left: 3px; bottom: 3px;
+    background-color: white; transition: .3s; border-radius: 50%;
+}
+input:checked + .slider { background-color: var(--primary-purple); }
+input:checked + .slider:before { transform: translateX(16px); }
+
 .table-container { background-color: var(--surface-color); border: 1px solid var(--border-color); border-radius: 12px; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
 th { background-color: #1B1B20; color: var(--text-muted); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--border-color); font-size: 10px; text-transform: uppercase; white-space: nowrap; }
 td { padding: 8px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; vertical-align: middle; }
 tr:nth-child(even) { background-color: var(--row-even); }
-
-tr {
-    transition: background-color 0.15s ease;
-    cursor: pointer;
-}
-
-tr:hover {
-    background-color: var(--surface-hover);
-}
-
-tr.selected-row, tr.selected-row td {
-    background-color: #2F2643 !important;
-}
-
-tr.selected-row td:first-child {
-    border-left: 3px solid var(--primary-purple);
-}
-
-tr.selected-row td {
-    border-top: 1px solid rgba(139, 92, 246, 0.4);
-    border-bottom: 1px solid rgba(139, 92, 246, 0.4);
-}
+tr { transition: background-color 0.15s ease; cursor: pointer; }
+tr:hover { background-color: var(--surface-hover); }
+tr.selected-row, tr.selected-row td { background-color: #2F2643 !important; }
+tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
+tr.selected-row td { border-top: 1px solid rgba(139, 92, 246, 0.4); border-bottom: 1px solid rgba(139, 92, 246, 0.4); }
 
 .th-cover { width: 50px; text-align: center; }
 .td-cover { width: 50px; text-align: center; padding: 4px 8px; vertical-align: middle; }
-
-.cover-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    background-color: #1B1B20;
-    border: 1px solid #363640;
-    border-radius: 6px;
-    color: #52525B;
-    font-size: 10px;
-    font-weight: 600;
-}
-
-.cover-thumb {
-    width: 38px;
-    height: 38px;
-    object-fit: cover;
-    border-radius: 6px;
-    border: 1px solid var(--border-color);
-    display: inline-block;
-    vertical-align: middle;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.cover-thumb:hover {
-    transform: scale(1.2);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    position: relative;
-    z-index: 2;
-}
+.cover-badge { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; background-color: #1B1B20; border: 1px solid #363640; border-radius: 6px; color: #52525B; font-size: 10px; font-weight: 600; }
+.cover-thumb { width: 38px; height: 38px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-color); display: inline-block; vertical-align: middle; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.cover-thumb:hover { transform: scale(1.2); box-shadow: 0 4px 12px rgba(0,0,0,0.5); position: relative; z-index: 2; }
 
 .col-center { text-align: center !important; }
 .text-subtle { color: var(--text-subtle) !important; font-weight: 400; }
-
 .pagination-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 0 4px; font-size: 12px; }
 """
 
@@ -518,6 +601,8 @@ let db = null;
 let currentPage = 0;
 const PAGE_SIZE = 100;
 const COLORS = ['#10B981', '#F59E0B', '#3B82F6', '#EF4444', '#9333EA', '#EC4899', '#14B8A6', '#8B5CF6', '#64748B'];
+
+let chartInstances = {};
 
 // Estado global de filtros en memoria
 let currentFilters = {
@@ -539,8 +624,8 @@ async function initSQLite() {
     const [SQL, buf] = await Promise.all([sqlPromise, dataPromise]);
     
     db = new SQL.Database(new Uint8Array(buf));
-    initDashboard();
     populateSelectFilters();
+    updateDashboard();
     loadTableData();
 }
 
@@ -575,24 +660,50 @@ function renderCustomLegend(containerId, labels, dataVals) {
     container.innerHTML = html;
 }
 
-function initDashboard() {
-    const resTotal = db.exec("SELECT COUNT(*) FROM tracks");
+// Reconstruye o actualiza las gráficas aplicando la condición WHERE de los filtros activos
+function updateDashboard() {
+    if (!db) return;
+
+    const whereSql = getActiveWhereClauses();
+
+    // Actualizar KPI Total
+    const resTotal = db.exec(`SELECT COUNT(*) FROM tracks ${whereSql}`);
     const totalTracks = (resTotal.length && resTotal[0].values.length) ? resTotal[0].values[0][0] : 0;
     const totalElem = document.getElementById('kpiTotalTracks');
     if (totalElem) {
         totalElem.textContent = totalTracks.toLocaleString('es-ES');
     }
 
-    const buildChart = (canvasId, legendId, sqlQuery, chartType) => {
-        const res = db.exec(sqlQuery);
-        if (!res.length || !res[0].values) return;
+    const buildChart = (canvasId, legendId, column, defaultLabel, chartType, sortAsc = false) => {
+        const query = `
+            SELECT CASE WHEN ${column} IS NULL OR ${column} = '' THEN '${defaultLabel}' ELSE ${column} END as label_name, 
+            COUNT(*) as c 
+            FROM tracks ${whereSql} 
+            GROUP BY 1 
+            ORDER BY ${sortAsc ? '1 ASC' : 'c DESC'}
+        `;
 
-        const labels = res[0].values.map(v => v[0] || 'Desconocido');
-        const dataVals = res[0].values.map(v => v[1]);
+        let labels = [];
+        let dataVals = [];
+
+        try {
+            const res = db.exec(query);
+            if (res.length && res[0].values) {
+                labels = res[0].values.map(v => v[0] || defaultLabel);
+                dataVals = res[0].values.map(v => v[1]);
+            }
+        } catch(err) {
+            console.error(`Error calculando gráfica ${canvasId}:`, err);
+        }
+
         const sliceColors = labels.map((_, i) => COLORS[i % COLORS.length]);
-
         const chartCanvas = document.getElementById(canvasId);
         if (!chartCanvas) return;
+
+        // Destruir instancia previa de Chart si existe para refrescar los datos
+        if (chartInstances[canvasId]) {
+            chartInstances[canvasId].destroy();
+        }
 
         const chartConfig = {
             type: chartType,
@@ -620,14 +731,15 @@ function initDashboard() {
             };
         }
 
-        new Chart(chartCanvas, chartConfig);
+        chartInstances[canvasId] = new Chart(chartCanvas, chartConfig);
         renderCustomLegend(legendId, labels, dataVals);
     };
 
-    buildChart('albumChart', 'albumLegend', "SELECT CASE WHEN album IS NULL OR album = '' THEN 'Sin Álbum' ELSE album END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'pie');
-    buildChart('genreChart', 'genreLegend', "SELECT CASE WHEN genre IS NULL OR genre = '' THEN 'Sin Género' ELSE genre END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'pie');
-    buildChart('publisherChart', 'publisherLegend', "SELECT CASE WHEN publisher IS NULL OR publisher = '' THEN 'Sin Etiqueta' ELSE publisher END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY c DESC", 'bar');
-    buildChart('yearChart', 'yearLegend', "SELECT CASE WHEN year IS NULL OR year = '' THEN 'Sin Año' ELSE year END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY 1 ASC", 'bar');
+    buildChart('albumChart', 'albumLegend', 'album', 'Sin Álbum', 'pie');
+    buildChart('genreChart', 'genreLegend', 'genre', 'Sin Género', 'pie');
+    // Pistas por etiqueta ahora ordenado alfabéticamente (sortAsc = true)
+    buildChart('publisherChart', 'publisherLegend', 'publisher', 'Sin Etiqueta', 'bar', true);
+    buildChart('yearChart', 'yearLegend', 'year', 'Sin Año', 'bar', true);
 }
 
 // Construye la cláusula WHERE usando el objeto de estado currentFilters
@@ -670,97 +782,139 @@ function populateSelectFilters() {
         { id: 'yearFilter', key: 'year', col: 'year', defaultLabel: 'Año: Todos', emptyLabel: 'Sin Año' }
     ];
 
-    filterDefs.forEach(f => {
-        const select = document.getElementById(f.id);
-        if (!select) return;
+    const desktopContainer = document.getElementById('desktopFilterContainer');
+    const mobileContainer = document.getElementById('mobileFilterContainer');
 
+    if (desktopContainer) desktopContainer.innerHTML = '';
+    if (mobileContainer) mobileContainer.innerHTML = '';
+
+    filterDefs.forEach(f => {
         const savedValue = currentFilters[f.key];
         const whereSql = getActiveWhereClauses(f.key);
 
-        select.innerHTML = '';
+        const createSelectElem = (selectId) => {
+            const select = document.createElement('select');
+            select.id = selectId;
+            select.className = 'filter-select';
+            select.onchange = (e) => handleFilterChange(f.key, e.target.value);
 
-        // 1. Opción por defecto (Todos)
-        const optAll = document.createElement('option');
-        optAll.value = "";
-        optAll.textContent = f.defaultLabel;
-        select.appendChild(optAll);
+            const optAll = document.createElement('option');
+            optAll.value = "";
+            optAll.textContent = f.defaultLabel;
+            select.appendChild(optAll);
 
-        // 2. Opción "Sin X" solo si hay registros vacíos para las condiciones activas
-        const emptyQuery = `SELECT COUNT(*) FROM tracks ${whereSql} ${whereSql ? 'AND' : 'WHERE'} (${f.col} IS NULL OR ${f.col} = '')`;
-        try {
-            const resEmpty = db.exec(emptyQuery);
-            if (resEmpty.length && resEmpty[0].values[0][0] > 0) {
-                const optEmpty = document.createElement('option');
-                optEmpty.value = "__EMPTY__";
-                optEmpty.textContent = f.emptyLabel;
-                select.appendChild(optEmpty);
-            }
-        } catch (err) {
-            console.error(`Error verificando opción vacía para ${f.id}:`, err);
-        }
+            const emptyQuery = `SELECT COUNT(*) FROM tracks ${whereSql} ${whereSql ? 'AND' : 'WHERE'} (${f.col} IS NULL OR ${f.col} = '')`;
+            try {
+                const resEmpty = db.exec(emptyQuery);
+                if (resEmpty.length && resEmpty[0].values[0][0] > 0) {
+                    const optEmpty = document.createElement('option');
+                    optEmpty.value = "__EMPTY__";
+                    optEmpty.textContent = f.emptyLabel;
+                    select.appendChild(optEmpty);
+                }
+            } catch (err) {}
 
-        // 3. Opciones distintas con valor
-        const distinctQuery = `SELECT DISTINCT ${f.col} FROM tracks ${whereSql} ${whereSql ? 'AND' : 'WHERE'} ${f.col} IS NOT NULL AND ${f.col} != '' ORDER BY ${f.col} ASC`;
-        try {
-            const res = db.exec(distinctQuery);
-            if (res.length && res[0].values) {
-                res[0].values.forEach(v => {
-                    const opt = document.createElement('option');
-                    opt.value = v[0];
-                    opt.textContent = v[0];
-                    select.appendChild(opt);
-                });
-            }
-        } catch (err) {
-            console.error(`Error actualizando opciones de ${f.id}:`, err);
-        }
+            const distinctQuery = `SELECT DISTINCT ${f.col} FROM tracks ${whereSql} ${whereSql ? 'AND' : 'WHERE'} ${f.col} IS NOT NULL AND ${f.col} != '' ORDER BY ${f.col} ASC`;
+            try {
+                const res = db.exec(distinctQuery);
+                if (res.length && res[0].values) {
+                    res[0].values.forEach(v => {
+                        const opt = document.createElement('option');
+                        opt.value = v[0];
+                        opt.textContent = v[0];
+                        select.appendChild(opt);
+                    });
+                }
+            } catch (err) {}
 
-        // Reasignamos y validamos que la selección previa continúe existiendo entre las opciones válidas
-        const exists = Array.from(select.options).some(o => o.value === savedValue);
-        if (exists) {
-            select.value = savedValue;
-        } else {
-            currentFilters[f.key] = "";
-            select.value = "";
-        }
+            const exists = Array.from(select.options).some(o => o.value === savedValue);
+            select.value = exists ? savedValue : "";
+            if (!exists && savedValue) currentFilters[f.key] = "";
+
+            if (savedValue) select.classList.add('active-filter');
+
+            return select;
+        };
+
+        if (desktopContainer) desktopContainer.appendChild(createSelectElem(f.id));
+        if (mobileContainer) mobileContainer.appendChild(createSelectElem(f.id + '_mobile'));
     });
+
+    updateFilterSummaryBar();
 }
 
-function updateFilterStyles() {
-    const filters = [
-        { id: 'albumFilter', key: 'album' },
-        { id: 'genreFilter', key: 'genre' },
-        { id: 'publisherFilter', key: 'publisher' },
-        { id: 'yearFilter', key: 'year' }
-    ];
-    let anyActive = !!currentFilters.search;
+function updateFilterSummaryBar() {
+    let activeCount = 0;
+    let activeNames = [];
 
-    filters.forEach(f => {
-        const elem = document.getElementById(f.id);
-        if (elem) {
-            if (currentFilters[f.key] !== '') {
-                elem.classList.add('active-filter');
-                anyActive = true;
-            } else {
-                elem.classList.remove('active-filter');
-            }
+    if (currentFilters.search) {
+        activeCount++;
+        activeNames.push(`"${currentFilters.search}"`);
+    }
+
+    const mapping = { album: 'Álbum', genre: 'Género', publisher: 'Etiqueta', year: 'Año' };
+    Object.keys(mapping).forEach(k => {
+        if (currentFilters[k]) {
+            activeCount++;
+            const valLabel = currentFilters[k] === '__EMPTY__' ? 'Sin valor' : currentFilters[k];
+            activeNames.push(`${mapping[k]}: ${valLabel}`);
         }
     });
 
-    const btnReset = document.getElementById('btnResetFilters');
-    if (btnReset) {
-        btnReset.style.display = anyActive ? 'inline-block' : 'none';
+    const badge = document.getElementById('activeFilterBadge');
+    const summaryText = document.getElementById('filterSummaryText');
+    const resetBtn = document.getElementById('btnGlobalResetFilters');
+
+    if (badge) {
+        badge.style.display = activeCount > 0 ? 'inline-block' : 'none';
+        badge.textContent = activeCount;
+    }
+
+    if (summaryText) {
+        summaryText.textContent = activeCount > 0 ? activeNames.join(' | ') : 'Sin filtros aplicados';
+    }
+
+    if (resetBtn) {
+        resetBtn.style.display = activeCount > 0 ? 'inline-block' : 'none';
     }
 }
 
-function handleFilterChange(key, filterId) {
-    const select = document.getElementById(filterId);
-    if (select) {
-        currentFilters[key] = select.value;
-    }
-    updateFilterStyles();
+function handleFilterChange(key, value) {
+    currentFilters[key] = value;
     populateSelectFilters();
+    if (window.innerWidth >= 768) {
+        applyFilters();
+    }
+}
+
+function applyFilters() {
+    updateDashboard();
     resetAndSearch();
+}
+
+function applyFiltersAndClose() {
+    applyFilters();
+    closeFilterModal();
+}
+
+function syncMobileSearch(val) {
+    currentFilters.search = val.trim();
+    const searchDesktop = document.getElementById('searchInput');
+    if (searchDesktop) searchDesktop.value = val;
+    populateSelectFilters();
+}
+
+function openFilterModal() {
+    const searchMobile = document.getElementById('searchInputMobile');
+    if (searchMobile) searchMobile.value = currentFilters.search;
+
+    document.getElementById('filterOverlay').classList.add('active');
+    document.getElementById('filterModal').classList.add('active');
+}
+
+function closeFilterModal() {
+    document.getElementById('filterOverlay').classList.remove('active');
+    document.getElementById('filterModal').classList.remove('active');
 }
 
 function resetAllFilters() {
@@ -769,14 +923,11 @@ function resetAllFilters() {
     const searchInput = document.getElementById('searchInput');
     if (searchInput) searchInput.value = '';
 
-    ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'].forEach(id => {
-        const elem = document.getElementById(id);
-        if (elem) elem.value = '';
-    });
+    const searchInputMobile = document.getElementById('searchInputMobile');
+    if (searchInputMobile) searchInputMobile.value = '';
 
-    updateFilterStyles();
     populateSelectFilters();
-    resetAndSearch();
+    applyFilters();
 }
 
 function loadTableData() {
@@ -962,10 +1113,11 @@ function debouncedSearch() {
     if (searchInput) {
         currentFilters.search = searchInput.value.trim();
     }
-    updateFilterStyles();
     populateSelectFilters();
     clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(resetAndSearch, 150);
+    searchTimeout = setTimeout(() => {
+        applyFilters();
+    }, 150);
 }
 
 function resetAndSearch() {

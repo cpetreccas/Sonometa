@@ -72,7 +72,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v1.2 - Audio Tag Suite")
+        self.title("Sonometa v1.3 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))
@@ -547,12 +547,6 @@ class App(ctk.CTk):
                 self.progress_bar.set(1 if loaded_count > 0 else 0)
                 self.label_status.configure(text=f"Carga completada: {loaded_count:,} canciones.")
                 self.logger.info(f"Se encontraron {loaded_count} archivo(s) de audio compatibles.")
-
-                elapsed = time.perf_counter() - started_at
-                self.logger.info(
-                    f"Carga masiva finalizada en {elapsed:.2f}s "
-                    f"(escaneo + inserción + refresco final, total={loaded_count})."
-                )
         finally:
             if self._progress_dialog and self._progress_dialog.winfo_exists():
                 self._progress_dialog.close()
