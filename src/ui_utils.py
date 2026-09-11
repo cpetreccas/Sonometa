@@ -73,9 +73,26 @@ class UiUtils:
 
     @staticmethod
     def load_app_icons(app):
-        """Carga los iconos (.png) principales de la ventana, cabecera y botones."""
-        # 1. Icono de la aplicación / ventana
-        icon_path = UiUtils.get_resource_path("assets/logo_relleno.png")
+        """Carga los iconos (.ico y .png) principales de la ventana, cabecera y botones."""
+        import ctypes
+
+        # Forzar a Windows a agrupar e identificar el icono en la barra de tareas
+        try:
+            myappid = 'sonometa.audiotagsuite.app.1.0'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+
+        # 1. Icono nativo de ventana para Windows (.ico) y fallback a .png
+        ico_path = UiUtils.get_resource_path("assets/logo_relleno.ico")
+        png_icon_path = UiUtils.get_resource_path("assets/logo_relleno.png")
+
+        # Configurar icono nativo en la ventana (.ico)
+        if os.path.exists(ico_path):
+            try:
+                app.iconbitmap(ico_path)
+            except Exception:
+                pass
 
         # 2. Logo panorámico para el Header Panel
         header_logo_path = UiUtils.get_resource_path("assets/logo_completo.png")
@@ -84,10 +101,12 @@ class UiUtils:
         broom_path = UiUtils.get_resource_path("assets/icono_borrar.png")
         white_logo_path = UiUtils.get_resource_path("assets/icono_procesar.png")
 
-        # Cargar icono de aplicación (para iconphoto/iconbitmap)
+        # Cargar icono de aplicación (para iconphoto/referencia PIL)
         logo_pil = None
-        if os.path.exists(icon_path):
-            with Image.open(icon_path) as icon_img:
+        target_icon_path = png_icon_path if os.path.exists(png_icon_path) else ico_path
+
+        if os.path.exists(target_icon_path):
+            with Image.open(target_icon_path) as icon_img:
                 logo_pil = icon_img.copy()
             img_icon = ImageTk.PhotoImage(logo_pil)
             app.app_icon_photo = img_icon

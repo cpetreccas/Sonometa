@@ -147,10 +147,10 @@ class TemplateProvider:
                 <input type="text" id="searchInput" class="search-input" placeholder="Buscar canción..." oninput="debouncedSearch()">
             </div>
             <div class="controls-row-filters">
-                <select id="albumFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Álbum: Todos</option></select>
-                <select id="genreFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Género: Todos</option></select>
-                <select id="publisherFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Etiqueta: Todas</option></select>
-                <select id="yearFilter" class="filter-select" onchange="handleFilterChange()"><option value="">Año: Todos</option></select>
+                <select id="albumFilter" class="filter-select" onchange="handleFilterChange('album', 'albumFilter')"><option value="">Álbum: Todos</option></select>
+                <select id="genreFilter" class="filter-select" onchange="handleFilterChange('genre', 'genreFilter')"><option value="">Género: Todos</option></select>
+                <select id="publisherFilter" class="filter-select" onchange="handleFilterChange('publisher', 'publisherFilter')"><option value="">Etiqueta: Todas</option></select>
+                <select id="yearFilter" class="filter-select" onchange="handleFilterChange('year', 'yearFilter')"><option value="">Año: Todos</option></select>
                 <button id="btnResetFilters" class="btn-reset" onclick="resetAllFilters()" title="Limpiar todos los filtros" style="display:none;">✕ Limpiar filtros</button>
             </div>
         </div>
@@ -337,20 +337,21 @@ body {
 .custom-legend::-webkit-scrollbar { width: 4px; }
 .custom-legend::-webkit-scrollbar-thumb { background: var(--border-highlight); border-radius: 2px; }
 
+/* LEYENDA Y ENCABEZADOS CON ESPACIADO AMPLIADO */
 .legend-header {
     display: flex; justify-content: space-between; color: var(--text-muted);
     font-size: 10px; font-weight: 700; text-transform: lowercase;
     padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border-color);
 }
 .legend-header span:first-child { flex: 1; }
-.legend-header span.val-col { width: 45px; text-align: right; }
-.legend-header span.pct-col { width: 55px; text-align: right; }
+.legend-header span.val-col { width: 65px; text-align: right; margin-right: 12px; }
+.legend-header span.pct-col { width: 65px; text-align: right; }
 
-.legend-item { display: flex; align-items: center; padding: 3px 0; color: #E4E4E7; border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+.legend-item { display: flex; align-items: center; padding: 4px 0; color: #E4E4E7; border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
 .legend-color { width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; display: inline-block; flex-shrink: 0; }
 .legend-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
-.legend-val { width: 45px; text-align: right; font-weight: 600; color: #FFFFFF; }
-.legend-pct { width: 55px; text-align: right; color: var(--text-muted); font-size: 10px; }
+.legend-val { width: 65px; text-align: right; font-weight: 600; color: #FFFFFF; margin-right: 12px; }
+.legend-pct { width: 65px; text-align: right; color: var(--text-muted); font-size: 10px; }
 
 /* PANEL DE FILTROS PURA BÚSQUEDA Y SELECCIÓN */
 .controls-panel {
@@ -518,6 +519,15 @@ let currentPage = 0;
 const PAGE_SIZE = 100;
 const COLORS = ['#10B981', '#F59E0B', '#3B82F6', '#EF4444', '#9333EA', '#EC4899', '#14B8A6', '#8B5CF6', '#64748B'];
 
+// Estado global de filtros en memoria
+let currentFilters = {
+    search: '',
+    album: '',
+    genre: '',
+    publisher: '',
+    year: ''
+};
+
 Chart.defaults.color = '#A1A1AA';
 Chart.defaults.borderColor = '#363640';
 
@@ -556,7 +566,7 @@ function renderCustomLegend(containerId, labels, dataVals) {
             <div class="legend-item">
                 <span class="legend-color" style="background-color: ${color};"></span>
                 <span class="legend-name" title="${label}">${label}</span>
-                <span class="legend-val">${val}</span>
+                <span class="legend-val">${val.toLocaleString('es-ES')}</span>
                 <span class="legend-pct">${pct}</span>
             </div>
         `;
@@ -620,48 +630,115 @@ function initDashboard() {
     buildChart('yearChart', 'yearLegend', "SELECT CASE WHEN year IS NULL OR year = '' THEN 'Sin Año' ELSE year END, COUNT(*) as c FROM tracks GROUP BY 1 ORDER BY 1 ASC", 'bar');
 }
 
-function populateSelectFilters() {
-    const populate = (selectId, colName, emptyLabel) => {
-        const select = document.getElementById(selectId);
-        if (!select) return;
-        
-        const optEmpty = document.createElement('option');
-        optEmpty.value = "__EMPTY__";
-        optEmpty.textContent = emptyLabel;
-        select.appendChild(optEmpty);
+// Construye la cláusula WHERE usando el objeto de estado currentFilters
+function getActiveWhereClauses(excludeKey = null) {
+    let whereClauses = [];
 
-        const res = db.exec(`SELECT DISTINCT ${colName} FROM tracks WHERE ${colName} IS NOT NULL AND ${colName} != '' ORDER BY ${colName} ASC`);
-        if (res.length && res[0].values) {
-            res[0].values.forEach(v => {
-                const opt = document.createElement('option');
-                opt.value = v[0];
-                opt.textContent = v[0];
-                select.appendChild(opt);
-            });
+    if (currentFilters.search) {
+        const searchEscaped = currentFilters.search.replace(/'/g, "''");
+        whereClauses.push(`(artist LIKE '%${searchEscaped}%' OR title LIKE '%${searchEscaped}%' OR album LIKE '%${searchEscaped}%' OR filename LIKE '%${searchEscaped}%' OR remix LIKE '%${searchEscaped}%')`);
+    }
+
+    const filterMapping = [
+        { key: 'album', col: 'album' },
+        { key: 'genre', col: 'genre' },
+        { key: 'publisher', col: 'publisher' },
+        { key: 'year', col: 'year' }
+    ];
+
+    filterMapping.forEach(f => {
+        if (f.key === excludeKey) return;
+        const val = currentFilters[f.key];
+        if (!val) return;
+
+        const valEscaped = val.replace(/'/g, "''");
+        if (valEscaped === "__EMPTY__") {
+            whereClauses.push(`(${f.col} IS NULL OR ${f.col} = '')`);
+        } else {
+            whereClauses.push(`${f.col} = '${valEscaped}'`);
         }
-    };
+    });
 
-    populate('albumFilter', 'album', 'Sin Álbum');
-    populate('genreFilter', 'genre', 'Sin Género');
-    populate('publisherFilter', 'publisher', 'Sin Etiqueta');
-    populate('yearFilter', 'year', 'Sin Año');
+    return whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+}
+
+function populateSelectFilters() {
+    const filterDefs = [
+        { id: 'albumFilter', key: 'album', col: 'album', defaultLabel: 'Álbum: Todos', emptyLabel: 'Sin Álbum' },
+        { id: 'genreFilter', key: 'genre', col: 'genre', defaultLabel: 'Género: Todos', emptyLabel: 'Sin Género' },
+        { id: 'publisherFilter', key: 'publisher', col: 'publisher', defaultLabel: 'Etiqueta: Todas', emptyLabel: 'Sin Etiqueta' },
+        { id: 'yearFilter', key: 'year', col: 'year', defaultLabel: 'Año: Todos', emptyLabel: 'Sin Año' }
+    ];
+
+    filterDefs.forEach(f => {
+        const select = document.getElementById(f.id);
+        if (!select) return;
+
+        const savedValue = currentFilters[f.key];
+        const whereSql = getActiveWhereClauses(f.key);
+
+        select.innerHTML = '';
+
+        // 1. Opción por defecto (Todos)
+        const optAll = document.createElement('option');
+        optAll.value = "";
+        optAll.textContent = f.defaultLabel;
+        select.appendChild(optAll);
+
+        // 2. Opción "Sin X" solo si hay registros vacíos para las condiciones activas
+        const emptyQuery = `SELECT COUNT(*) FROM tracks ${whereSql} ${whereSql ? 'AND' : 'WHERE'} (${f.col} IS NULL OR ${f.col} = '')`;
+        try {
+            const resEmpty = db.exec(emptyQuery);
+            if (resEmpty.length && resEmpty[0].values[0][0] > 0) {
+                const optEmpty = document.createElement('option');
+                optEmpty.value = "__EMPTY__";
+                optEmpty.textContent = f.emptyLabel;
+                select.appendChild(optEmpty);
+            }
+        } catch (err) {
+            console.error(`Error verificando opción vacía para ${f.id}:`, err);
+        }
+
+        // 3. Opciones distintas con valor
+        const distinctQuery = `SELECT DISTINCT ${f.col} FROM tracks ${whereSql} ${whereSql ? 'AND' : 'WHERE'} ${f.col} IS NOT NULL AND ${f.col} != '' ORDER BY ${f.col} ASC`;
+        try {
+            const res = db.exec(distinctQuery);
+            if (res.length && res[0].values) {
+                res[0].values.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v[0];
+                    opt.textContent = v[0];
+                    select.appendChild(opt);
+                });
+            }
+        } catch (err) {
+            console.error(`Error actualizando opciones de ${f.id}:`, err);
+        }
+
+        // Reasignamos y validamos que la selección previa continúe existiendo entre las opciones válidas
+        const exists = Array.from(select.options).some(o => o.value === savedValue);
+        if (exists) {
+            select.value = savedValue;
+        } else {
+            currentFilters[f.key] = "";
+            select.value = "";
+        }
+    });
 }
 
 function updateFilterStyles() {
-    const filters = ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'];
-    let anyActive = false;
+    const filters = [
+        { id: 'albumFilter', key: 'album' },
+        { id: 'genreFilter', key: 'genre' },
+        { id: 'publisherFilter', key: 'publisher' },
+        { id: 'yearFilter', key: 'year' }
+    ];
+    let anyActive = !!currentFilters.search;
 
-    // Verificar si hay texto en el campo de búsqueda
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput && searchInput.value.trim() !== '') {
-        anyActive = true;
-    }
-
-    // Verificar selects de filtros
-    filters.forEach(id => {
-        const elem = document.getElementById(id);
+    filters.forEach(f => {
+        const elem = document.getElementById(f.id);
         if (elem) {
-            if (elem.value !== '') {
+            if (currentFilters[f.key] !== '') {
                 elem.classList.add('active-filter');
                 anyActive = true;
             } else {
@@ -676,65 +753,40 @@ function updateFilterStyles() {
     }
 }
 
-function handleFilterChange() {
+function handleFilterChange(key, filterId) {
+    const select = document.getElementById(filterId);
+    if (select) {
+        currentFilters[key] = select.value;
+    }
     updateFilterStyles();
+    populateSelectFilters();
     resetAndSearch();
 }
 
 function resetAllFilters() {
-    // Limpiar input de búsqueda
+    currentFilters = { search: '', album: '', genre: '', publisher: '', year: '' };
+
     const searchInput = document.getElementById('searchInput');
     if (searchInput) searchInput.value = '';
 
-    // Limpiar selects
     ['albumFilter', 'genreFilter', 'publisherFilter', 'yearFilter'].forEach(id => {
         const elem = document.getElementById(id);
         if (elem) elem.value = '';
     });
 
     updateFilterStyles();
+    populateSelectFilters();
     resetAndSearch();
 }
 
 function loadTableData() {
-    const searchInput = document.getElementById('searchInput');
-    const albumFilter = document.getElementById('albumFilter');
-    const genreFilter = document.getElementById('genreFilter');
-    const publisherFilter = document.getElementById('publisherFilter');
-    const yearFilter = document.getElementById('yearFilter');
     const chkVerDetalle = document.getElementById('chkVerDetalle');
     const resultsCountElem = document.getElementById('resultsCount');
 
-    if (!searchInput || !albumFilter || !genreFilter || !publisherFilter || !yearFilter || !chkVerDetalle) {
-        return;
-    }
+    if (!chkVerDetalle) return;
 
-    const search = searchInput.value.replace(/'/g, "''").trim();
-    const album = albumFilter.value.replace(/'/g, "''");
-    const genre = genreFilter.value.replace(/'/g, "''");
-    const publisher = publisherFilter.value.replace(/'/g, "''");
-    const year = yearFilter.value.replace(/'/g, "''");
     const verDetalle = chkVerDetalle.checked;
-    
-    let whereClauses = [];
-    if (search) {
-        whereClauses.push(`(artist LIKE '%${search}%' OR title LIKE '%${search}%' OR album LIKE '%${search}%' OR filename LIKE '%${search}%' OR remix LIKE '%${search}%')`);
-    }
-    
-    const applyFilter = (col, val) => {
-        if (val === "__EMPTY__") {
-            whereClauses.push(`(${col} IS NULL OR ${col} = '')`);
-        } else if (val) {
-            whereClauses.push(`${col} = '${val}'`);
-        }
-    };
-
-    applyFilter('album', album);
-    applyFilter('genre', genre);
-    applyFilter('publisher', publisher);
-    applyFilter('year', year);
-    
-    const whereSql = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+    const whereSql = getActiveWhereClauses();
 
     const countQuery = `SELECT COUNT(*) FROM tracks ${whereSql}`;
     let totalRecords = 0;
@@ -754,7 +806,6 @@ function loadTableData() {
 
     const offset = currentPage * PAGE_SIZE;
 
-    // Criterio de ordenación dinámico según la vista activa
     const orderBySql = verDetalle 
         ? "ORDER BY LOWER(COALESCE(NULLIF(artist, ''), filename)) ASC, LOWER(title) ASC" 
         : "ORDER BY LOWER(filename) ASC";
@@ -803,7 +854,6 @@ function loadTableData() {
         res[0].values.forEach(row => {
             const tr = document.createElement('tr');
             
-            // Evento para resaltar fila activa en toque/click móvil
             tr.onclick = function() {
                 document.querySelectorAll('#tableBody tr').forEach(r => r.classList.remove('selected-row'));
                 this.classList.add('selected-row');
@@ -908,7 +958,12 @@ function toggleVerDetalle() {
 
 let searchTimeout;
 function debouncedSearch() {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        currentFilters.search = searchInput.value.trim();
+    }
     updateFilterStyles();
+    populateSelectFilters();
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(resetAndSearch, 150);
 }

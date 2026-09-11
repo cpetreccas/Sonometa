@@ -669,6 +669,143 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+class ProgressDialog(ctk.CTkToplevel):
+    """Modal de progreso para operaciones pesadas con actualización segura desde hilos."""
+
+    def __init__(self, parent, title_text="Procesando", message="Iniciando...", total=0):
+        super().__init__(parent)
+        self.app = parent
+        self._total = max(0, int(total or 0))
+        self._current = 0
+        self._ui_queue = queue.Queue()
+        self._ui_pump_after_id = None
+
+        self.title("Progreso - Sonometa")
+        self.geometry("520x190")
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        self._setup_ui(title_text, message)
+
+        self.withdraw()
+        DialogManager.center_popup_on_parent(self, self.app, width=520, height=190)
+        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
+        self._start_ui_pump()
+
+    def _setup_ui(self, title_text, message):
+        frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        self.lbl_title = ctk.CTkLabel(
+            frame,
+            text=title_text,
+            anchor="w",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color="#F3F4F6"
+        )
+        self.lbl_title.pack(fill="x", pady=(0, 2))
+
+        self.lbl_message = ctk.CTkLabel(
+            frame,
+            text=message,
+            anchor="w",
+            justify="left",
+            text_color="#D1D5DB"
+        )
+        self.lbl_message.pack(fill="x", pady=(0, 10))
+
+        self.progress = ctk.CTkProgressBar(frame, progress_color=getattr(self.app, "CORP_COLOR", "#6B21A8"))
+        self.progress.pack(fill="x", pady=(0, 8))
+        self.progress.set(0)
+
+        self.lbl_counter = ctk.CTkLabel(
+            frame,
+            text="Procesando 0 / 0 canciones...",
+            anchor="w",
+            text_color="#9CA3AF",
+            font=ctk.CTkFont(size=11)
+        )
+        self.lbl_counter.pack(fill="x")
+
+    def close(self):
+        if self._ui_pump_after_id:
+            try:
+                self.after_cancel(self._ui_pump_after_id)
+            except Exception:
+                pass
+            self._ui_pump_after_id = None
+
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
+
+    def set_progress(self, value):
+        value = max(0.0, min(1.0, float(value)))
+        if self.winfo_exists():
+            self.progress.set(value)
+
+    def set_text(self, title=None, message=None, counter_text=None):
+        if not self.winfo_exists():
+            return
+        if title is not None:
+            self.lbl_title.configure(text=title)
+        if message is not None:
+            self.lbl_message.configure(text=message)
+        if counter_text is not None:
+            self.lbl_counter.configure(text=counter_text)
+
+    def set_counter(self, current, total=None, current_file=""):
+        self._current = max(0, int(current or 0))
+        if total is not None:
+            self._total = max(0, int(total or 0))
+
+        counter_text = f"Procesando {self._current:,} / {self._total:,} canciones..."
+        message = "Leyendo metadatos de audio..."
+        if current_file:
+            message = f"Leyendo: {os.path.basename(current_file)}"
+
+        progress_value = (self._current / self._total) if self._total > 0 else 0.0
+        self.set_text(message=message, counter_text=counter_text)
+        self.set_progress(progress_value)
+
+    def set_progress_threadsafe(self, value):
+        self._ui_queue.put(("progress", value))
+
+    def set_text_threadsafe(self, title=None, message=None, counter_text=None):
+        self._ui_queue.put(("text", {"title": title, "message": message, "counter_text": counter_text}))
+
+    def set_counter_threadsafe(self, current, total=None, current_file=""):
+        self._ui_queue.put(("counter", {"current": current, "total": total, "current_file": current_file}))
+
+    def _start_ui_pump(self):
+        if self._ui_pump_after_id is None:
+            self._ui_pump_after_id = self.after(30, self._drain_ui_queue)
+
+    def _drain_ui_queue(self):
+        self._ui_pump_after_id = None
+        if not self.winfo_exists():
+            return
+
+        processed = 0
+        while processed < 120:
+            try:
+                action, payload = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            processed += 1
+            if action == "progress":
+                self.set_progress(payload)
+            elif action == "text":
+                self.set_text(**payload)
+            elif action == "counter":
+                self.set_counter(**payload)
+
+        self._ui_pump_after_id = self.after(30, self._drain_ui_queue)
+
+
 class DialogManager:
     """Clase especializada en la gestión de ventanas emergentes, diálogos y popups de la aplicación."""
 
@@ -712,6 +849,10 @@ class DialogManager:
 
         dialog = ReplaceFilenameDialog(app, target_items)
         app.wait_window(dialog)
+
+    @staticmethod
+    def show_progress_dialog(app, title_text="Procesando", message="Iniciando...", total=0):
+        return ProgressDialog(app, title_text=title_text, message=message, total=total)
 
     @staticmethod
     def apply_popup_style(app, win, is_modal=True, owner=None):

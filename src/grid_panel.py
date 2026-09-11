@@ -1330,9 +1330,9 @@ class GridPanel:
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)
 
-    def insert_audio_row(self, metadata, count):
-        tag = "even" if count % 2 == 0 else "odd"
-        row_values = self.build_row_values({
+    @staticmethod
+    def _build_audio_row_payload(metadata):
+        return {
             "Filename": metadata.get("Filename", ""),
             "Artist": metadata.get("Artist", ""),
             "Title": metadata.get("Title", ""),
@@ -1343,9 +1343,29 @@ class GridPanel:
             "Year": metadata.get("Year", ""),
             "Comment": metadata.get("Comment", ""),
             "Cover": metadata.get("Cover", "No"),
-        })
+        }
+
+    def insert_audio_row(self, metadata, count):
+        tag = "even" if count % 2 == 0 else "odd"
+        row_values = self.build_row_values(self._build_audio_row_payload(metadata))
         row_id = self.tree.insert("", "end", values=row_values, tags=(tag,))
         return row_id
+
+    def insert_audio_rows_batch(self, batch_items, start_count=0):
+        """Inserta un bloque de filas minimizando sobrecarga de Python por iteración."""
+        inserted = []
+        tree_insert = self.tree.insert
+        build_values = self.build_row_values
+
+        for offset, item in enumerate(batch_items):
+            count = start_count + offset
+            tag = "even" if count % 2 == 0 else "odd"
+            metadata = item.get("metadata", {})
+            row_values = build_values(self._build_audio_row_payload(metadata))
+            row_id = tree_insert("", "end", values=row_values, tags=(tag,))
+            inserted.append((row_id, item.get("file_path")))
+
+        return inserted
 
     def _on_tree_delete_press(self, event):
         if self.cell_entry and self.cell_entry.winfo_exists():

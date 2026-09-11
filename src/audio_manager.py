@@ -1,10 +1,11 @@
 import io
 import os
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 import threading
 from collections import OrderedDict
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Logger unificado de Sonometa
 logger = logging.getLogger("Sonometa")
@@ -641,26 +642,74 @@ class AudioManager:
     # Eliminación completa de metadatos
     # ------------------------------------------------------------------
 
-    def scan_audio_files(self, folder):
+    def _iter_audio_file_paths(self, folder: str, audio_extensions: tuple) -> List[str]:
+        file_paths: List[str] = []
+        for root, _, files in os.walk(folder):
+            for file_name in files:
+                if file_name.lower().endswith(audio_extensions):
+                    file_paths.append(os.path.join(root, file_name))
+        return file_paths
+
+    def scan_audio_files(self, folder: str, progress_callback: Optional[Callable[[int, int, str], None]] = None):
         """Escanea recursivamente una carpeta y devuelve una lista de diccionarios con
         la ruta del archivo y sus metadatos extraídos.
+
+        Args:
+            folder: Carpeta raíz a escanear.
+            progress_callback: Callback opcional con firma
+                               progress_callback(current, total, current_file).
         """
         AUDIO_EXTENSIONS = ('.mp3', '.flac', '.m4a', '.aac', '.wav', '.ogg', '.wma', '.aiff')
         if not os.path.isdir(folder) or not os.access(folder, os.R_OK):
             logger.error(f"Ruta inválida o sin permisos de lectura: {folder}")
             return []
 
-        results = []
-        for root, _, files in os.walk(folder):
-            for file in files:
-                if file.lower().endswith(AUDIO_EXTENSIONS):
-                    file_path = os.path.join(root, file)
-                    metadata = self.extract_metadata(file_path, file)
-                    results.append({
+        file_paths = self._iter_audio_file_paths(folder, AUDIO_EXTENSIONS)
+        total_files = len(file_paths)
+        if total_files == 0:
+            return []
+
+        max_workers = min(32, max(4, (os.cpu_count() or 4) * 2))
+        ordered_results: List[Optional[dict]] = [None] * total_files
+        completed = 0
+
+        def _safe_notify(current: int, total: int, current_file: str) -> None:
+            if not callable(progress_callback):
+                return
+            try:
+                progress_callback(current, total, current_file)
+            except Exception:
+                pass
+
+        def _read_metadata(file_path: str) -> dict:
+            file_name = os.path.basename(file_path)
+            metadata = self.extract_metadata(file_path, file_name)
+            return {
+                "file_path": file_path,
+                "metadata": metadata,
+            }
+
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="SonometaScan") as executor:
+            future_map = {
+                executor.submit(_read_metadata, file_path): (idx, file_path)
+                for idx, file_path in enumerate(file_paths)
+            }
+
+            for future in as_completed(future_map):
+                idx, file_path = future_map[future]
+                try:
+                    ordered_results[idx] = future.result()
+                except Exception as exc:
+                    logger.error(f"Error escaneando {os.path.basename(file_path)}: {str(exc)}")
+                    ordered_results[idx] = {
                         "file_path": file_path,
-                        "metadata": metadata
-                    })
-        return results
+                        "metadata": self.extract_metadata(file_path, os.path.basename(file_path)),
+                    }
+
+                completed += 1
+                _safe_notify(completed, total_files, file_path)
+
+        return [item for item in ordered_results if item is not None]
 
     def clear_audio_file_metadata(self, file_path):
         """Elimina únicamente las etiquetas de texto editables y la carátula,

@@ -1,5 +1,7 @@
 import os
 import ctypes
+import threading
+import time
 import tkinter as tk
 from collections import deque
 import customtkinter as ctk
@@ -58,6 +60,9 @@ class App(ctk.CTk):
 
         self.log_window = None
         self.log_textbox = None
+        self._is_loading_audio = False
+        self._load_job_id = 0
+        self._progress_dialog = None
 
         self._configure_window()
         self._init_services()
@@ -67,7 +72,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v1.1 - Audio Tag Suite")
+        self.title("Sonometa v1.2 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))
@@ -393,6 +398,15 @@ class App(ctk.CTk):
         self.destroy()
 
     def load_audio_files(self, folder):
+        if self._is_loading_audio:
+            self.logger.warning("Ya hay una carga en curso. Espera a que finalice para iniciar otra.")
+            return
+
+        scan_started_at = time.perf_counter()
+        self._is_loading_audio = True
+        self._load_job_id += 1
+        job_id = self._load_job_id
+
         if hasattr(self, "audio_manager") and hasattr(self.audio_manager, "clear_runtime_caches"):
             self.audio_manager.clear_runtime_caches()
         if hasattr(self, "detail_panel") and hasattr(self.detail_panel, "clear_runtime_caches"):
@@ -404,26 +418,146 @@ class App(ctk.CTk):
         self.search_manager.reset_all_tree_items()
 
         self.logger.info(f"Escaneando carpeta: {folder}")
-        items = self.audio_manager.scan_audio_files(folder)
+        self.progress_bar.set(0)
+        self.label_status.configure(text="Iniciando escaneo masivo...")
+        self._progress_dialog = DialogManager.show_progress_dialog(
+            self,
+            title_text="Escaneando colección",
+            message="Leyendo metadatos de audio...",
+            total=0
+        )
 
-        for count, item in enumerate(items):
-            file_path = item["file_path"]
-            metadata = item["metadata"]
+        def _scan_progress(current, total, current_file):
+            def _ui_update():
+                if job_id != self._load_job_id or not self.winfo_exists():
+                    return
 
-            for key in self.CATALOG_KEYS:
-                val = CatalogManager.normalize_catalog_text(metadata.get(key, ""))
-                metadata[key] = val
-                self.catalog_manager.add_catalog_value(key, val, persist=False)
+                ratio = (current / total) if total > 0 else 0.0
+                self.progress_bar.set(ratio)
+                self.label_status.configure(text=f"Escaneando {current:,} / {total:,} canciones...")
 
-            row_id = self.grid_panel.insert_audio_row(metadata, count)
-            self.file_paths_map[row_id] = file_path
+                if self._progress_dialog and self._progress_dialog.winfo_exists():
+                    self._progress_dialog.set_counter(current, total, current_file)
 
-        self.detail_panel.refresh_catalog_comboboxes()
-        self.search_manager.sync_all_tree_items()
-        if hasattr(self.header_panel, "entry_search") and self.header_panel.entry_search.get():
-            self.search_manager.apply_search_filter()
+            try:
+                self.after(0, _ui_update)
+            except Exception:
+                pass
 
-        self.logger.info(f"Se encontraron {len(items)} archivo(s) de audio compatibles.")
+        def _scan_worker():
+            items = []
+            error_message = None
+            try:
+                items = self.audio_manager.scan_audio_files(folder, progress_callback=_scan_progress)
+            except Exception as exc:
+                error_message = str(exc)
+
+            def _done():
+                self._on_scan_finished(job_id, items, scan_started_at, error_message)
+
+            try:
+                self.after(0, _done)
+            except Exception:
+                pass
+
+        threading.Thread(target=_scan_worker, daemon=True, name="SonometaScanWorker").start()
+
+    def _on_scan_finished(self, job_id, items, started_at, error_message=None):
+        if job_id != self._load_job_id or not self.winfo_exists():
+            return
+
+        if error_message:
+            self._finalize_load_job(job_id, started_at, loaded_count=0, error_message=error_message)
+            return
+
+        total = len(items)
+        if self._progress_dialog and self._progress_dialog.winfo_exists():
+            self._progress_dialog.set_text(
+                title="Insertando en grilla",
+                message="Renderizando registros en lotes..."
+            )
+
+        self._insert_items_in_batches(job_id, items, started_at, batch_size=300)
+
+    def _insert_items_in_batches(self, job_id, items, started_at, batch_size=300):
+        total = len(items)
+        cursor = 0
+
+        def _insert_step():
+            nonlocal cursor
+            if job_id != self._load_job_id or not self.winfo_exists():
+                return
+
+            end = min(cursor + batch_size, total)
+            raw_batch = items[cursor:end]
+            normalized_batch = []
+
+            for item in raw_batch:
+                file_path = item.get("file_path", "")
+                metadata = dict(item.get("metadata") or {})
+
+                for key in self.CATALOG_KEYS:
+                    val = CatalogManager.normalize_catalog_text(metadata.get(key, ""))
+                    metadata[key] = val
+                    self.catalog_manager.add_catalog_value(key, val, persist=False)
+
+                normalized_batch.append({"file_path": file_path, "metadata": metadata})
+
+            inserted_rows = self.grid_panel.insert_audio_rows_batch(normalized_batch, start_count=cursor)
+            for row_id, file_path in inserted_rows:
+                if row_id and file_path:
+                    self.file_paths_map[row_id] = file_path
+
+            cursor = end
+            ratio = (cursor / total) if total > 0 else 0.0
+            self.progress_bar.set(ratio)
+            self.label_status.configure(text=f"Insertando {cursor:,} / {total:,} canciones...")
+
+            if self._progress_dialog and self._progress_dialog.winfo_exists():
+                self._progress_dialog.set_text(
+                    title="Insertando en grilla",
+                    message="Renderizando registros en lotes...",
+                    counter_text=f"Procesando {cursor:,} / {total:,} canciones..."
+                )
+                self._progress_dialog.set_progress(ratio)
+
+            if cursor < total:
+                self.after(1, _insert_step)
+                return
+
+            self._finalize_load_job(job_id, started_at, loaded_count=total)
+
+        self.after(0, _insert_step)
+
+    def _finalize_load_job(self, job_id, started_at, loaded_count, error_message=None):
+        if job_id != self._load_job_id:
+            return
+
+        try:
+            if error_message:
+                self.label_status.configure(text="Error durante la carga de audio.")
+                self.progress_bar.set(0)
+                self.logger.error(f"Error al cargar archivos de audio: {error_message}")
+            else:
+                self.detail_panel.refresh_catalog_comboboxes()
+                self.search_manager.sync_all_tree_items()
+                if hasattr(self.header_panel, "entry_search") and self.header_panel.entry_search.get():
+                    self.search_manager.apply_search_filter()
+
+                self.progress_bar.set(1 if loaded_count > 0 else 0)
+                self.label_status.configure(text=f"Carga completada: {loaded_count:,} canciones.")
+                self.logger.info(f"Se encontraron {loaded_count} archivo(s) de audio compatibles.")
+
+                elapsed = time.perf_counter() - started_at
+                self.logger.info(
+                    f"Carga masiva finalizada en {elapsed:.2f}s "
+                    f"(escaneo + inserción + refresco final, total={loaded_count})."
+                )
+        finally:
+            if self._progress_dialog and self._progress_dialog.winfo_exists():
+                self._progress_dialog.close()
+            self._progress_dialog = None
+            self._is_loading_audio = False
 
     def _on_global_key(self, event):
         if getattr(self, "_is_redirecting_key", False):

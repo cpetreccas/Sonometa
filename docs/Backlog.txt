@@ -1,7 +1,6 @@
 FUNCIONALIDADES GENERALES:
-- La carga de 4000 canciones tarda 4m 15s.
-- Se debe visualizar un modal de carga y estado del avance de la carga.
-- El icono no carga ni en la barra superior ni en la parte de iconos abiertos de Windows abajo.
+- Crear caché de Discogs para no hacer tantas peticiones a la API
+- Crear caché para no recargar tantas veces al importar colección si no hay cambios.
 - Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Integrar búsquedas en Google para el nombre y carátulas
@@ -12,5 +11,4 @@ Panel de filtros avanzados:
 - Se pierde la ordenación cuando seleccionas un álbum y luego le das a TODOS
 
 WebApp:
-- El logo apunta hacia la derecha y no hacia la izquierda
 - Poder personalizar el dashboard. Al hacer click en un género, recalcular todos los gráficos a ese género.
