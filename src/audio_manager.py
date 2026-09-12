@@ -19,9 +19,10 @@ class AudioManager:
     """Responsable exclusivamente de la lectura, modificación y eliminación
     de etiquetas de audio mediante mutagen. No contiene ninguna lógica de UI."""
 
-    def __init__(self) -> None:
+    def __init__(self, cache_manager=None) -> None:
         self._metadata_cache: "OrderedDict[MetadataCacheKey, MetadataDict]" = OrderedDict()
         self._cache_lock = threading.Lock()
+        self.cache_manager = cache_manager  # Caché persistente opcional
 
     @staticmethod
     def _safe_close_audio(audio_obj) -> None:
@@ -94,6 +95,14 @@ class AudioManager:
         cached = self._get_cached_metadata(file_path)
         if cached is not None:
             return cached
+
+        # Intentar caché persistente si está disponible
+        if self.cache_manager:
+            persistent_cache = self.cache_manager.get_cached_tags(file_path)
+            if persistent_cache is not None:
+                logger.debug(f"[AUDIO] Metadatos cargados de caché persistente: {filename}")
+                self._set_cached_metadata(file_path, persistent_cache)
+                return persistent_cache
 
         data = {
             "Filename": filename,
@@ -223,6 +232,11 @@ class AudioManager:
                 self._safe_close_audio(audio_obj)
 
         self._set_cached_metadata(file_path, data)
+        
+        # Guardar en caché persistente si está disponible
+        if self.cache_manager:
+            self.cache_manager.save_tags(file_path, data)
+        
         return data
 
     def count_traktor_cues(self, file_path):
@@ -484,6 +498,9 @@ class AudioManager:
 
         finally:
             self._invalidate_metadata_cache(file_path)
+            # Invalidar caché persistente también
+            if self.cache_manager:
+                self.cache_manager.invalidate_track_cache(file_path)
             if app and hasattr(app, "detail_panel") and app.detail_panel.audio_player:
                 app.detail_panel.audio_player.resume_after_file_write(file_path, was_playing, saved_pos)
 
@@ -556,6 +573,9 @@ class AudioManager:
                 return False
 
             self._invalidate_metadata_cache(file_path)
+            # Invalidar caché persistente
+            if self.cache_manager:
+                self.cache_manager.invalidate_track_cache(file_path)
             return True
 
         except Exception as e:
@@ -634,6 +654,9 @@ class AudioManager:
 
             logger.info(f"Carátula eliminada con éxito de: {os.path.basename(file_path)}")
             self._invalidate_metadata_cache(file_path)
+            # Invalidar caché persistente
+            if self.cache_manager:
+                self.cache_manager.invalidate_track_cache(file_path)
 
         except Exception as e:
             logger.error(f"Error al eliminar carátula de {os.path.basename(file_path)}: {str(e)}")
@@ -779,6 +802,9 @@ class AudioManager:
                     audio.save()
 
             self._invalidate_metadata_cache(file_path)
+            # Invalidar caché persistente
+            if self.cache_manager:
+                self.cache_manager.invalidate_track_cache(file_path)
             return True
 
         except Exception as e:

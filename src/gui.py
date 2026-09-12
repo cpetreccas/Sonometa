@@ -9,6 +9,7 @@ from customtkinter import filedialog
 
 from grid_panel import GridPanel
 from audio_manager import AudioManager
+from cache_manager import CacheManager
 from detail_panel import DetailPanel
 from format_filename import FilenameFormatter
 from discogs_client import DiscogsClient
@@ -81,7 +82,11 @@ class App(ctk.CTk):
     def _init_services(self):
         self.logger = LogManager.setup_logger(self)
         self.undo_manager = UndoManager(self)
-        self.audio_manager = AudioManager()
+        
+        # Inicializar CacheManager antes de otros servicios
+        self.cache_manager = CacheManager()
+        
+        self.audio_manager = AudioManager(cache_manager=self.cache_manager)
         self.filename_formatter = FilenameFormatter()
 
         self.DEFAULT_COVER_PATH = UiUtils.get_resource_path("assets/no_cover_art.jpg")
@@ -97,7 +102,10 @@ class App(ctk.CTk):
         manual_rev = settings_dict.get("manual_cover_review", True) if isinstance(settings_dict, dict) else True
         self.review_covers_var = tk.BooleanVar(value=manual_rev)
 
-        self.discogs_client = DiscogsClient(token_getter=lambda: self.discogs_token)
+        self.discogs_client = DiscogsClient(
+            token_getter=lambda: self.discogs_token,
+            cache_manager=self.cache_manager
+        )
         self.process_manager = ProcessManager(self)
 
     def _load_app_resources(self):

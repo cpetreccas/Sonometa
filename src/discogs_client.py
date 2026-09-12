@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import threading
 import urllib.parse
 import urllib.request
@@ -13,11 +14,12 @@ MAX_DISCOGS_CACHE = 3000
 
 class DiscogsClient:
 
-    def __init__(self, token_getter: Callable[[], str]):
+    def __init__(self, token_getter: Callable[[], str], cache_manager=None):
         self._get_token = token_getter
         self._cache_lock = threading.Lock()
         self._search_cache: "OrderedDict[str, Tuple[str, str, str, str]]" = OrderedDict()
         self._images_cache: "OrderedDict[Tuple[str, int], Tuple[str, ...]]" = OrderedDict()
+        self.cache_manager = cache_manager  # Caché persistente opcional
 
     @staticmethod
     def _normalize_query(query: str) -> str:
@@ -47,6 +49,26 @@ class DiscogsClient:
                     self._search_cache.move_to_end(norm_query)
             if cached is not None:
                 return cached
+
+        # Intentar caché persistente ANTES de hacer request HTTP
+        if self.cache_manager and norm_query:
+            persistent = self.cache_manager.get_discogs_response(norm_query, max_age_days=30)
+            if persistent:
+                artist = persistent.get("artist", "")
+                title = persistent.get("title", "")
+                year = persistent.get("year", "")
+                cover_url = persistent.get("cover_url", "")
+                result = (artist, title, year, cover_url)
+
+                logger.info(f"[DISCOGS] Resultado cargado de caché persistente: '{query}'")
+
+                # Actualizar caché en runtime
+                with self._cache_lock:
+                    self._search_cache[norm_query] = result
+                    while len(self._search_cache) > MAX_DISCOGS_CACHE:
+                        self._search_cache.popitem(last=False)
+
+                return result
 
         try:
             encoded_query = urllib.parse.quote(query)
@@ -86,6 +108,17 @@ class DiscogsClient:
                             self._search_cache[norm_query] = result
                             while len(self._search_cache) > MAX_DISCOGS_CACHE:
                                 self._search_cache.popitem(last=False)
+
+                        # Guardar en caché persistente
+                        if self.cache_manager:
+                            response_data = {
+                                "artist": artist,
+                                "title": title,
+                                "year": str(year),
+                                "cover_url": cover_url,
+                                "query": query
+                            }
+                            self.cache_manager.save_discogs_response(norm_query, response_data)
                     return result
 
                 logger.warning(
@@ -112,11 +145,28 @@ class DiscogsClient:
 
     def download_image_bytes(self, image_url: str) -> Optional[bytes]:
         """Descarga los bytes de una imagen utilizando las cabeceras autenticadas."""
+        # Revisar si está en caché persistente
+        if self.cache_manager:
+            cached_path = self.cache_manager.get_cached_cover_path(image_url)
+            if cached_path and os.path.exists(cached_path):
+                try:
+                    with open(cached_path, "rb") as f:
+                        logger.debug(f"[DISCOGS] Imagen cargada de caché local: {image_url[:50]}...")
+                        return f.read()
+                except Exception as e:
+                    logger.warning(f"[DISCOGS] Error leyendo imagen en caché: {str(e)}")
+
         try:
             req = urllib.request.Request(image_url, headers=self._get_headers())
             with urllib.request.urlopen(req, timeout=10) as response:
                 if response.status == 200:
-                    return response.read()
+                    image_bytes = response.read()
+
+                    # Guardar en caché persistente
+                    if self.cache_manager and image_bytes:
+                        self.cache_manager.save_cached_cover(image_url, image_bytes)
+
+                    return image_bytes
         except Exception as e:
             logger.error(f"[DISCOGS] Error descargando imagen ({image_url}): {str(e)}")
         return None
@@ -132,6 +182,20 @@ class DiscogsClient:
                     self._images_cache.move_to_end(cache_key)
             if isinstance(cached, tuple):
                 return list(cached)
+
+        # Caché persistente
+        if self.cache_manager and norm_query:
+            persistent = self.cache_manager.get_discogs_response(
+                f"images:{norm_query}:{max_images}",
+                max_age_days=30
+            )
+            if persistent:
+                images = persistent.get("images", [])
+                if images:
+                    logger.info(f"[DISCOGS] Imágenes cargadas de caché persistente: {norm_query}")
+                    with self._cache_lock:
+                        self._images_cache[cache_key] = tuple(images)
+                    return images
 
         try:
             encoded_query = urllib.parse.quote(query)
@@ -156,6 +220,18 @@ class DiscogsClient:
                             self._images_cache[cache_key] = tuple(images)
                             while len(self._images_cache) > MAX_DISCOGS_CACHE:
                                 self._images_cache.popitem(last=False)
+
+                        # Guardar en caché persistente
+                        if self.cache_manager:
+                            response_data = {
+                                "images": images,
+                                "query": query,
+                                "max_images": max_images
+                            }
+                            self.cache_manager.save_discogs_response(
+                                f"images:{norm_query}:{max_images}",
+                                response_data
+                            )
                     return images
         except Exception as e:
             logger.error(f"[DISCOGS] Error obteniendo lista de imágenes: {str(e)}")
