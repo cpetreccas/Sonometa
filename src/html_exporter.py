@@ -32,6 +32,8 @@ class SQLiteManager:
                 genre TEXT,
                 publisher TEXT,
                 year TEXT,
+                cues INTEGER,
+                rating INTEGER,
                 cover_blob TEXT
             )
         """)
@@ -45,8 +47,8 @@ class SQLiteManager:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_artist_title ON tracks(artist, title);")
 
         cursor.executemany("""
-            INSERT INTO tracks (filename, artist, title, remix, album, genre, publisher, year, cover_blob)
-            VALUES (:filename, :artist, :title, :remix, :album, :genre, :publisher, :year, :cover_blob)
+            INSERT INTO tracks (filename, artist, title, remix, album, genre, publisher, year, cues, rating, cover_blob)
+            VALUES (:filename, :artist, :title, :remix, :album, :genre, :publisher, :year, :cues, :rating, :cover_blob)
         """, tracks_data)
 
         conn.commit()
@@ -961,7 +963,7 @@ function loadTableData() {
         ? "ORDER BY LOWER(COALESCE(NULLIF(artist, ''), filename)) ASC, LOWER(title) ASC" 
         : "ORDER BY LOWER(filename) ASC";
 
-    const query = `SELECT cover_blob, filename, artist, title, remix, album, genre, publisher, year FROM tracks ${whereSql} ${orderBySql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+    const query = `SELECT cover_blob, filename, artist, title, remix, album, genre, publisher, year, cues, rating FROM tracks ${whereSql} ${orderBySql} LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
     
     let res = [];
     try {
@@ -988,6 +990,8 @@ function loadTableData() {
                 <th>GÉNERO</th>
                 <th>ETIQUETA</th>
                 <th class="col-center">AÑO</th>
+                <th class="col-center">CUES</th>
+                <th class="col-center">RATING</th>
             </tr>
         `;
     } else {
@@ -1019,6 +1023,9 @@ function loadTableData() {
             const genreVal = row[6] || '';
             const publisherVal = row[7] || '';
             const yearVal = row[8] || '';
+            const cuesVal = Number(row[9] || 0) > 0 ? String(row[9]) : '-';
+            const ratingNum = Number(row[10] || 0);
+            const ratingVal = `${Math.max(0, Math.min(5, Number.isFinite(ratingNum) ? ratingNum : 0))}★`;
 
             let imgTag = '<span class="cover-badge">N/A</span>';
             if (coverData) {
@@ -1062,6 +1069,8 @@ function loadTableData() {
                     ${renderCell(genreVal)}
                     ${renderCell(publisherVal)}
                     ${renderCell(yearVal, true)}
+                    ${renderCell(cuesVal, true)}
+                    ${renderCell(ratingVal, true)}
                 `;
             } else {
                 tr.innerHTML = `
@@ -1072,7 +1081,7 @@ function loadTableData() {
             tbody.appendChild(tr);
         });
     } else {
-        const colSpan = verDetalle ? 8 : 2;
+        const colSpan = verDetalle ? 10 : 2;
         tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;" class="text-subtle">No se encontraron registros.</td></tr>`;
     }
 
@@ -1210,46 +1219,50 @@ class HTMLExporter:
             return
 
         tree = grid.tree
-        visible_cols = [c for c in tree["displaycolumns"] if c != "#0"]
-        headers = [tree.heading(c)["text"] for c in visible_cols]
+        all_cols = list(tree["columns"])
+        col_index = {name: idx for idx, name in enumerate(all_cols)}
 
-        idx = {"file": 0, "cover": -1, "artist": -1, "title": -1, "remix": -1, "album": -1, "genre": -1, "publisher": -1, "year": -1}
-        for i, h in enumerate(headers):
-            h_lower = h.lower()
-            if any(k in h_lower for k in ["archivo", "filename", "file"]): idx["file"] = i
-            elif any(k in h_lower for k in ["carátula", "cover"]): idx["cover"] = i
-            elif any(k in h_lower for k in ["intérprete", "artista", "artist"]): idx["artist"] = i
-            elif any(k in h_lower for k in ["título", "title"]): idx["title"] = i
-            elif any(k in h_lower for k in ["remix"]): idx["remix"] = i
-            elif any(k in h_lower for k in ["álbum", "album"]): idx["album"] = i
-            elif any(k in h_lower for k in ["género", "genre"]): idx["genre"] = i
-            elif any(k in h_lower for k in ["etiqueta", "sello", "publisher", "label"]): idx["publisher"] = i
-            elif any(k in h_lower for k in ["año", "year"]): idx["year"] = i
+        def get_col_value(values, key, default=""):
+            idx = col_index.get(key)
+            if idx is None or idx >= len(values):
+                return default
+            raw = values[idx]
+            return "" if raw is None else str(raw).strip()
+
+        def parse_cues(raw_value):
+            text = str(raw_value or "").strip()
+            return int(text) if text.isdigit() else 0
+
+        def parse_rating(raw_value):
+            text = str(raw_value or "").strip().replace("★", "")
+            if not text.isdigit():
+                return 0
+            return max(0, min(5, int(text)))
 
         tracks_data = []
         for item_id in tree.get_children():
             values = tree.item(item_id, "values")
-            col_indices = [tree["columns"].index(c) for c in visible_cols]
-            row_vals = [values[i] if i < len(values) else "" for i in col_indices]
 
             b64_cover = None
-            audio_path = HTMLExporter._resolve_audio_path(app, item_id, row_vals, idx["file"])
+            file_idx = col_index.get("Filename", 0)
+            audio_path = HTMLExporter._resolve_audio_path(app, item_id, values, file_idx)
             if audio_path:
                 b64_cover = HTMLExporter._extract_cover_from_audio(audio_path)
 
-            def get_val(key):
-                i = idx[key]
-                return row_vals[i].strip() if i != -1 and i < len(row_vals) else ""
+            cues_raw = get_col_value(values, "Cues", get_col_value(values, "CUEs", "-"))
+            rating_raw = get_col_value(values, "Rating", "0★")
 
             tracks_data.append({
-                "filename": get_val("file"),
-                "artist": get_val("artist"),
-                "title": get_val("title"),
-                "remix": get_val("remix"),
-                "album": get_val("album"),
-                "genre": get_val("genre"),
-                "publisher": get_val("publisher"),
-                "year": get_val("year"),
+                "filename": get_col_value(values, "Filename"),
+                "artist": get_col_value(values, "Artist"),
+                "title": get_col_value(values, "Title"),
+                "remix": get_col_value(values, "MixArtist"),
+                "album": get_col_value(values, "Album"),
+                "genre": get_col_value(values, "Genre"),
+                "publisher": get_col_value(values, "Publisher"),
+                "year": get_col_value(values, "Year"),
+                "cues": parse_cues(cues_raw),
+                "rating": parse_rating(rating_raw),
                 "cover_blob": b64_cover if isinstance(b64_cover, str) and b64_cover.strip() else None
             })
 

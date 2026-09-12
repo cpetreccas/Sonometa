@@ -47,6 +47,8 @@ class GridPanel:
             "Genre": "GÉNERO",
             "Publisher": "ETIQUETA",
             "Year": "AÑO",
+            "Cues": "CUES",
+            "Rating": "RATING",
             "Cover": "CARÁTULA"
         }
 
@@ -61,6 +63,8 @@ class GridPanel:
             "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
             "Year":      {"width": 40,  "minwidth": 40,  "stretch": False, "anchor": "center"},
             "Comment":   {"width": 0,   "minwidth": 0,   "stretch": False, "anchor": "w"},
+            "Cues":      {"width": 58,  "minwidth": 50,  "stretch": False, "anchor": "center"},
+            "Rating":    {"width": 64,  "minwidth": 58,  "stretch": False, "anchor": "center"},
             "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"}
         }
 
@@ -125,7 +129,7 @@ class GridPanel:
 
     def _build_row_search_text(self, values, columns, col_index):
         searchable_columns = (
-            "Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment"
+            "Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cues", "Rating"
         )
         parts = []
         for col_name in searchable_columns:
@@ -141,6 +145,9 @@ class GridPanel:
         text_filters = criteria_obj.text
         combo_filters = criteria_obj.combo
         toggles = criteria_obj.toggles
+
+        cues_raw = str(self.get_value_by_column(values, "Cues", self.get_value_by_column(values, "CUEs", "-"))).strip()
+        cues_num = self._parse_cues_value(cues_raw)
 
         for col_name, search_val in text_filters.items():
             idx = col_index.get(col_name)
@@ -175,7 +182,18 @@ class GridPanel:
             if comment_val != "":
                 return False
 
+        if toggles.get("no_cues") and cues_num > 0:
+            return False
+
         return True
+
+
+    @staticmethod
+    def _parse_cues_value(value: str) -> int:
+        raw = str(value or "").strip()
+        if raw.isdigit():
+            return max(0, int(raw))
+        return 0
 
     @staticmethod
     def _has_active_advanced_filters(criteria_obj: AdvancedFilterCriteria) -> bool:
@@ -270,8 +288,7 @@ class GridPanel:
                 self._update_tree_scrollbars()
 
         self.logger.info(
-            f"Filtro combinado aplicado: {len(visible_rows)} de {len(all_rows)} visibles "
-            f"(texto={'on' if normalized_query else 'off'}, avanzado={'on' if self._has_active_advanced_filters(criteria_obj) else 'off'})."
+            f"Filtro combinado aplicado: {len(visible_rows)} de {len(all_rows)}."
         )
 
     def _install_editor_bindtag_guard(self):
@@ -435,8 +452,8 @@ class GridPanel:
         return "break"
 
     def _build_treeview(self):
-        # Declaramos las 10 columnas en la tupla interna de datos
-        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cover")
+        # Declaramos las columnas internas de datos (incluye columnas ocultas por defecto)
+        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cues", "Rating", "Cover")
 
         self.tree = ttk.Treeview(self.tree_container, columns=self.columns, show="headings", selectmode="extended")
 
@@ -752,7 +769,7 @@ class GridPanel:
             return False
 
     def _get_next_tree_edit_target(self, row_id, col_index, direction):
-        editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment")]
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment", "Cues", "Rating")]
         if col_index not in editable_cols:
             return None
 
@@ -809,7 +826,7 @@ class GridPanel:
             return
 
         col_name = self.columns[col_index]
-        if col_name in ("Cover", "Comment"):
+        if col_name in ("Cover", "Comment", "Cues", "Rating"):
             return
 
         self._last_edited_col = col_index
@@ -1252,6 +1269,9 @@ class GridPanel:
         if not col_name or col_name in ("Cover", "Comment"):
             return
 
+        if col_name in ("Cues", "Rating"):
+            return
+
         if col_name in self.columns:
             col_index = self.columns.index(col_name)
             row_id = self.tree.identify_row(event.y)
@@ -1323,6 +1343,8 @@ class GridPanel:
             "Publisher": new_metadata.get("Publisher", ""),
             "Year": new_metadata.get("Year", ""),
             "Comment": new_metadata.get("Comment", current_map.get("Comment", "")),
+            "Cues": new_metadata.get("Cues", new_metadata.get("CUEs", current_map.get("Cues", "-"))),
+            "Rating": new_metadata.get("Rating", current_map.get("Rating", "0★")),
             "Cover": new_metadata.get("Cover", current_map.get("Cover", "No")),
         }
 
@@ -1342,6 +1364,8 @@ class GridPanel:
             "Publisher": metadata.get("Publisher", ""),
             "Year": metadata.get("Year", ""),
             "Comment": metadata.get("Comment", ""),
+            "Cues": metadata.get("Cues", metadata.get("CUEs", "-")),
+            "Rating": metadata.get("Rating", "0★"),
             "Cover": metadata.get("Cover", "No"),
         }
 
@@ -1390,7 +1414,7 @@ class GridPanel:
         if not focused_row:
             return "break"
 
-        editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment")]
+        editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment", "Cues", "Rating")]
         target_col = editable_cols[0]
 
         self._start_tree_cell_edit(focused_row, target_col, open_dropdown=True)
@@ -1414,7 +1438,7 @@ class GridPanel:
 
         self._nav_lock = True
         try:
-            editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment")]
+            editable_cols = [idx for idx, col in enumerate(self.columns) if col not in ("Cover", "Comment", "Cues", "Rating")]
 
             if reverse:
                 target_col = editable_cols[-1]
@@ -1576,21 +1600,11 @@ class GridPanel:
             bd=1, relief="flat", font=('Segoe UI', 10)
         )
 
-        col_titles = {
-            "Filename": "NOMBRE DE ARCHIVO",
-            "Artist": "INTÉRPRETE",
-            "Title": "TÍTULO",
-            "MixArtist": "REMIX",
-            "Album": "ÁLBUM",
-            "Genre": "GÉNERO",
-            "Publisher": "ETIQUETA",
-            "Year": "AÑO",
-            "Cover": "CARÁTULA"
-        }
+        col_titles = dict(self.col_titles)
 
         display_cols = list(self.tree.cget("displaycolumns"))
         if display_cols == ["#all"] or not display_cols:
-            display_cols = [c for c in self.columns if c != "Comment"]
+            display_cols = [c for c in self.columns if c not in ("Comment", "Cues", "Rating")]
 
         header_menu.vars = []
 
@@ -1619,7 +1633,7 @@ class GridPanel:
     def _toggle_column_visibility(self, col_name, current_visible):
         display_cols = list(self.tree.cget("displaycolumns"))
         if display_cols == ["#all"] or not display_cols:
-            display_cols = [c for c in self.columns if c != "Comment"]
+            display_cols = [c for c in self.columns if c not in ("Comment", "Cues", "Rating")]
 
         if current_visible:
             if len(display_cols) > 1:

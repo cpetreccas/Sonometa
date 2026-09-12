@@ -1,6 +1,7 @@
 import io
 import os
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 import threading
@@ -84,7 +85,7 @@ class AudioManager:
 
         Returns:
             dict con claves: Filename, Title, Artist, MixArtist, Album,
-                             Genre, Publisher, Year, Comment, Duration, CUEs, Cover.
+                             Genre, Publisher, Year, Comment, Duration, Cues, Rating, Cover.
         """
         from mutagen.wave import WAVE
         from mutagen.flac import FLAC
@@ -94,15 +95,16 @@ class AudioManager:
 
         cached = self._get_cached_metadata(file_path)
         if cached is not None:
-            return cached
+            return self._normalize_traktor_fields(dict(cached))
 
         # Intentar caché persistente si está disponible
         if self.cache_manager:
             persistent_cache = self.cache_manager.get_cached_tags(file_path)
             if persistent_cache is not None:
                 logger.debug(f"[AUDIO] Metadatos cargados de caché persistente: {filename}")
-                self._set_cached_metadata(file_path, persistent_cache)
-                return persistent_cache
+                normalized = self._normalize_traktor_fields(dict(persistent_cache))
+                self._set_cached_metadata(file_path, normalized)
+                return normalized
 
         data = {
             "Filename": filename,
@@ -115,7 +117,11 @@ class AudioManager:
             "Year": "",
             "Comment": "",
             "Duration": "",  # Preservación de la duración calculada del audio
-            "CUEs": 0,
+            "Cues": "-",
+            "Rating": "0★",
+            # Campos crudos para filtros/caché persistente
+            "cue_count": 0,
+            "rating": 0,
             "Cover": "No",
         }
 
@@ -220,7 +226,21 @@ class AudioManager:
                 mins, secs = divmod(total_seconds, 60)
                 data["Duration"] = f"{mins:02d}:{secs:02d}"
 
-            data["CUEs"] = self.count_traktor_cues(file_path)
+            cue_count = self.count_traktor_cues(file_path)
+
+            # Extracción segura del rating usando el objeto audio mutagen o fallback
+            rating_audio_obj = open_audio_objects[0] if open_audio_objects else MutagenFile(file_path)
+            if rating_audio_obj is not None:
+                rating_value = self.extract_traktor_rating(rating_audio_obj, file_path)
+            else:
+                rating_value = 0
+
+            data["cue_count"] = cue_count
+            data["rating"] = rating_value
+            data["Cues"] = str(cue_count) if cue_count > 0 else "-"
+            data["Rating"] = f"{rating_value}★"
+            # Compatibilidad con versiones previas que consumen la clave histórica
+            data["CUEs"] = data["Cues"]
 
             if self.extract_cover_bytes(file_path):
                 data["Cover"] = "Sí"
@@ -231,13 +251,43 @@ class AudioManager:
             for audio_obj in open_audio_objects:
                 self._safe_close_audio(audio_obj)
 
+        data = self._normalize_traktor_fields(data)
         self._set_cached_metadata(file_path, data)
-        
+
         # Guardar en caché persistente si está disponible
         if self.cache_manager:
             self.cache_manager.save_tags(file_path, data)
-        
+
         return data
+
+    @staticmethod
+    def _normalize_traktor_fields(metadata: MetadataDict) -> MetadataDict:
+        def parse_cues(raw_value) -> int:
+            text = str(raw_value or "").strip()
+            return int(text) if text.isdigit() else 0
+
+        def parse_rating(raw_value) -> int:
+            text = str(raw_value or "").strip().replace("★", "")
+            return max(0, min(5, int(text))) if text.isdigit() else 0
+
+        cue_count = metadata.get("cue_count")
+        if cue_count is None:
+            cue_count = parse_cues(metadata.get("Cues", metadata.get("CUEs", "-")))
+        else:
+            cue_count = parse_cues(cue_count)
+
+        rating_value = metadata.get("rating")
+        if rating_value is None:
+            rating_value = parse_rating(metadata.get("Rating", "0★"))
+        else:
+            rating_value = parse_rating(rating_value)
+
+        metadata["cue_count"] = cue_count
+        metadata["rating"] = rating_value
+        metadata["Cues"] = str(cue_count) if cue_count > 0 else "-"
+        metadata["CUEs"] = metadata["Cues"]
+        metadata["Rating"] = f"{rating_value}★"
+        return metadata
 
     def count_traktor_cues(self, file_path):
         """Lee la etiqueta GEOB/PRIV 'TRAKTOR4' o la etiqueta 'TRAKTOR4' y cuenta
@@ -251,51 +301,26 @@ class AudioManager:
             if audio is None:
                 return 0
 
-            xml_data_bytes = None
-
-            # 1. Búsqueda en tags ID3 (MP3, WAV, AIFF)
-            if hasattr(audio, "tags") and audio.tags:
-                for key, tag in audio.tags.items():
-                    if key.startswith("GEOB") or key.startswith("PRIV"):
-                        desc = getattr(tag, "desc", "") or getattr(tag, "owner", "")
-                        if "TRAKTOR" in desc.upper():
-                            xml_data_bytes = getattr(tag, "data", None)
-                            break
-
-            # 2. Búsqueda en tags de otros formatos (FLAC, OGG, etc.) o respaldo genérico
-            if not xml_data_bytes and hasattr(audio, "get"):
-                traktor_tag = audio.get("TRAKTOR4") or audio.get("traktor4")
-                if traktor_tag:
-                    val = traktor_tag[0] if isinstance(traktor_tag, list) else traktor_tag
-                    if isinstance(val, str):
-                        xml_data_bytes = val.encode("utf-8", errors="ignore")
-                    elif isinstance(val, bytes):
-                        xml_data_bytes = val
-
-            if not xml_data_bytes:
+            xml_str = self._extract_traktor_xml_string(audio)
+            if not xml_str:
                 return 0
 
-            # 3. Decodificación y parsing XML
-            try:
-                xml_str = xml_data_bytes.decode("utf-8", errors="ignore")
-            except Exception:
-                xml_str = str(xml_data_bytes)
-
-            start_idx = xml_str.find("<CUE_V2")
-            if start_idx == -1:
-                start_idx = xml_str.find("<ENTRY")
-                if start_idx == -1:
-                    return 0
-
-            end_idx = xml_str.rfind(">")
-            if end_idx == -1 or end_idx <= start_idx:
+            root = self._parse_traktor_root(xml_str)
+            if root is None:
                 return 0
-
-            clean_xml = xml_str[start_idx : end_idx + 1]
-            root = ET.fromstring(clean_xml)
 
             cues = root.findall(".//CUE_V2")
-            return len(cues)
+            if cues:
+                return len(cues)
+
+            # Fallback para estructuras simplificadas sin nodos CUE_V2
+            for tag_name in ("CUE", "CUEPOINT"):
+                fallback = root.findall(f".//{tag_name}")
+                if fallback:
+                    return len(fallback)
+
+            # Último fallback textual si el XML es parcial
+            return len(re.findall(r"<CUE_V2\b", xml_str, flags=re.IGNORECASE))
 
         except Exception as e:
             logger.debug(f"Error parseando Traktor CUEs en {os.path.basename(file_path)}: {str(e)}")
@@ -303,6 +328,158 @@ class AudioManager:
             self._safe_close_audio(locals().get("self_audio_ref"))
 
         return 0
+
+    @staticmethod
+    def _normalize_rating_value(raw_value) -> Optional[int]:
+        if raw_value is None:
+            return None
+
+        text = str(raw_value).strip()
+        if text == "":
+            return None
+
+        try:
+            value = float(text)
+        except Exception:
+            return None
+
+        if value <= 1:
+            stars = round(value * 5)
+        elif value <= 5:
+            stars = round(value)
+        elif value <= 100:
+            stars = round(value / 20)
+        elif value <= 255:
+            stars = round(value / 51)
+        else:
+            stars = round(value)
+
+        return max(0, min(5, int(stars)))
+
+    @staticmethod
+    def _extract_traktor_xml_string(audio_obj) -> Optional[str]:
+        xml_data_bytes = None
+
+        if hasattr(audio_obj, "tags") and audio_obj.tags:
+            for key, tag in audio_obj.tags.items():
+                if key.startswith("GEOB") or key.startswith("PRIV"):
+                    desc = getattr(tag, "desc", "") or getattr(tag, "owner", "")
+                    if "TRAKTOR" in str(desc).upper():
+                        xml_data_bytes = getattr(tag, "data", None)
+                        break
+
+        if not xml_data_bytes and hasattr(audio_obj, "get"):
+            traktor_tag = audio_obj.get("TRAKTOR4") or audio_obj.get("traktor4")
+            if traktor_tag:
+                val = traktor_tag[0] if isinstance(traktor_tag, list) else traktor_tag
+                if isinstance(val, str):
+                    xml_data_bytes = val.encode("utf-8", errors="ignore")
+                elif isinstance(val, bytes):
+                    xml_data_bytes = val
+
+        if not xml_data_bytes:
+            return None
+
+        try:
+            return xml_data_bytes.decode("utf-8", errors="ignore")
+        except Exception:
+            try:
+                return str(xml_data_bytes)
+            except Exception:
+                return None
+
+    @staticmethod
+    def _parse_traktor_root(xml_str: str):
+        if not xml_str:
+            return None
+
+        markers = ("<ENTRY", "<NML", "<CUE_V2")
+        start_idx = -1
+        for marker in markers:
+            start_idx = xml_str.find(marker)
+            if start_idx != -1:
+                break
+
+        if start_idx == -1:
+            return None
+
+        end_idx = xml_str.rfind(">")
+        if end_idx == -1 or end_idx <= start_idx:
+            return None
+
+        clean_xml = xml_str[start_idx : end_idx + 1]
+        try:
+            return ET.fromstring(clean_xml)
+        except Exception:
+            return None
+
+    def extract_traktor_rating(self, audio, file_path: str = "") -> int:
+        """
+        Extrae el rating de Traktor en escala 0-5.
+        Soporta MP3 (marcos POPM) y FLAC (Vorbis Comments: rating wmp, rating, traktor_rating, etc.)
+        """
+        rating_stars = 0
+
+        # Si no se proporciona file_path explícitamente, intentamos inferirlo desde el objeto audio
+        if not file_path and hasattr(audio, "filename"):
+            file_path = str(audio.filename)
+
+        try:
+            # --- CASO 1: ARCHIVOS FLAC (Vorbis Comments) ---
+            if file_path.lower().endswith(".flac"):
+                # Mapeo de claves habituales en FLAC (se evalúan en minúsculas)
+                possible_keys = [
+                    "rating wmp",
+                    "rating",
+                    "rating:traktor",
+                    "traktor_rating",
+                    "rating_winamp"
+                ]
+
+                raw_val = None
+                # Convertimos las claves de audio a minúsculas para evitar problemas de mayúsculas
+                audio_keys_lower = {str(k).lower(): k for k in audio.keys()}
+
+                for key in possible_keys:
+                    if key in audio_keys_lower:
+                        original_key = audio_keys_lower[key]
+                        val_list = audio[original_key]
+                        raw_val = val_list[0] if isinstance(val_list, list) and val_list else val_list
+                        break
+
+                if raw_val is not None:
+                    try:
+                        val_num = float(str(raw_val).strip())
+                        # Conversión desde escala 0-255 (estándar POPM / Windows Media Player)
+                        if val_num > 5:
+                            if val_num >= 224: rating_stars = 5      # 255 es 5 estrellas
+                            elif val_num >= 160: rating_stars = 4    # 196 / 160 es 4 estrellas
+                            elif val_num >= 96: rating_stars = 3     # 128 / 96 es 3 estrellas
+                            elif val_num >= 32: rating_stars = 2     # 64 / 32 es 2 estrellas
+                            elif val_num > 0: rating_stars = 1      # 1 / 32 es 1 estrella
+                        else:
+                            # Si ya viene en escala 1-5
+                            rating_stars = int(val_num)
+                    except ValueError:
+                        rating_stars = 0
+
+            # --- CASO 2: ARCHIVOS MP3 / ID3 (POPM Frame) ---
+            else:
+                for key in audio.keys():
+                    if key.startswith("POPM"):
+                        popm_data = audio[key]
+                        raw_rating = getattr(popm_data, "rating", 0)
+                        if raw_rating >= 224: rating_stars = 5
+                        elif raw_rating >= 160: rating_stars = 4
+                        elif raw_rating >= 96: rating_stars = 3
+                        elif raw_rating >= 32: rating_stars = 2
+                        elif raw_rating > 0: rating_stars = 1
+                        break
+
+        except Exception as e:
+            logger.warning(f"Error extrayendo rating de {file_path}: {e}")
+
+        return rating_stars
 
     def extract_cover_bytes(self, file_path):
         """Lee y devuelve los bytes de la carátula incrustada, o None si no existe."""

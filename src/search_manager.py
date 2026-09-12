@@ -119,7 +119,7 @@ class SearchManager:
         columns = list(self.tree["columns"])
         searchable_columns = [
             col for col in columns
-            if col in ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment")
+            if col in ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cues", "Rating")
         ]
         parts = []
         for col_name in searchable_columns:

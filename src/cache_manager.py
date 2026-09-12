@@ -155,7 +155,19 @@ class CacheManager:
             stat = os.stat(file_path)
             mtime = stat.st_mtime
             size = stat.st_size
-            tags_json = json.dumps(tags, ensure_ascii=False)
+
+            normalized_tags = dict(tags or {})
+            cue_value = normalized_tags.get("cue_count")
+            if cue_value is None:
+                cue_value = normalized_tags.get("Cues", normalized_tags.get("CUEs", "-"))
+            normalized_tags["cue_count"] = self._safe_parse_cues(cue_value)
+
+            rating_value = normalized_tags.get("rating")
+            if rating_value is None:
+                rating_value = normalized_tags.get("Rating", "0★")
+            normalized_tags["rating"] = self._safe_parse_rating(rating_value)
+
+            tags_json = json.dumps(normalized_tags, ensure_ascii=False)
 
             with self._lock:
                 conn = sqlite3.connect(self.CACHE_DB_PATH)
@@ -178,6 +190,18 @@ class CacheManager:
         except Exception as e:
             logger.error(f"[CACHE] Error guardando metadatos de {file_path}: {str(e)}")
             return False
+
+    @staticmethod
+    def _safe_parse_cues(raw_value) -> int:
+        text = str(raw_value or "").strip()
+        return int(text) if text.isdigit() else 0
+
+    @staticmethod
+    def _safe_parse_rating(raw_value) -> int:
+        text = str(raw_value or "").strip().replace("★", "")
+        if not text.isdigit():
+            return 0
+        return max(0, min(5, int(text)))
 
     def invalidate_track_cache(self, file_path: str) -> None:
         """Elimina el registro de caché para un archivo específico."""

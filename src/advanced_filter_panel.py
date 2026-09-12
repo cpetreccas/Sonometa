@@ -28,6 +28,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             "no_year": ctk.BooleanVar(value=False),
             "no_cover": ctk.BooleanVar(value=False),
             "no_comment": ctk.BooleanVar(value=False),
+            "no_cues": ctk.BooleanVar(value=False),
         }
 
         self._filter_debounce_id = None
@@ -124,6 +125,16 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             font=("Segoe UI", 11)
         )
         sw_comment.pack(side="left", padx=15)
+
+        sw_cues = ctk.CTkSwitch(
+            frame_toggles,
+            text="Sin Cues",
+            variable=self.toggle_vars["no_cues"],
+            command=self._trigger_filter,
+            progress_color="#7B2CBF",
+            font=("Segoe UI", 11)
+        )
+        sw_cues.pack(side="left", padx=15)
 
         btn_reset = ctk.CTkButton(
             frame_toggles,
