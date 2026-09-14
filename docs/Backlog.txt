@@ -10,10 +10,8 @@ Panel de filtros avanzados:
 - Limpiar
 
 WebApp:
-- En el reproductor se ve una carátula rota si el archivo no tiene carátula. Enseñar la misma que en el listado.
 - Ordenar por todas las cabeceras.
 - En archivos flac no se guarda la caratula.
-- Habilitar reproducción aleatoria?
 - Configura Python en el escritorio para consultar las playlists creadas en la nube y generar los archivos locales compatibles (.m3u8, XML Traktor/Rekordbox).
 - Módulo de Compartición (Social & Web Share API): Añade el botón "Compartir" en la WebApp usando navigator.share (Web Share API) o copiado de enlace.
 - Configura una vista pública ligera / tarjeta visual (Social Card) con etiquetas Open Graph para previsualizar portadas, CUEs y BPM al enviar por WhatsApp o Instagram.

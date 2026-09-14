@@ -8,6 +8,8 @@ const PAGE_SIZE = 100;
 
 let allTracks = [];
 let filteredTracks = [];
+let currentTrackIndex = -1;
+let isShuffle = false;
 
 let currentFilters = {
     search: '',
@@ -418,6 +420,8 @@ export function playTrack(track) {
         return;
     }
 
+    currentTrackIndex = filteredTracks.findIndex(t => t.id === track.id);
+
     const playerBar = document.getElementById('playerBar');
     const playerCoverContainer = document.getElementById('playerCoverContainer');
     const playerTitle = document.getElementById('playerTitle');
@@ -445,9 +449,7 @@ export function playTrack(track) {
             const maxDuration = 20; // Límite de preescucha
 
             if (current >= maxDuration) {
-                mainAudio.pause();
-                mainAudio.currentTime = 0;
-                updatePlayIcon(false);
+                playNextTrack();
             }
 
             // Actualizar barra y tiempo
@@ -464,10 +466,52 @@ export function playTrack(track) {
         };
 
         mainAudio.onended = function() {
-            updatePlayIcon(false);
+            playNextTrack();
         };
     }
 }
+
+function playNextTrack() {
+    if (filteredTracks.length === 0) return;
+
+    let nextIndex;
+    if (isShuffle) {
+        if (filteredTracks.length === 1) {
+            nextIndex = 0;
+        } else {
+            do {
+                nextIndex = Math.floor(Math.random() * filteredTracks.length);
+            } while (nextIndex === currentTrackIndex);
+        }
+    } else {
+        nextIndex = (currentTrackIndex + 1) % filteredTracks.length;
+    }
+
+    const nextTrack = filteredTracks[nextIndex];
+    if (nextTrack) {
+        // Resaltar en la tabla si la fila existe visible
+        document.querySelectorAll('#tableBody tr').forEach(r => {
+            if (r.getAttribute('data-track-id') === String(nextTrack.id)) {
+                r.classList.add('selected-row');
+            } else {
+                r.classList.remove('selected-row');
+            }
+        });
+        playTrack(nextTrack);
+    }
+}
+
+window.toggleShuffle = function() {
+    isShuffle = !isShuffle;
+    const btn = document.getElementById('btnShuffle');
+    if (btn) {
+        if (isShuffle) {
+            btn.classList.add('active-shuffle');
+        } else {
+            btn.classList.remove('active-shuffle');
+        }
+    }
+};
 
 function updatePlayIcon(isPlaying) {
     const iconPlay = document.getElementById('iconPlay');

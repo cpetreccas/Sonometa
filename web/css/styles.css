@@ -248,36 +248,14 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     position: fixed;
     bottom: 0; left: 0; right: 0;
     height: 64px;
-    background-color: rgba(36, 36, 42, 0.95);
-    backdrop-filter: blur(8px);
-    border-top: 1px solid var(--border-highlight);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 16px;
-    z-index: 900;
-}
-.player-info { display: flex; align-items: center; gap: 12px; max-width: 40%; }
-.player-info img { width: 42px; height: 42px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border-color); }
-.player-details { display: flex; flex-direction: column; overflow: hidden; }
-.player-title { font-size: 13px; font-weight: 600; color: #FFF; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.player-artist { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.player-controls audio { height: 36px; outline: none; }
-
-/* Player Bar Personalizado */
-.player-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 64px;
     background: #18181C;
+    backdrop-filter: blur(8px);
     border-top: 1px solid #2E2E38;
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 20px;
-    z-index: 100;
+    z-index: 900;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
 }
 
@@ -345,6 +323,37 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     height: 20px;
 }
 
+/* BOTÓN SHUFFLE SUTIL */
+.player-btn-subtle {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s, background-color 0.2s, transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.player-btn-subtle:hover {
+    color: var(--text-main);
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.player-btn-subtle.active-shuffle {
+    color: var(--primary-purple);
+    background-color: rgba(139, 92, 246, 0.15);
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+}
+
+.player-icon-sm {
+    width: 18px;
+    height: 18px;
+}
+
 .player-time {
     font-size: 0.75rem;
     color: #A1A1AA;
@@ -398,7 +407,7 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
         gap: 8px;
     }
 
-    /* FILA 1: Carátula + Título/Artista + Botón Play a la derecha */
+    /* FILA 1: Carátula + Título/Artista + Botón Play */
     .player-info {
         width: 100%;
         max-width: 100%;
@@ -411,7 +420,7 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
 
     .player-details {
         flex: 1;
-        min-width: 0; /* Permite que el texto se corte con ellipsis sin empujar */
+        min-width: 0;
         display: flex;
         flex-direction: column;
     }
@@ -436,7 +445,6 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
         margin-top: 1px;
     }
 
-    /* Botón Play fijado a la derecha en la Fila 1 */
     .player-btn-toggle {
         width: 36px;
         height: 36px;
@@ -444,7 +452,7 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
         margin-left: auto;
     }
 
-    /* FILA 2: Tiempos y Barra de progreso a lo ancho */
+    /* FILA 2: Shuffle, Tiempos y Barra de progreso */
     .player-controls {
         width: 100%;
         max-width: 100%;
@@ -466,7 +474,6 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
         text-align: center;
     }
 
-    /* Ocultar control de volumen en móvil */
     .volume-container {
         display: none;
     }
