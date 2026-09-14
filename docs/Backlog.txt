@@ -1,6 +1,4 @@
 FUNCIONALIDADES GENERALES:
-- Crear caché de Discogs para no hacer tantas peticiones a la API
-- Crear caché para no recargar tantas veces al importar colección si no hay cambios.
 - Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Integrar búsquedas en Google para el nombre y carátulas
@@ -9,6 +7,13 @@ FUNCIONALIDADES GENERALES:
 
 Panel de filtros avanzados:
 - Se pierde la ordenación cuando seleccionas un álbum y luego le das a TODOS
+- Limpiar
 
 WebApp:
-- Poder personalizar el dashboard. Al hacer click en un género, recalcular todos los gráficos a ese género.
+- Ordenar por todas las cabeceras.
+- Corregir filtros.
+- En archivos flac no se guarda la caratula.
+- En el reproductor se ve una carátula rota si el archivo no tiene carátula. Enseñar la misma que en el listado.
+- Habilitar reproducción aleatoria?
+
+Analizar postgesql para ver si se puede optimizar la base de datos y mejorar el rendimiento de las consultas.

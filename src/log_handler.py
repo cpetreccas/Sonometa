@@ -8,31 +8,32 @@ class LogManager(logging.Handler):
         self.app_instance = app_instance
         self._buffer_lock = threading.Lock()
         self._pending_ui_logs = []
-        self._flush_scheduled = False
         self._flush_after_id = None
+        self._flush_interval_ms = 80
+
+        # Inicia un poller en el hilo UI para drenar logs sin tocar Tk desde workers.
+        try:
+            if threading.current_thread() is threading.main_thread():
+                self._flush_after_id = self.app_instance.after(self._flush_interval_ms, self._flush_ui_logs)
+        except Exception:
+            self._flush_after_id = None
 
     def emit(self, record):
-        msg = self.format(record)
-        if hasattr(self.app_instance, "log_history"):
-            self.app_instance.log_history.append((record.levelname, msg))
-
-        # Si la ventana principal ya fue destruida, evitamos llamar a after()
-        if not hasattr(self.app_instance, "winfo_exists") or not self.app_instance.winfo_exists():
-            return
-
         try:
+            msg = self.format(record)
+            if hasattr(self.app_instance, "log_history"):
+                self.app_instance.log_history.append((record.levelname, msg))
+
+            # Si la ventana principal no existe o fue destruida, omitir refresco UI
+            if not hasattr(self.app_instance, "winfo_exists") or not self.app_instance.winfo_exists():
+                return
+
             message_text = record.getMessage()
             with self._buffer_lock:
                 self._pending_ui_logs.append((message_text, record.levelname, msg))
-                if self._flush_scheduled:
-                    return
-                self._flush_scheduled = True
 
-            # Flush por lote: evita saturar el hilo UI cuando hay muchas trazas.
-            self._flush_after_id = self.app_instance.after(80, self._flush_ui_logs)
         except Exception:
-            with self._buffer_lock:
-                self._flush_scheduled = False
+            pass
 
     def _flush_ui_logs(self):
         self._flush_after_id = None
@@ -40,32 +41,33 @@ class LogManager(logging.Handler):
         if not hasattr(self.app_instance, "winfo_exists") or not self.app_instance.winfo_exists():
             with self._buffer_lock:
                 self._pending_ui_logs.clear()
-                self._flush_scheduled = False
             return
 
         with self._buffer_lock:
             batch = list(self._pending_ui_logs)
             self._pending_ui_logs.clear()
-            self._flush_scheduled = False
 
-        if not batch:
-            return
+        if batch:
+            status_msg, _, _ = batch[-1]
+            if hasattr(self.app_instance, "label_status") and self.app_instance.label_status:
+                try:
+                    self.app_instance.label_status.configure(text=status_msg.split('\n')[0])
+                except Exception:
+                    pass
 
-        status_msg, _, _ = batch[-1]
-        if hasattr(self.app_instance, "label_status") and self.app_instance.label_status:
-            try:
-                self.app_instance.label_status.configure(text=status_msg.split('\n')[0])
-            except Exception:
-                pass
+            for _, level, full_msg in batch:
+                LogManager.append_log_to_dialog(self.app_instance, level, full_msg)
 
-        for _, level, full_msg in batch:
-            LogManager.append_log_to_dialog(self.app_instance, level, full_msg)
+        try:
+            if hasattr(self.app_instance, "winfo_exists") and self.app_instance.winfo_exists():
+                self._flush_after_id = self.app_instance.after(self._flush_interval_ms, self._flush_ui_logs)
+        except Exception:
+            self._flush_after_id = None
 
     def _update_ui_log(self, status_msg, level, full_msg):
         """Actualiza la barra de estado y el cuadro de texto del diálogo si existen."""
         if hasattr(self.app_instance, "label_status") and self.app_instance.label_status:
             try:
-                # Si es un log multilínea con árbol, tomamos solo la primera línea para la barra de estado
                 first_line = status_msg.split('\n')[0]
                 self.app_instance.label_status.configure(text=first_line)
             except Exception:
@@ -75,7 +77,6 @@ class LogManager(logging.Handler):
 
     @staticmethod
     def _format_dict_value(val):
-        """Formatea los valores individuales estilo JSON/Python estandarizado para logs."""
         if val is None:
             return "null"
         if isinstance(val, str):
@@ -84,7 +85,6 @@ class LogManager(logging.Handler):
 
     @staticmethod
     def dict_to_str(d):
-        """Convierte un diccionario a string con formato {Key: 'Value', Key2: null}."""
         if not d:
             return "{}"
         items = [f"{k}: {LogManager._format_dict_value(v)}" for k, v in d.items()]
@@ -92,14 +92,6 @@ class LogManager(logging.Handler):
 
     @staticmethod
     def format_tree_log(context, action, filename, prev_vals=None, new_vals=None, error_cause=None):
-        """
-        Construye el mensaje multilínea con estructura de árbol ASCII.
-
-        Ejemplos de salidas generadas:
-        [DETAIL] Modificado 'pista.mp3'
-          ├── Valores previos : {Year: 1995}
-          └── Valores nuevos  : {Year: 1996}
-        """
         header = f"[{context.upper()}] {action} '{filename}'"
 
         if error_cause:
@@ -117,22 +109,18 @@ class LogManager(logging.Handler):
 
     @staticmethod
     def setup_logger(app_instance, name="Sonometa", level=logging.INFO):
-        """Configura y retorna el logger principal de la aplicación vinculado a la GUI."""
         logger = logging.getLogger(name)
         logger.setLevel(level)
 
-        # Evitar duplicar handlers en re-inicializaciones
         if not logger.handlers:
             formatter = logging.Formatter(
                 "%(asctime)s [%(levelname)s] %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S"
             )
-            # 1. Console Handler
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
 
-            # 2. LogManager Handler (GUI / Historial)
             ui_handler = LogManager(app_instance)
             ui_handler.setFormatter(formatter)
             logger.addHandler(ui_handler)
@@ -141,7 +129,6 @@ class LogManager(logging.Handler):
 
     @staticmethod
     def append_log_to_dialog(app, level, msg):
-        """Agrega una línea de texto al cuadro de texto del diálogo de logs aplicando formato si está abierto."""
         log_win = getattr(app, "log_window", None)
         log_box = getattr(app, "log_textbox", None)
 
@@ -154,7 +141,6 @@ class LogManager(logging.Handler):
                 app.log_textbox = None
                 return
 
-            # Intentar delegar el filtrado y formateo enriquecido a DialogManager si está disponible
             from dialogs import DialogManager
             if hasattr(DialogManager, "append_formatted_log_line"):
                 DialogManager.append_formatted_log_line(app, level, msg)
@@ -166,7 +152,6 @@ class LogManager(logging.Handler):
                 log_box.configure(state="disabled")
         except Exception:
             try:
-                # Fallback seguro en caso de fallo durante el formateo
                 log_box.configure(state="normal")
                 line_to_insert = msg if msg.endswith("\n") else f"{msg}\n"
                 log_box.insert("end", line_to_insert)

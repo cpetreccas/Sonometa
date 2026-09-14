@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import ctypes
+import webbrowser
 import queue
 import threading
 import urllib.request
@@ -848,6 +849,15 @@ class DialogManager:
             return
 
         dialog = ReplaceFilenameDialog(app, target_items)
+        app.wait_window(dialog)
+
+    # Al final de la clase DialogManager en dialogs.py
+
+    @staticmethod
+    def show_login_dialog(app, supabase_client, on_success_callback=None):
+        """Muestra el diálogo modal para iniciar sesión en Supabase Cloud."""
+        from login_dialog import LoginDialog
+        dialog = LoginDialog(app, supabase_client=supabase_client, on_success_callback=on_success_callback)
         app.wait_window(dialog)
 
     @staticmethod
@@ -1924,3 +1934,86 @@ class DialogManager:
         }]
         result = DialogManager.process_pending_covers_dialog(app, mock_item)
         return result.get("single_select")
+
+    @staticmethod
+    def show_netlify_deploy_url_dialog(app, deploy_url):
+        """Muestra la URL publica del deploy con opcion de copia al portapapeles."""
+        dialog = ctk.CTkToplevel(app)
+        dialog.title("Despliegue Netlify - Sonometa")
+        dialog.geometry("620x220")
+        dialog.resizable(False, False)
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+
+        DialogManager.center_popup_on_parent(dialog, app, width=620, height=220)
+        DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=app)
+
+        frame = ctk.CTkFrame(dialog, fg_color="#1E1E1E")
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        ctk.CTkLabel(
+            frame,
+            text="WebApp desplegada correctamente",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color="#22C55E",
+            anchor="w"
+        ).pack(fill="x", pady=(0, 8))
+
+        ctk.CTkLabel(
+            frame,
+            text="URL publica:",
+            text_color="#D1D5DB",
+            anchor="w"
+        ).pack(fill="x")
+
+        entry_url = ctk.CTkEntry(frame)
+        entry_url.pack(fill="x", pady=(6, 10))
+        entry_url.insert(0, deploy_url or "")
+        entry_url.configure(state="readonly")
+
+        lbl_feedback = ctk.CTkLabel(frame, text="", text_color="#9CA3AF", anchor="w")
+        lbl_feedback.pack(fill="x", pady=(0, 8))
+
+        btn_row = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_row.pack(fill="x", side="bottom")
+
+        def _copy_url():
+            app.clipboard_clear()
+            app.clipboard_append(deploy_url or "")
+            lbl_feedback.configure(text="URL copiada al portapapeles.", text_color="#22C55E")
+
+        def _open_url():
+            url = (deploy_url or "").strip()
+            if url.lower().startswith(("http://", "https://")):
+                webbrowser.open(url)
+                lbl_feedback.configure(text="URL abierta en el navegador.", text_color="#22C55E")
+            else:
+                lbl_feedback.configure(text="No se pudo abrir: URL invalida.", text_color="#EF4444")
+
+        ctk.CTkButton(
+            btn_row,
+            text="Cerrar",
+            fg_color="#374151",
+            hover_color="#1F2937",
+            command=dialog.destroy
+        ).pack(side="right")
+
+        ctk.CTkButton(
+            btn_row,
+            text="Copiar URL",
+            fg_color=app.CORP_COLOR,
+            hover_color=app.CORP_HOVER,
+            command=_copy_url
+        ).pack(side="right", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_row,
+            text="Abrir URL",
+            fg_color="#0F766E",
+            hover_color="#115E59",
+            command=_open_url
+        ).pack(side="right", padx=(0, 8))
+
+        dialog.wait_window()
+        if app and app.winfo_exists():
+            app.focus_force()
+

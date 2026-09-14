@@ -78,7 +78,7 @@ class UiUtils:
 
         # Forzar a Windows a agrupar e identificar el icono en la barra de tareas
         try:
-            myappid = 'sonometa.audiotagsuite.app.1.3'
+            myappid = 'sonometa.audiotagsuite.app.2.0'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass

@@ -1,15 +1,20 @@
 import base64
 import io
+import logging
 import os
 import sqlite3
 import tempfile
 import zipfile
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 
+from dialogs import DialogManager
 from mutagen import File
 from mutagen.flac import FLAC
 from mutagen.id3 import APIC
-from PIL import Image
+from netlify_deployer import NetlifyDeployer
+from PIL import Image, ImageDraw
+
+logger = logging.getLogger("Sonometa")
 
 
 class SQLiteManager:
@@ -65,10 +70,26 @@ class TemplateProvider:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <!-- Configuración PWA y Pantalla de Inicio iOS -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Sonometa">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- Iconos para Pantalla de Inicio en iOS (iPhone / iPad) -->
+    <link rel="apple-touch-icon" href="assets/logo_relleno.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/logo_relleno.png">
+    <link rel="apple-touch-icon-precomposed" href="assets/logo_relleno.png">
+    
+    <!-- Favicon Estándar para Navegadores -->
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/logo_relleno.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/logo_relleno.png">
+    <link rel="shortcut icon" href="assets/logo_relleno.png">
+    
     <title>Sonometa - Mi Colección</title>
+    
+    <!-- Scripts & CSS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
     <link rel="stylesheet" href="styles.css">
@@ -92,7 +113,7 @@ class TemplateProvider:
             <div class="brand-text">
                 <div class="brand-title-row">
                     <span class="brand-title">Sonometa</span>
-                    <span class="brand-version">v1.3</span>
+                    <span class="brand-version">v1.4</span>
                 </div>
                 <span class="brand-subtitle">AUDIO TAG SUITE</span>
             </div>
@@ -1154,6 +1175,40 @@ class HTMLExporter:
     """Clase principal orquestadora del proceso de exportación."""
 
     @staticmethod
+    def _generate_fallback_icon(output_path, size=(180, 180)):
+        """Genera un icono de respaldo por si no encuentra el archivo físico en assets/."""
+        img = Image.new("RGB", size, "#1A1A1E")
+        draw = ImageDraw.Draw(img)
+
+        width, height = size
+        for y in range(height):
+            r = int(26 + (y / height) * (36 - 26))
+            g = int(26 + (y / height) * (24 - 26))
+            b = int(30 + (y / height) * (42 - 30))
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+        margin = 25
+        stroke_width = 12
+        polygon_points = [
+            (width * 0.38, margin),
+            (width - margin, margin),
+            (width - margin, height - margin),
+            (width * 0.38, height - margin),
+            (margin + 5, height * 0.58),
+            (margin + 5, height * 0.42)
+        ]
+        draw.polygon(polygon_points, outline="#8B5CF6", width=stroke_width)
+
+        circle_center = (int(width * 0.32), int(height * 0.5))
+        r = 10
+        draw.ellipse([
+            (circle_center[0] - r, circle_center[1] - r),
+            (circle_center[0] + r, circle_center[1] + r)
+        ], fill="#EC4899")
+
+        img.save(output_path, format="PNG")
+
+    @staticmethod
     def _compress_image_to_jpeg_bytes(image_bytes, max_size=(80, 80), quality=60):
         """Comprime la carátula y la devuelve como un string Base64 Data-URI."""
         if not image_bytes:
@@ -1211,8 +1266,80 @@ class HTMLExporter:
         return None
 
     @staticmethod
+    def _build_sqlite_bytes(tracks_data):
+        """Construye data.db y devuelve sus bytes para empaquetarlo en memoria."""
+        tmp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        tmp_db_path = tmp_db.name
+        tmp_db.close()
+
+        try:
+            SQLiteManager.create_database(tmp_db_path, tracks_data)
+            with open(tmp_db_path, "rb") as db_file:
+                return db_file.read()
+        finally:
+            try:
+                os.remove(tmp_db_path)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _get_logo_png_bytes():
+        """Obtiene assets/logo_relleno.png o genera un fallback en memoria."""
+        current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(current_script_dir, ".."))
+        local_icon_path = os.path.join(project_root, "assets", "logo_relleno.png")
+
+        if os.path.exists(local_icon_path):
+            with open(local_icon_path, "rb") as icon_file:
+                return icon_file.read()
+
+        fallback_buffer = io.BytesIO()
+        img = Image.new("RGB", (180, 180), "#1A1A1E")
+        draw = ImageDraw.Draw(img)
+
+        width, height = (180, 180)
+        for y in range(height):
+            r = int(26 + (y / height) * (36 - 26))
+            g = int(26 + (y / height) * (24 - 26))
+            b = int(30 + (y / height) * (42 - 30))
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+
+        margin = 25
+        polygon_points = [
+            (width * 0.38, margin),
+            (width - margin, margin),
+            (width - margin, height - margin),
+            (width * 0.38, height - margin),
+            (margin + 5, height * 0.58),
+            (margin + 5, height * 0.42)
+        ]
+        draw.polygon(polygon_points, outline="#8B5CF6", width=12)
+
+        circle_center = (int(width * 0.32), int(height * 0.5))
+        r = 10
+        draw.ellipse([
+            (circle_center[0] - r, circle_center[1] - r),
+            (circle_center[0] + r, circle_center[1] + r)
+        ], fill="#EC4899")
+
+        img.save(fallback_buffer, format="PNG")
+        return fallback_buffer.getvalue()
+
+    @staticmethod
     def export_grid_to_html(app):
-        """Orquesta la generación de la DB SQLite y el empaquetado final en un archivo .zip listo para Netlify."""
+        """Legacy: exportador HTML/Netlify desactivado en Fase 2 de migración a Supabase."""
+        if os.getenv("SONOMETA_ENABLE_LEGACY_HTML_EXPORT", "0") != "1":
+            logger.warning("[MIGRACION] Exportación HTML/Netlify desactivada en cliente desktop.")
+            DialogManager.show_themed_dialog(
+                app,
+                "Función desactivada",
+                "La exportación HTML local y el despliegue ZIP a Netlify fueron retirados del flujo desktop.\n\n"
+                "La WebApp/PWA ahora se despliega por separado y consume Supabase Cloud.",
+                level="info"
+            )
+            return
+
+        # Código legacy conservado temporalmente por compatibilidad histórica.
         grid = getattr(app, "grid_panel", None)
         if not grid or not hasattr(grid, "tree"):
             messagebox.showerror("Error", "No se encontró el grid de datos.")
@@ -1270,31 +1397,56 @@ class HTMLExporter:
             messagebox.showwarning("Exportar WebApp", "No hay datos para exportar.")
             return
 
-        zip_path = filedialog.asksaveasfilename(
-            defaultextension=".zip",
-            filetypes=[("Archivo ZIP", "*.zip")],
-            title="Guardar WebApp para Netlify (.zip)"
-        )
-        if not zip_path:
-            return
-
         try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                db_file_path = os.path.join(tmp_dir, "data.db")
-                SQLiteManager.create_database(db_file_path, tracks_data)
+            db_bytes = HTMLExporter._build_sqlite_bytes(tracks_data)
+            logo_bytes = HTMLExporter._get_logo_png_bytes()
 
-                with open(os.path.join(tmp_dir, "index.html"), "w", encoding="utf-8") as f:
-                    f.write(TemplateProvider.get_index_html())
-                with open(os.path.join(tmp_dir, "styles.css"), "w", encoding="utf-8") as f:
-                    f.write(TemplateProvider.get_styles_css())
-                with open(os.path.join(tmp_dir, "app.js"), "w", encoding="utf-8") as f:
-                    f.write(TemplateProvider.get_app_js())
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_out:
+                zip_out.writestr("index.html", TemplateProvider.get_index_html())
+                zip_out.writestr("styles.css", TemplateProvider.get_styles_css())
+                zip_out.writestr("app.js", TemplateProvider.get_app_js())
+                zip_out.writestr("data.db", db_bytes)
+                zip_out.writestr("assets/logo_relleno.png", logo_bytes)
 
-                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zip_out:
-                    for filename in ["index.html", "styles.css", "app.js", "data.db"]:
-                        file_full_path = os.path.join(tmp_dir, filename)
-                        zip_out.write(file_full_path, arcname=filename)
+            zip_buffer.seek(0)
 
-            messagebox.showinfo("Exportación exitosa", f"Paquete ZIP generado en:\n{zip_path}\n\nListo para arrastrar a Netlify Drop.")
+            deployer = NetlifyDeployer()
+            if not deployer.site_id or not deployer.auth_token:
+                logger.error("[NETLIFY] Credenciales incompletas: faltan NETLIFY_SITE_ID o NETLIFY_AUTH_TOKEN.")
+                DialogManager.show_themed_dialog(
+                    app,
+                    "Configuracion incompleta",
+                    "Faltan las credenciales de Netlify.\n\nDefine NETLIFY_SITE_ID y NETLIFY_AUTH_TOKEN para continuar.",
+                    level="error"
+                )
+                return
+
+            deploy_result = deployer.deploy_zip(zip_buffer)
+            if isinstance(deploy_result, str) and deploy_result.strip():
+                deploy_url = deploy_result.strip()
+                logger.info(f"[NETLIFY] Despliegue exitoso. URL: {deploy_url}")
+                DialogManager.show_netlify_deploy_url_dialog(app, deploy_url)
+                return
+
+            if deploy_result is True:
+                logger.info("[NETLIFY] Despliegue exitoso sin URL publica en la respuesta.")
+                DialogManager.show_themed_dialog(
+                    app,
+                    "Despliegue exitoso",
+                    "La WebApp fue desplegada en Netlify, pero la API no devolvio una URL publica.",
+                    level="info"
+                )
+                return
+
+            error_detail = getattr(deployer, "last_error", "") or "No se pudo desplegar la WebApp en Netlify."
+            logger.error(f"[NETLIFY] Error de despliegue: {error_detail}")
+            DialogManager.show_themed_dialog(
+                app,
+                "Error de despliegue",
+                error_detail,
+                level="error"
+            )
         except Exception as e:
+            logger.error(f"[NETLIFY] Error durante exportacion/despliegue: {str(e)}")
             messagebox.showerror("Error al exportar", f"Ocurrió un fallo durante la exportación:\n{str(e)}")

@@ -1,3 +1,9 @@
+try:
+    import audioop
+except ImportError:
+    import audioop_lts as audioop
+    import sys
+    sys.modules["audioop"] = audioop
 import os
 import ctypes
 import threading
@@ -6,7 +12,8 @@ import tkinter as tk
 from collections import deque
 import customtkinter as ctk
 from customtkinter import filedialog
-
+from src.supabase_client import SupabaseClientManager
+from src.cloud_sync_worker import CloudSyncWorker
 from grid_panel import GridPanel
 from audio_manager import AudioManager
 from cache_manager import CacheManager
@@ -73,7 +80,7 @@ class App(ctk.CTk):
         self._check_initial_status()
 
     def _configure_window(self):
-        self.title("Sonometa v1.3 - Audio Tag Suite")
+        self.title("Sonometa v2.0 - Audio Tag Suite")
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))
@@ -82,10 +89,15 @@ class App(ctk.CTk):
     def _init_services(self):
         self.logger = LogManager.setup_logger(self)
         self.undo_manager = UndoManager(self)
-        
+
         # Inicializar CacheManager antes de otros servicios
         self.cache_manager = CacheManager()
-        
+
+        # Inicializar cliente de Supabase y motor de sincronización
+        self.supabase_manager = SupabaseClientManager()
+        self.sync_worker = None
+        self.sync_diagnostic_mode = os.getenv("SONOMETA_SYNC_DIAGNOSTIC", "0").strip().lower() in ("1", "true", "yes", "on")
+
         self.audio_manager = AudioManager(cache_manager=self.cache_manager)
         self.filename_formatter = FilenameFormatter()
 
@@ -168,6 +180,59 @@ class App(ctk.CTk):
             frame_bottom_ref=self.frame_bottom,
             detail_panel=self.detail_panel,
             grid_panel=self.grid_panel
+        )
+
+    def open_login_modal(self):
+        """Abre el diálogo modal de autenticación desde DialogManager."""
+        DialogManager.show_login_dialog(
+            self,
+            supabase_client=self.supabase_manager,
+            on_success_callback=self.on_login_success
+        )
+
+    def on_login_success(self):
+        self.logger.info("[GUI] Login correcto. Iniciando servicios Cloud...")
+        # Diferir la transición para que el cierre del modal termine antes de iniciar tareas cloud.
+        self.after(300, self.on_user_logged_in)
+
+    def on_user_logged_in(self):
+        if not self.supabase_manager.is_authenticated():
+            self.logger.warning("Login cloud inválido: no se inicia la sincronización.")
+            return
+
+        if self.sync_worker and self.sync_worker.is_alive():
+            self.logger.info("Sincronización Cloud ya está activa.")
+            return
+
+        # Instanciar el worker sin lanzarlo todavía
+        self.sync_worker = CloudSyncWorker(
+            self.cache_manager,
+            self.supabase_manager,
+            diagnostic_mode=self.sync_diagnostic_mode,
+        )
+
+        # Dejar que el bucle de eventos principal (mainloop) respire antes de iniciar el hilo secundario
+        self.after(300, self._start_cloud_sync_worker)
+
+    def _start_cloud_sync_worker(self):
+        """Arranca CloudSyncWorker de forma totalmente desacoplada de la UI."""
+        if not self.sync_worker or self.sync_worker.is_alive():
+            return
+
+        try:
+            self.sync_worker.start()
+        except Exception as e:
+            self.logger.error(f"Error iniciando CloudSyncWorker: {e}")
+
+    def show_legacy_export_deprecated(self):
+        """Notifica que la exportación HTML/Netlify legacy quedó fuera del flujo principal."""
+        self.logger.info("[MIGRACION] Exportador HTML/Netlify legacy desactivado en UI principal.")
+        DialogManager.show_themed_dialog(
+            self,
+            "Función desactivada",
+            "La exportación HTML local y el despliegue directo a Netlify fueron retirados del flujo principal.\n\n"
+            "La WebApp/PWA ahora se despliega de forma independiente y consume datos desde Supabase Cloud.",
+            level="info"
         )
 
     def _on_toggle_manual_cover_review(self):
@@ -351,6 +416,9 @@ class App(ctk.CTk):
         else:
             self.logger.warning("No hay token de Discogs configurado.")
 
+        if self.supabase_manager.is_authenticated():
+            self.on_user_logged_in()
+
     def show_themed_dialog(self, title, message, level="info"):
         DialogManager.show_themed_dialog(self, title, message, level)
 
@@ -393,6 +461,9 @@ class App(ctk.CTk):
         self.logger.info("Lista y estado limpiados.")
 
     def on_close(self):
+        if hasattr(self, "sync_worker") and self.sync_worker:
+            self.sync_worker.stop()
+            self.sync_worker = None
         if hasattr(self, "detail_panel") and self.detail_panel.audio_player:
             self.detail_panel.audio_player.stop_and_unload()
         if hasattr(self, "detail_panel") and hasattr(self.detail_panel, "clear_runtime_caches"):

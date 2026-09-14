@@ -1,7 +1,6 @@
 import tkinter as tk
 import customtkinter as ctk
 from dialogs import DialogManager
-from html_exporter import HTMLExporter
 
 
 class CustomMenuDropdown(ctk.CTkToplevel):
@@ -189,7 +188,7 @@ class ToolPanel(ctk.CTkFrame):
         categories = [
             ("Archivo", [
                 {"type": "command", "label": "Abrir Carpeta…", "accelerator": "Ctrl+O", "command": app.browse_folder},
-                {"type": "command", "label": "Exportar Colección…", "accelerator": "", "command": lambda: HTMLExporter.export_grid_to_html(app)},
+                {"type": "command", "label": "Iniciar Sesión…", "accelerator": "", "command": app.open_login_modal},
                 {"type": "separator"},
                 {"type": "command", "label": "Salir", "accelerator": "Alt+F4", "command": app.on_close}
             ]),

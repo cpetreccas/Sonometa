@@ -25,12 +25,26 @@ class CacheManager:
     )
     CACHE_DB_PATH = os.path.join(BASE_CACHE_DIR, "cache.db")
     COVERS_CACHE_DIR = os.path.join(BASE_CACHE_DIR, "cache", "covers")
+    SQLITE_TIMEOUT_SEC = 30.0
 
     def __init__(self) -> None:
         """Inicializa el gestor de caché y prepara la base de datos SQLite."""
-        self._lock = threading.Lock()
+        # RLock evita deadlocks al encadenar helpers internos que también usan lock.
+        self._lock = threading.RLock()
         self._ensure_directories()
         self._initialize_database()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Crea una conexión SQLite segura para acceso concurrente ligero."""
+        conn = sqlite3.connect(
+            self.CACHE_DB_PATH,
+            timeout=self.SQLITE_TIMEOUT_SEC,
+            check_same_thread=False,
+        )
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+        return conn
 
     @staticmethod
     def _ensure_directories() -> None:
@@ -42,9 +56,7 @@ class CacheManager:
         """Inicializa la base de datos SQLite con las tablas requeridas."""
         with self._lock:
             try:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute("PRAGMA synchronous=NORMAL;")
+                conn = self._get_connection()
                 cursor = conn.cursor()
 
                 # Tabla: track_cache (metadatos locales de archivos)
@@ -54,10 +66,29 @@ class CacheManager:
                         file_path TEXT PRIMARY KEY,
                         mtime REAL NOT NULL,
                         file_size INTEGER NOT NULL,
-                        tags_json TEXT NOT NULL
+                        tags_json TEXT NOT NULL,
+                        synced BOOLEAN DEFAULT 0,
+                        remote_id TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                     """
                 )
+
+                # Migraciones para bases de datos existentes creadas previamente
+                try:
+                    cursor.execute("ALTER TABLE track_cache ADD COLUMN synced BOOLEAN DEFAULT 0;")
+                except sqlite3.OperationalError:
+                    pass  # Columna ya existe
+
+                try:
+                    cursor.execute("ALTER TABLE track_cache ADD COLUMN remote_id TEXT;")
+                except sqlite3.OperationalError:
+                    pass  # Columna ya existe
+
+                try:
+                    cursor.execute("ALTER TABLE track_cache ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+                except sqlite3.OperationalError:
+                    pass  # Columna ya existe
 
                 # Tabla: discogs_cache (respuestas de API de Discogs)
                 cursor.execute(
@@ -75,6 +106,108 @@ class CacheManager:
             except Exception as e:
                 logger.error(f"[CACHE] Error inicializando base de datos: {str(e)}")
                 raise
+
+    def get_unsynced_tracks(self, limit: int = 50) -> list:
+        """Obtiene las canciones marcadas como no sincronizadas (synced = 0) para enviar a la nube."""
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT rowid, file_path, tags_json FROM track_cache WHERE COALESCE(synced, 0) = 0 LIMIT ?",
+                    (limit,)
+                )
+                rows = cursor.fetchall()
+                conn.close()
+
+            unsynced = []
+            for row_id, file_path, tags_json in rows:
+                try:
+                    data = json.loads(tags_json)
+                    data["local_cache_id"] = row_id
+                    data["filepath_local"] = file_path
+                    unsynced.append(data)
+                except json.JSONDecodeError:
+                    continue
+            return unsynced
+        except Exception as e:
+            logger.error(f"[CACHE] Error obteniendo registros no sincronizados: {str(e)}")
+            return []
+
+    def mark_tracks_as_synced(self, file_paths: Optional[list] = None, row_ids: Optional[list] = None) -> int:
+        """Marca registros como sincronizados usando file_path o rowid de SQLite."""
+        file_paths = [p for p in (file_paths or []) if p]
+        row_ids = [rid for rid in (row_ids or []) if rid is not None]
+        if not file_paths and not row_ids:
+            return 0
+
+        affected_rows = 0
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+
+                if file_paths:
+                    cursor.executemany(
+                        "UPDATE track_cache SET synced = 1, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?",
+                        [(path,) for path in file_paths],
+                    )
+                    affected_rows += cursor.rowcount
+
+                if row_ids:
+                    cursor.executemany(
+                        "UPDATE track_cache SET synced = 1, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?",
+                        [(rid,) for rid in row_ids],
+                    )
+                    affected_rows += cursor.rowcount
+
+                conn.commit()
+                conn.close()
+
+            return affected_rows
+        except Exception as e:
+            logger.error(f"[CACHE] Error marcando registros como sincronizados: {str(e)}")
+            return 0
+
+    def mark_as_synced(self, file_paths: list) -> None:
+        """Compatibilidad: marca como sincronizado usando file_path."""
+        if not file_paths:
+            return
+        self.mark_tracks_as_synced(file_paths=file_paths)
+
+    def mark_track_as_unsynced(self, file_path: str) -> bool:
+        """Marca un track como pendiente de sincronización (synced = 0)."""
+        if not file_path:
+            return False
+
+        if not os.path.exists(file_path):
+            logger.warning(f"[CACHE] No se puede marcar como pendiente: archivo inexistente {file_path}")
+            return False
+
+        try:
+            stat = os.stat(file_path)
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE track_cache
+                    SET synced = 0,
+                        mtime = ?,
+                        file_size = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE file_path = ?
+                    """,
+                    (stat.st_mtime, stat.st_size, file_path),
+                )
+                affected = cursor.rowcount
+                conn.commit()
+                conn.close()
+
+            return affected > 0
+        except Exception as e:
+            logger.error(f"[CACHE] Error marcando track pendiente de sincronización: {str(e)}")
+            return False
 
     # ========================================================================
     # 1. Caché de Metadatos Locales (Tabla: track_cache)
@@ -99,8 +232,9 @@ class CacheManager:
             current_mtime = stat.st_mtime
             current_size = stat.st_size
 
+            should_invalidate = False
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
 
                 cursor.execute(
@@ -128,15 +262,18 @@ class CacheManager:
                         )
                         return None
                 else:
-                    # Archivo modificado, invalidar caché
-                    self.invalidate_track_cache(file_path)
-                    return None
+                    should_invalidate = True
+
+            # Invalidar fuera de la sección crítica para no encadenar locks.
+            if should_invalidate:
+                self.invalidate_track_cache(file_path)
+            return None
 
         except Exception as e:
             logger.debug(f"[CACHE] Error leyendo caché de {os.path.basename(file_path)}: {str(e)}")
             return None
 
-    def save_tags(self, file_path: str, tags: Dict) -> bool:
+    def save_tags(self, file_path: str, tags: Dict, force_unsynced: bool = False) -> bool:
         """
         Inserta o actualiza el registro de metadatos en la caché.
 
@@ -170,15 +307,35 @@ class CacheManager:
             tags_json = json.dumps(normalized_tags, ensure_ascii=False)
 
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
 
                 cursor.execute(
+                    "SELECT synced, tags_json FROM track_cache WHERE file_path = ?",
+                    (file_path,),
+                )
+                existing_row = cursor.fetchone()
+
+                synced_value = 0
+                if existing_row is not None:
+                    previous_synced, previous_tags_json = existing_row
+                    if force_unsynced:
+                        synced_value = 0
+                    elif (previous_tags_json or "") == tags_json:
+                        synced_value = int(previous_synced or 0)
+
+                cursor.execute(
                     """
-                    INSERT OR REPLACE INTO track_cache (file_path, mtime, file_size, tags_json)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO track_cache (file_path, mtime, file_size, tags_json, synced, updated_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(file_path) DO UPDATE SET
+                        mtime = excluded.mtime,
+                        file_size = excluded.file_size,
+                        tags_json = excluded.tags_json,
+                        synced = excluded.synced,
+                        updated_at = CURRENT_TIMESTAMP
                     """,
-                    (file_path, mtime, size, tags_json),
+                    (file_path, mtime, size, tags_json, synced_value),
                 )
 
                 conn.commit()
@@ -207,7 +364,7 @@ class CacheManager:
         """Elimina el registro de caché para un archivo específico."""
         try:
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM track_cache WHERE file_path = ?", (file_path,))
                 conn.commit()
@@ -237,7 +394,7 @@ class CacheManager:
             now = time.time()
 
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
 
                 cursor.execute(
@@ -284,7 +441,7 @@ class CacheManager:
             response_json = json.dumps(response_data, ensure_ascii=False)
 
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
 
                 cursor.execute(
@@ -311,7 +468,7 @@ class CacheManager:
         """Elimina el registro de caché para una búsqueda específica de Discogs."""
         try:
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM discogs_cache WHERE query_key = ?", (query_key,))
                 conn.commit()
@@ -422,7 +579,7 @@ class CacheManager:
             now = time.time()
 
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
 
                 cursor.execute(
@@ -446,7 +603,7 @@ class CacheManager:
         """Limpia todas las cachés (SQLite y archivos de carátulas)."""
         try:
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM track_cache")
                 cursor.execute("DELETE FROM discogs_cache")
@@ -472,7 +629,7 @@ class CacheManager:
         """Retorna estadísticas sobre el tamaño y contenido de las cachés."""
         try:
             with self._lock:
-                conn = sqlite3.connect(self.CACHE_DB_PATH)
+                conn = self._get_connection()
                 cursor = conn.cursor()
 
                 cursor.execute("SELECT COUNT(*) FROM track_cache")
