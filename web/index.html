@@ -68,7 +68,7 @@
             <div class="brand-text">
                 <div class="brand-title-row">
                     <span class="brand-title">Sonometa</span>
-                    <span class="brand-version">v1.3</span>
+                    <span class="brand-version">v2.0</span>
                 </div>
                 <span class="brand-subtitle">AUDIO TAG SUITE</span>
             </div>
@@ -139,16 +139,30 @@
                 <input type="text" id="searchInput" class="search-input" placeholder="Buscar canción..." oninput="debouncedSearch()">
             </div>
             <div id="desktopFilterContainer" class="controls-row-filters"></div>
+            <div class="filter-toggles-row">
+                <button type="button" id="btnToggleNoCues" class="chip-toggle" onclick="toggleFilterFlag('noCues')">Sin Cues</button>
+                <button type="button" id="btnToggleNoCover" class="chip-toggle" onclick="toggleFilterFlag('noCover')">Sin Carátula</button>
+                <button type="button" id="btnToggleNoRating" class="chip-toggle" onclick="toggleFilterFlag('noRating')">Sin Rating</button>
+            </div>
         </div>
 
         <div class="table-toolbar">
             <div class="results-text" id="resultsCount">0 resultados</div>
-            <div class="toggle-container no-select">
-                <span class="toggle-label">Ver detalle</span>
-                <label class="switch">
-                    <input type="checkbox" id="chkVerDetalle" onchange="toggleVerDetalle()">
-                    <span class="slider round"></span>
-                </label>
+            <div class="toolbar-actions">
+                <div class="col-picker-container">
+                    <button class="btn-secondary btn-sm" onclick="toggleColumnPicker(event)">⚙️ Columnas</button>
+                    <div id="columnPickerDropdown" class="col-picker-menu hidden" onclick="event.stopPropagation()">
+                        <div class="col-picker-header">Visibilidad de columnas</div>
+                        <div id="columnPickerList" class="col-picker-list"></div>
+                    </div>
+                </div>
+                <div class="toggle-container no-select">
+                    <span class="toggle-label">Ver detalle</span>
+                    <label class="switch">
+                        <input type="checkbox" id="chkVerDetalle" onchange="toggleVerDetalle()">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
             </div>
         </div>
 
@@ -179,6 +193,11 @@
                 <input type="text" id="searchInputMobile" class="search-input" placeholder="Buscar canción..." oninput="syncMobileSearch(this.value)">
             </div>
             <div id="mobileFilterContainer" class="mobile-filters-grid"></div>
+            <div class="filter-toggles-row" style="margin-top: 14px;">
+                <button type="button" id="btnToggleNoCuesMobile" class="chip-toggle" onclick="toggleFilterFlag('noCues')">Sin Cues</button>
+                <button type="button" id="btnToggleNoCoverMobile" class="chip-toggle" onclick="toggleFilterFlag('noCover')">Sin Carátula</button>
+                <button type="button" id="btnToggleNoRatingMobile" class="chip-toggle" onclick="toggleFilterFlag('noRating')">Sin Rating</button>
+            </div>
         </div>
         <div class="sheet-footer">
             <button class="btn-reset" onclick="resetAllFilters()">Limpiar todo</button>
@@ -186,6 +205,7 @@
         </div>
     </div>
 
+    <!-- REPRODUCTOR FLOTANTE INFERIOR -->
     <footer id="playerBar" class="player-bar hidden">
         <div class="player-info">
             <div id="playerCoverContainer" class="td-cover">

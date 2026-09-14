@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sonometa-v2.1';
+const CACHE_NAME = 'sonometa-v2.0';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

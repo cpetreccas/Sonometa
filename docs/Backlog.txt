@@ -10,7 +10,6 @@ Panel de filtros avanzados:
 - Limpiar
 
 WebApp:
-- Ordenar por todas las cabeceras.
 - En archivos flac no se guarda la caratula.
 - Configura Python en el escritorio para consultar las playlists creadas en la nube y generar los archivos locales compatibles (.m3u8, XML Traktor/Rekordbox).
 - Módulo de Compartición (Social & Web Share API): Añade el botón "Compartir" en la WebApp usando navigator.share (Web Share API) o copiado de enlace.

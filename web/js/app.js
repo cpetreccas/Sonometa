@@ -11,12 +11,50 @@ let filteredTracks = [];
 let currentTrackIndex = -1;
 let isShuffle = false;
 
+// Estado de ordenación global
+let sortState = {
+    key: 'filename',
+    direction: 'asc' // 'asc' | 'desc'
+};
+
+// Configuración de visibilidad de columnas
+let columnVisibility = {
+    cover: true,
+    artist: true,
+    title: true,
+    mix_artist: true,
+    album: true,
+    genre: true,
+    publisher: true,
+    year: true,
+    cue_count: true,
+    rating: true,
+    filename: true
+};
+
+const ALL_COLUMNS = [
+    { key: 'cover', label: 'Carátula', detailOnly: false },
+    { key: 'filename', label: 'Nombre de Archivo', detailOnly: false, normalOnly: true },
+    { key: 'artist', label: 'Intérprete', detailOnly: true },
+    { key: 'title', label: 'Título', detailOnly: true },
+    { key: 'mix_artist', label: 'Remix', detailOnly: true },
+    { key: 'album', label: 'Álbum', detailOnly: true },
+    { key: 'genre', label: 'Género', detailOnly: true },
+    { key: 'publisher', label: 'Etiqueta', detailOnly: true },
+    { key: 'year', label: 'Año', detailOnly: true },
+    { key: 'cue_count', label: 'Cues', detailOnly: true },
+    { key: 'rating', label: 'Rating', detailOnly: true }
+];
+
 let currentFilters = {
     search: '',
     album: '',
     genre: '',
     publisher: '',
-    year: ''
+    year: '',
+    noCues: false,
+    noCover: false,
+    noRating: false
 };
 
 // 1. Inicialización PWA & Auth
@@ -24,6 +62,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js').catch(console.error);
     }
+
+    // Cerrar dropdown de columnas al hacer clic fuera
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('columnPickerDropdown');
+        if (dropdown && !dropdown.classList.contains('hidden')) {
+            dropdown.classList.add('hidden');
+        }
+    });
 
     try {
         const session = await checkSession();
@@ -78,10 +124,8 @@ async function loadInitialCollection() {
         if (error) throw error;
 
         allTracks = data || [];
-
-        // Poblar desplegables de filtro inicialmente con los datos del catálogo
         populateFilterDropdowns(allTracks);
-
+        renderColumnPicker();
         window.applyFilters();
     } catch (err) {
         console.error('Error al cargar colección:', err);
@@ -138,6 +182,11 @@ function populateSelectFilters() {
                     match = false;
                 }
             }
+
+            // Validar flags especiales en el cómputo de opciones
+            if (currentFilters.noCues && track.cue_count > 0) match = false;
+            if (currentFilters.noCover && track.cover_url) match = false;
+            if (currentFilters.noRating && track.rating > 0) match = false;
 
             if (match) {
                 const val = track[f.key];
@@ -207,6 +256,10 @@ function updateFilterSummaryBar() {
         }
     });
 
+    if (currentFilters.noCues) { activeCount++; activeNames.push('Sin Cues'); }
+    if (currentFilters.noCover) { activeCount++; activeNames.push('Sin Carátula'); }
+    if (currentFilters.noRating) { activeCount++; activeNames.push('Sin Rating'); }
+
     const badge = document.getElementById('activeFilterBadge');
     const summaryText = document.getElementById('filterSummaryText');
     const resetBtn = document.getElementById('btnGlobalResetFilters');
@@ -222,6 +275,21 @@ function updateFilterSummaryBar() {
     if (resetBtn) {
         resetBtn.style.display = activeCount > 0 ? 'inline-block' : 'none';
     }
+
+    // Actualizar estilos visuales de botones tipo Chip Toggle
+    ['noCues', 'noCover', 'noRating'].forEach(key => {
+        const capitalized = key.charAt(0).toUpperCase() + key.slice(1);
+        const btnDesktop = document.getElementById(`btnToggle${capitalized}`);
+        const btnMobile = document.getElementById(`btnToggle${capitalized}Mobile`);
+
+        if (currentFilters[key]) {
+            btnDesktop?.classList.add('active');
+            btnMobile?.classList.add('active');
+        } else {
+            btnDesktop?.classList.remove('active');
+            btnMobile?.classList.remove('active');
+        }
+    });
 }
 
 function handleFilterChange(key, value) {
@@ -231,6 +299,12 @@ function handleFilterChange(key, value) {
         window.applyFilters();
     }
 }
+
+window.toggleFilterFlag = function(key) {
+    currentFilters[key] = !currentFilters[key];
+    populateSelectFilters();
+    window.applyFilters();
+};
 
 // 3. Objeto controlador principal expuesto
 window.applyFilters = function() {
@@ -255,11 +329,16 @@ window.applyFilters = function() {
                 return false;
             }
         }
+
+        if (currentFilters.noCues && Number(t.cue_count || 0) > 0) return false;
+        if (currentFilters.noCover && t.cover_url && String(t.cover_url).trim() !== '') return false;
+        if (currentFilters.noRating && Number(t.rating || 0) > 0) return false;
+
         return true;
     });
 
     populateSelectFilters();
-    updateDashboard(filteredTracks); // Recálculo local instantáneo
+    updateDashboard(filteredTracks);
     currentPage = 0;
     loadTableData();
 };
@@ -270,7 +349,10 @@ window.applyFiltersAndClose = function() {
 };
 
 window.resetAllFilters = function() {
-    currentFilters = { search: '', album: '', genre: '', publisher: '', year: '' };
+    currentFilters = {
+        search: '', album: '', genre: '', publisher: '', year: '',
+        noCues: false, noCover: false, noRating: false
+    };
     const sInput = document.getElementById('searchInput');
     const sMobile = document.getElementById('searchInputMobile');
     if (sInput) sInput.value = '';
@@ -278,21 +360,50 @@ window.resetAllFilters = function() {
     window.applyFilters();
 };
 
+// 4. Lógica de Ordenación por Cabeceras y Renderizado de Tabla
+window.sortByColumn = function(key) {
+    // Evitar ordenar por carátula
+    if (key === 'cover') return;
+
+    if (sortState.key === key) {
+        sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortState.key = key;
+        sortState.direction = 'asc';
+    }
+    loadTableData();
+};
+
+function sortCollection(tracks) {
+    const { key, direction } = sortState;
+    const modifier = direction === 'asc' ? 1 : -1;
+
+    return tracks.sort((a, b) => {
+        let valA = a[key];
+        let valB = b[key];
+
+        if (key === 'cover') {
+            valA = a.cover_url ? 1 : 0;
+            valB = b.cover_url ? 1 : 0;
+        }
+
+        if (valA === null || valA === undefined || valA === '') return 1;
+        if (valB === null || valB === undefined || valB === '') return -1;
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+            return (valA - valB) * modifier;
+        }
+
+        return String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' }) * modifier;
+    });
+}
+
 function loadTableData() {
     const chkVerDetalle = document.getElementById('chkVerDetalle');
     const verDetalle = chkVerDetalle ? chkVerDetalle.checked : false;
 
-    if (verDetalle) {
-        filteredTracks.sort((a, b) => {
-            const artistA = a.artist || '';
-            const artistB = b.artist || '';
-            const cmp = artistA.localeCompare(artistB);
-            if (cmp !== 0) return cmp;
-            return (a.title || '').localeCompare(b.title || '');
-        });
-    } else {
-        filteredTracks.sort((a, b) => (a.filename || '').localeCompare(b.filename || ''));
-    }
+    // Aplicar ordenación seleccionada
+    sortCollection(filteredTracks);
 
     const totalRecords = filteredTracks.length;
     const totalPages = Math.ceil(totalRecords / PAGE_SIZE);
@@ -304,50 +415,46 @@ function loadTableData() {
     const thead = document.getElementById('tableHeader');
     const tbody = document.getElementById('tableBody');
 
-    if (!tbody) return;
+    if (!tbody || !thead) return;
 
-    if (verDetalle) {
-        thead.innerHTML = `
-            <tr>
-                <th class="th-cover">CARÁTULA</th>
-                <th>INTÉRPRETE</th>
-                <th>TÍTULO</th>
-                <th>REMIX</th>
-                <th>ÁLBUM</th>
-                <th>GÉNERO</th>
-                <th>ETIQUETA</th>
-                <th class="col-center">AÑO</th>
-                <th class="col-center">CUES</th>
-                <th class="col-center">RATING</th>
-            </tr>
-        `;
-    } else {
-        thead.innerHTML = `
-            <tr>
-                <th class="th-cover">CARÁTULA</th>
-                <th>NOMBRE DE ARCHIVO</th>
-            </tr>
-        `;
-    }
-
-    const existingRows = new Map();
-    Array.from(tbody.children).forEach(row => {
-        const id = row.getAttribute('data-track-id');
-        if (id) existingRows.set(id, row);
+    // Construir columnas visibles según el modo (Detalle / Normal) y selector
+    const activeCols = ALL_COLUMNS.filter(c => {
+        if (!columnVisibility[c.key]) return false;
+        if (verDetalle) {
+            return !c.normalOnly;
+        } else {
+            return !c.detailOnly;
+        }
     });
+
+    // Renderizar cabecera (excluyendo interacción de orden en 'cover')
+    let headerHtml = '<tr>';
+    activeCols.forEach(col => {
+        const isCover = col.key === 'cover';
+        const isSorted = sortState.key === col.key;
+        const arrow = isSorted ? (sortState.direction === 'asc' ? ' ▲' : ' ▼') : '';
+        const alignClass = (col.key === 'year' || col.key === 'cue_count' || col.key === 'rating') ? 'col-center' : '';
+        const coverClass = isCover ? 'th-cover' : '';
+
+        const sortableAttrs = isCover ? '' : `class="sortable-th ${alignClass} ${coverClass} ${isSorted ? 'sorted-col' : ''}" onclick="sortByColumn('${col.key}')"`;
+        const defaultAttrs = isCover ? `class="${alignClass} ${coverClass}"` : '';
+
+        headerHtml += `<th ${isCover ? defaultAttrs : sortableAttrs}>
+            ${col.label}${arrow}
+        </th>`;
+    });
+    headerHtml += '</tr>';
+    thead.innerHTML = headerHtml;
+
+    // Limpiar el contenido del tbody para evitar residuos de filas de 'sin registros'
+    tbody.innerHTML = '';
 
     if (pageTracks.length > 0) {
         const fragment = document.createDocumentFragment();
 
         pageTracks.forEach(row => {
-            let tr = existingRows.get(String(row.id));
-
-            if (tr) {
-                existingRows.delete(String(row.id));
-            } else {
-                tr = document.createElement('tr');
-                tr.setAttribute('data-track-id', row.id);
-            }
+            const tr = document.createElement('tr');
+            tr.setAttribute('data-track-id', row.id);
 
             tr.onclick = function() {
                 document.querySelectorAll('#tableBody tr').forEach(r => r.classList.remove('selected-row'));
@@ -355,51 +462,38 @@ function loadTableData() {
                 playTrack(row);
             };
 
-            let imgTag = '<span class="cover-badge">N/A</span>';
-            if (row.cover_url) {
-                imgTag = `<img src="${row.cover_url}" class="cover-thumb" loading="lazy">`;
-            }
+            let rowHtml = '';
+            activeCols.forEach(col => {
+                if (col.key === 'cover') {
+                    let imgTag = '<span class="cover-badge">N/A</span>';
+                    if (row.cover_url) {
+                        imgTag = `<img src="${row.cover_url}" class="cover-thumb" loading="lazy">`;
+                    }
+                    rowHtml += `<td class="td-cover">${imgTag}</td>`;
+                } else if (col.key === 'filename') {
+                    const cleanFilename = (row.filename || '').replace(/\.[^/.]+$/, "");
+                    rowHtml += `<td title="${cleanFilename}">${cleanFilename}</td>`;
+                } else {
+                    let val = row[col.key];
+                    if (col.key === 'rating') val = val ? `${Math.max(0, Math.min(5, val))}★` : null;
+                    if (col.key === 'cue_count') val = (val !== undefined && val !== null && Number(val) > 0) ? String(val) : null;
 
-            const cleanFilename = (row.filename || '').replace(/\.[^/.]+$/, "");
-            const ratingVal = `${Math.max(0, Math.min(5, row.rating || 0))}★`;
-            const cuesVal = (row.cue_count !== undefined && row.cue_count !== null && Number(row.cue_count) > 0)
-                ? String(row.cue_count)
-                : '-';
+                    const isCenter = (col.key === 'year' || col.key === 'cue_count' || col.key === 'rating');
+                    const hasValue = val && String(val).trim() !== '';
+                    const displayValue = hasValue ? val : '—';
 
-            const renderCell = (val, isCenter = false) => {
-                const hasValue = val && String(val).trim() !== '';
-                const displayValue = hasValue ? val : '—';
-                return `<td class="${!hasValue ? 'text-subtle' : ''} ${isCenter ? 'col-center' : ''}" title="${displayValue}">${displayValue}</td>`;
-            };
+                    rowHtml += `<td class="${!hasValue ? 'text-subtle' : ''} ${isCenter ? 'col-center' : ''}" title="${displayValue}">${displayValue}</td>`;
+                }
+            });
 
-            if (verDetalle) {
-                tr.innerHTML = `
-                    <td class="td-cover">${imgTag}</td>
-                    ${renderCell(row.artist)}
-                    ${renderCell(row.title)}
-                    ${renderCell(row.mix_artist)}
-                    ${renderCell(row.album)}
-                    ${renderCell(row.genre)}
-                    ${renderCell(row.publisher)}
-                    ${renderCell(row.year, true)}
-                    ${renderCell(cuesVal, true)}
-                    ${renderCell(ratingVal, true)}
-                `;
-            } else {
-                tr.innerHTML = `
-                    <td class="td-cover">${imgTag}</td>
-                    <td title="${cleanFilename}">${cleanFilename}</td>
-                `;
-            }
-
+            tr.innerHTML = rowHtml;
             fragment.appendChild(tr);
         });
 
-        existingRows.forEach(row => row.remove());
         tbody.appendChild(fragment);
 
     } else {
-        tbody.innerHTML = `<tr><td colspan="${verDetalle ? 10 : 2}" style="text-align: center;" class="text-subtle">No se encontraron registros.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${activeCols.length || 1}" style="text-align: center;" class="text-subtle">No se encontraron registros.</td></tr>`;
     }
 
     const resultsCountElem = document.getElementById('resultsCount');
@@ -414,6 +508,46 @@ function loadTableData() {
     }
 }
 
+// 5. Gestión del Selector de Columnas Visibles
+window.toggleColumnPicker = function(e) {
+    e.stopPropagation();
+    const dropdown = document.getElementById('columnPickerDropdown');
+    if (dropdown) dropdown.classList.toggle('hidden');
+};
+
+function renderColumnPicker() {
+    const container = document.getElementById('columnPickerList');
+    if (!container) return;
+
+    const chkVerDetalle = document.getElementById('chkVerDetalle');
+    const verDetalle = chkVerDetalle ? chkVerDetalle.checked : false;
+
+    container.innerHTML = '';
+    ALL_COLUMNS.forEach(col => {
+        if (verDetalle && col.normalOnly) return;
+        if (!verDetalle && col.detailOnly) return;
+
+        const item = document.createElement('label');
+        item.className = 'col-picker-item no-select';
+
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.checked = !!columnVisibility[col.key];
+        chk.onchange = (e) => {
+            columnVisibility[col.key] = e.target.checked;
+            loadTableData();
+        };
+
+        const span = document.createElement('span');
+        span.textContent = col.label;
+
+        item.appendChild(chk);
+        item.appendChild(span);
+        container.appendChild(item);
+    });
+}
+
+// 6. Reproducción de Audio
 export function playTrack(track) {
     if (!track.preview_audio_url) {
         alert("Esta canción no dispone de preescucha subida en la nube.");
@@ -446,13 +580,12 @@ export function playTrack(track) {
 
         mainAudio.ontimeupdate = function() {
             const current = mainAudio.currentTime;
-            const maxDuration = 20; // Límite de preescucha
+            const maxDuration = 20;
 
             if (current >= maxDuration) {
                 playNextTrack();
             }
 
-            // Actualizar barra y tiempo
             const pct = Math.min((current / maxDuration) * 100, 100);
             const progressBar = document.getElementById('playerProgressBar');
             const timeElem = document.getElementById('playerTimeCurrent');
@@ -489,7 +622,6 @@ function playNextTrack() {
 
     const nextTrack = filteredTracks[nextIndex];
     if (nextTrack) {
-        // Resaltar en la tabla si la fila existe visible
         document.querySelectorAll('#tableBody tr').forEach(r => {
             if (r.getAttribute('data-track-id') === String(nextTrack.id)) {
                 r.classList.add('selected-row');
@@ -527,7 +659,6 @@ function updatePlayIcon(isPlaying) {
     }
 }
 
-// Helpers globales para interacción
 window.togglePlayPause = function() {
     const mainAudio = document.getElementById('mainAudio');
     if (!mainAudio || !mainAudio.src) return;
@@ -551,7 +682,7 @@ window.seekAudio = function(e) {
     const width = rect.width;
 
     const targetPct = clickX / width;
-    mainAudio.currentTime = targetPct * 20; // Escala sobre el máximo de 20s
+    mainAudio.currentTime = targetPct * 20;
 };
 
 window.changeVolume = function(val) {
@@ -559,7 +690,6 @@ window.changeVolume = function(val) {
     if (mainAudio) mainAudio.volume = parseFloat(val);
 };
 
-// 4. Modales y Helpers expuestos
 let searchTimeout;
 window.debouncedSearch = function() {
     const searchInput = document.getElementById('searchInput');
@@ -576,7 +706,10 @@ window.syncMobileSearch = function(val) {
     if (sInput) sInput.value = val;
 };
 
-window.toggleVerDetalle = function() { loadTableData(); };
+window.toggleVerDetalle = function() {
+    renderColumnPicker();
+    loadTableData();
+};
 window.changePage = function(delta) { currentPage += delta; loadTableData(); };
 
 window.switchView = function(view) {
