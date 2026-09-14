@@ -5,6 +5,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 import threading
+from traktor_cue_counter import TraktorCueCounter
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -75,6 +76,18 @@ class AudioManager:
     def clear_runtime_caches(self) -> None:
         with self._cache_lock:
             self._metadata_cache.clear()
+
+    def _refresh_persistent_cache_after_mutation(self, file_path: str) -> None:
+        """Recalcula metadatos y los guarda como pendientes de sincronización."""
+        if not self.cache_manager:
+            return
+
+        try:
+            self.cache_manager.invalidate_track_cache(file_path)
+            refreshed = self.extract_metadata(file_path, os.path.basename(file_path))
+            self.cache_manager.save_tags(file_path, refreshed, force_unsynced=True)
+        except Exception as exc:
+            logger.error(f"[AUDIO] No se pudo refrescar cache local para sincronización: {str(exc)}")
 
     # ------------------------------------------------------------------
     # Lectura de metadatos
@@ -290,44 +303,11 @@ class AudioManager:
         return metadata
 
     def count_traktor_cues(self, file_path):
-        """Lee la etiqueta GEOB/PRIV 'TRAKTOR4' o la etiqueta 'TRAKTOR4' y cuenta
-        el número de Cue Points configurados dentro del XML subyacente.
-        """
-        from mutagen import File as MutagenFile
-
         try:
-            audio = MutagenFile(file_path)
-            self_audio_ref = audio
-            if audio is None:
-                return 0
-
-            xml_str = self._extract_traktor_xml_string(audio)
-            if not xml_str:
-                return 0
-
-            root = self._parse_traktor_root(xml_str)
-            if root is None:
-                return 0
-
-            cues = root.findall(".//CUE_V2")
-            if cues:
-                return len(cues)
-
-            # Fallback para estructuras simplificadas sin nodos CUE_V2
-            for tag_name in ("CUE", "CUEPOINT"):
-                fallback = root.findall(f".//{tag_name}")
-                if fallback:
-                    return len(fallback)
-
-            # Último fallback textual si el XML es parcial
-            return len(re.findall(r"<CUE_V2\b", xml_str, flags=re.IGNORECASE))
-
+            return TraktorCueCounter.count_cues(file_path)
         except Exception as e:
-            logger.debug(f"Error parseando Traktor CUEs en {os.path.basename(file_path)}: {str(e)}")
-        finally:
-            self._safe_close_audio(locals().get("self_audio_ref"))
-
-        return 0
+            logger.debug(f"Error al contar CUEs con TraktorCueCounter en {os.path.basename(file_path)}: {str(e)}")
+            return 0
 
     @staticmethod
     def _normalize_rating_value(raw_value) -> Optional[int]:
@@ -530,6 +510,7 @@ class AudioManager:
             was_playing, saved_pos = app.detail_panel.audio_player.prepare_for_file_write()
 
         ext = os.path.splitext(file_path)[1].lower()
+        has_mutation = False
 
         try:
             if ext in (".mp3", ".wav"):
@@ -580,11 +561,13 @@ class AudioManager:
 
                 if ext == ".wav" and audio_wav is not None:
                     audio_wav.save()
+                    has_mutation = True
                 else:
                     if is_new_id3:
                         audio_tags.save(file_path, v2_version=4)
                     else:
                         audio_tags.save(file_path)
+                    has_mutation = True
 
             elif ext == ".flac":
                 audio = FLAC(file_path)
@@ -608,6 +591,7 @@ class AudioManager:
                 else:
                     audio.pop(flac_key, None)
                 audio.save()
+                has_mutation = True
 
             elif ext in (".m4a", ".mp4"):
                 audio = MP4(file_path)
@@ -637,6 +621,7 @@ class AudioManager:
                     else:
                         audio.pop(m4a_key, None)
                 audio.save()
+                has_mutation = True
 
             else:
                 tag_map = {
@@ -669,15 +654,18 @@ class AudioManager:
                     audio.pop(mutagen_key, None)
 
                 audio.save()
+                has_mutation = True
 
         except Exception as e:
             logger.error(f"Error al guardar etiqueta '{field_name}' en {os.path.basename(file_path)}: {str(e)}")
 
         finally:
             self._invalidate_metadata_cache(file_path)
-            # Invalidar caché persistente también
             if self.cache_manager:
-                self.cache_manager.invalidate_track_cache(file_path)
+                if has_mutation:
+                    self._refresh_persistent_cache_after_mutation(file_path)
+                else:
+                    self.cache_manager.invalidate_track_cache(file_path)
             if app and hasattr(app, "detail_panel") and app.detail_panel.audio_player:
                 app.detail_panel.audio_player.resume_after_file_write(file_path, was_playing, saved_pos)
 
@@ -750,9 +738,8 @@ class AudioManager:
                 return False
 
             self._invalidate_metadata_cache(file_path)
-            # Invalidar caché persistente
             if self.cache_manager:
-                self.cache_manager.invalidate_track_cache(file_path)
+                self._refresh_persistent_cache_after_mutation(file_path)
             return True
 
         except Exception as e:
@@ -831,9 +818,8 @@ class AudioManager:
 
             logger.info(f"Carátula eliminada con éxito de: {os.path.basename(file_path)}")
             self._invalidate_metadata_cache(file_path)
-            # Invalidar caché persistente
             if self.cache_manager:
-                self.cache_manager.invalidate_track_cache(file_path)
+                self._refresh_persistent_cache_after_mutation(file_path)
 
         except Exception as e:
             logger.error(f"Error al eliminar carátula de {os.path.basename(file_path)}: {str(e)}")
@@ -979,9 +965,8 @@ class AudioManager:
                     audio.save()
 
             self._invalidate_metadata_cache(file_path)
-            # Invalidar caché persistente
             if self.cache_manager:
-                self.cache_manager.invalidate_track_cache(file_path)
+                self._refresh_persistent_cache_after_mutation(file_path)
             return True
 
         except Exception as e:
