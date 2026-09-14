@@ -185,19 +185,44 @@
             <button class="btn-primary btn-apply" onclick="applyFiltersAndClose()">Aplicar filtros</button>
         </div>
     </div>
-
-    <!-- REPRODUCTOR INFERIOR -->
+    
     <footer id="playerBar" class="player-bar hidden">
         <div class="player-info">
-            <img id="playerCover" src="" alt="Cover" />
+            <div id="playerCoverContainer" class="td-cover">
+                <span class="cover-badge">N/A</span>
+            </div>
             <div class="player-details">
                 <span id="playerTitle" class="player-title">-</span>
                 <span id="playerArtist" class="player-artist">-</span>
             </div>
+            <button id="btnPlayPause" class="player-btn-toggle" onclick="togglePlayPause()">
+                <svg id="iconPlay" class="player-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+                <svg id="iconPause" class="player-icon hidden" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                </svg>
+            </button>
         </div>
+
         <div class="player-controls">
-            <audio id="mainAudio" controls></audio>
+            <span id="playerTimeCurrent" class="player-time">0:00</span>
+
+            <div class="player-progress-wrapper" onclick="seekAudio(event)">
+                <div id="playerProgressBar" class="player-progress-fill"></div>
+            </div>
+
+            <span class="player-time">0:20</span>
+
+            <div class="volume-container">
+                <svg class="volume-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                </svg>
+                <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="1" oninput="changeVolume(this.value)">
+            </div>
         </div>
+
+        <audio id="mainAudio"></audio>
     </footer>
 </div>
 

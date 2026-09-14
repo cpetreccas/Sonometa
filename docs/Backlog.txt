@@ -1,5 +1,5 @@
 FUNCIONALIDADES GENERALES:
-- Exponer en el listado metadatos de Traktor (Analizado Si/No - Número de Cues)
+- Hacer algo con la info de los CUEs? Meter ahí el inicio de la reproducción lite de la webapp??
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Integrar búsquedas en Google para el nombre y carátulas
 - Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
@@ -10,10 +10,10 @@ Panel de filtros avanzados:
 - Limpiar
 
 WebApp:
-- Ordenar por todas las cabeceras.
-- Corregir filtros.
-- En archivos flac no se guarda la caratula.
 - En el reproductor se ve una carátula rota si el archivo no tiene carátula. Enseñar la misma que en el listado.
+- Ordenar por todas las cabeceras.
+- En archivos flac no se guarda la caratula.
 - Habilitar reproducción aleatoria?
-
-Analizar postgesql para ver si se puede optimizar la base de datos y mejorar el rendimiento de las consultas.
+- Configura Python en el escritorio para consultar las playlists creadas en la nube y generar los archivos locales compatibles (.m3u8, XML Traktor/Rekordbox).
+- Módulo de Compartición (Social & Web Share API): Añade el botón "Compartir" en la WebApp usando navigator.share (Web Share API) o copiado de enlace.
+- Configura una vista pública ligera / tarjeta visual (Social Card) con etiquetas Open Graph para previsualizar portadas, CUEs y BPM al enviar por WhatsApp o Instagram.

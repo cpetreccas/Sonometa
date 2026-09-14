@@ -412,35 +412,108 @@ function loadTableData() {
     }
 }
 
-function playTrack(track) {
+export function playTrack(track) {
     if (!track.preview_audio_url) {
         alert("Esta canción no dispone de preescucha subida en la nube.");
         return;
     }
 
     const playerBar = document.getElementById('playerBar');
-    const playerCover = document.getElementById('playerCover');
+    const playerCoverContainer = document.getElementById('playerCoverContainer');
     const playerTitle = document.getElementById('playerTitle');
     const playerArtist = document.getElementById('playerArtist');
     const mainAudio = document.getElementById('mainAudio');
 
     if (playerBar) playerBar.classList.remove('hidden');
-    if (playerCover) playerCover.src = track.cover_url || '';
     if (playerTitle) playerTitle.textContent = track.title || track.filename;
     if (playerArtist) playerArtist.textContent = track.artist || 'Artista Desconocido';
 
+    if (playerCoverContainer) {
+        if (track.cover_url && track.cover_url.trim() !== '') {
+            playerCoverContainer.innerHTML = `<img src="${track.cover_url}" class="cover-thumb">`;
+        } else {
+            playerCoverContainer.innerHTML = `<span class="cover-badge">N/A</span>`;
+        }
+    }
+
     if (mainAudio) {
         mainAudio.src = track.preview_audio_url;
-        mainAudio.play().catch(console.error);
+        mainAudio.play().then(() => updatePlayIcon(true)).catch(console.error);
 
         mainAudio.ontimeupdate = function() {
-            if (mainAudio.currentTime >= 20) {
+            const current = mainAudio.currentTime;
+            const maxDuration = 20; // Límite de preescucha
+
+            if (current >= maxDuration) {
                 mainAudio.pause();
                 mainAudio.currentTime = 0;
+                updatePlayIcon(false);
             }
+
+            // Actualizar barra y tiempo
+            const pct = Math.min((current / maxDuration) * 100, 100);
+            const progressBar = document.getElementById('playerProgressBar');
+            const timeElem = document.getElementById('playerTimeCurrent');
+
+            if (progressBar) progressBar.style.width = `${pct}%`;
+            if (timeElem) {
+                const mins = Math.floor(current / 60);
+                const secs = Math.floor(current % 60).toString().padStart(2, '0');
+                timeElem.textContent = `${mins}:${secs}`;
+            }
+        };
+
+        mainAudio.onended = function() {
+            updatePlayIcon(false);
         };
     }
 }
+
+function updatePlayIcon(isPlaying) {
+    const iconPlay = document.getElementById('iconPlay');
+    const iconPause = document.getElementById('iconPause');
+    if (iconPlay && iconPause) {
+        if (isPlaying) {
+            iconPlay.classList.add('hidden');
+            iconPause.classList.remove('hidden');
+        } else {
+            iconPlay.classList.remove('hidden');
+            iconPause.classList.add('hidden');
+        }
+    }
+}
+
+// Helpers globales para interacción
+window.togglePlayPause = function() {
+    const mainAudio = document.getElementById('mainAudio');
+    if (!mainAudio || !mainAudio.src) return;
+
+    if (mainAudio.paused) {
+        mainAudio.play();
+        updatePlayIcon(true);
+    } else {
+        mainAudio.pause();
+        updatePlayIcon(false);
+    }
+};
+
+window.seekAudio = function(e) {
+    const mainAudio = document.getElementById('mainAudio');
+    if (!mainAudio || !mainAudio.src) return;
+
+    const wrapper = e.currentTarget;
+    const rect = wrapper.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const width = rect.width;
+
+    const targetPct = clickX / width;
+    mainAudio.currentTime = targetPct * 20; // Escala sobre el máximo de 20s
+};
+
+window.changeVolume = function(val) {
+    const mainAudio = document.getElementById('mainAudio');
+    if (mainAudio) mainAudio.volume = parseFloat(val);
+};
 
 // 4. Modales y Helpers expuestos
 let searchTimeout;
