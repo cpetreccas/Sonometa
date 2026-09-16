@@ -24,7 +24,12 @@ export function playTrack(track) {
     const playerArtist = document.getElementById('playerArtist');
     const mainAudio = document.getElementById('mainAudio');
 
-    if (playerBar) playerBar.classList.remove('hidden');
+    if (playerBar) {
+        playerBar.classList.remove('hidden');
+        if (typeof window.updatePlayerSpacing === 'function') {
+            window.updatePlayerSpacing(true);
+        }
+    }
     if (playerTitle) playerTitle.textContent = track.title || track.filename;
     if (playerArtist) playerArtist.textContent = track.artist || 'Artista Desconocido';
 

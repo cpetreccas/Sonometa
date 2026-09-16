@@ -115,6 +115,24 @@ function showGlobalError(msg) {
 // ============================================================================
 // 2. Controlador Orquestador Principal - Exposición de Funciones Globales
 // ============================================================================
+// Exponer funciones del Menú Móvil y Espaciado del Reproductor
+export function toggleMobileMenu() {
+    const actions = document.getElementById('headerActions');
+    if (actions) {
+        actions.classList.toggle('show');
+    }
+}
+window.toggleMobileMenu = toggleMobileMenu;
+
+export function updatePlayerSpacing(isPlayerVisible) {
+    if (isPlayerVisible) {
+        document.body.classList.add('has-player');
+    } else {
+        document.body.classList.remove('has-player');
+    }
+}
+window.updatePlayerSpacing = updatePlayerSpacing;
+
 // Exponer funciones de filtrado
 window.populateSelectFilters = populateSelectFilters;
 window.handleFilterChange = handleFilterChange;
@@ -177,6 +195,12 @@ export function switchView(view) {
     if (tblView) tblView.style.display = isDashboard ? 'none' : 'block';
     if (btnDash) btnDash.style.display = isDashboard ? 'none' : 'inline-block';
     if (btnTbl) btnTbl.style.display = isDashboard ? 'inline-block' : 'none';
+
+    // Cerrar menú hamburguesa al cambiar de vista en móvil
+    const actions = document.getElementById('headerActions');
+    if (actions && actions.classList.contains('show')) {
+        actions.classList.remove('show');
+    }
 }
 
 window.switchView = switchView;

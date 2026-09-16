@@ -74,7 +74,14 @@
                 <span class="brand-subtitle">AUDIO TAG SUITE</span>
             </div>
         </div>
-        <div class="header-actions">
+
+        <!-- Botón Hamburguesa Móvil -->
+        <button id="btnMenuToggle" class="btn-menu-toggle" onclick="toggleMobileMenu()" aria-label="Abrir menú">
+            ☰
+        </button>
+
+        <!-- Menú de Acciones -->
+        <div id="headerActions" class="header-actions">
             <button id="btnDashboard" class="btn-primary btn-header" style="display:none;" onclick="switchView('dashboard')">Ver dashboards</button>
             <button id="btnTable" class="btn-primary btn-header" onclick="switchView('table')">Ver mi colección</button>
             <button id="btnLogout" class="btn-secondary">Salir</button>
@@ -328,3 +335,6 @@
 <script type="module" src="js/app.js"></script>
 </body>
 </html>
+<footer role="contentinfo" class="app-footer no-select">
+    <p>&copy; 2026 Sonometa. Todos los derechos reservados.</p>
+</footer>

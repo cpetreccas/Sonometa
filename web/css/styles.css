@@ -22,6 +22,12 @@ body {
     margin: 0;
     padding: 12px;
     -webkit-font-smoothing: antialiased;
+    transition: padding-bottom 0.3s ease;
+}
+
+/* Espaciado dinámico del reproductor flotante */
+body.has-player {
+    padding-bottom: 90px !important;
 }
 
 @media (min-width: 768px) { body { padding: 28px; } }
@@ -75,7 +81,7 @@ body {
 .auth-input:focus { border-color: var(--primary-purple); }
 .error-msg { color: #EF4444; font-size: 11px; margin-top: 8px; }
 
-/* HEADER & BRAND */
+/* HEADER, BRAND & MENÚ HAMBURGUESA */
 .header {
     display: flex;
     align-items: center;
@@ -83,6 +89,7 @@ body {
     margin-bottom: 12px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--border-color);
+    position: relative;
 }
 
 .brand-container { display: flex; align-items: center; gap: 10px; cursor: default; }
@@ -95,6 +102,50 @@ body {
 .brand-subtitle { font-size: 8px; font-weight: 600; letter-spacing: 1.2px; color: var(--text-muted); margin-top: 2px; }
 
 .header-actions { display: flex; align-items: center; gap: 8px; }
+
+.btn-menu-toggle {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: #FFF;
+    font-size: 20px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+@media (max-width: 768px) {
+    body.has-player {
+        padding-bottom: 120px !important;
+    }
+
+    .btn-menu-toggle {
+        display: block;
+    }
+
+    .header-actions {
+        display: none;
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: var(--surface-color);
+        border: 1px solid var(--border-highlight);
+        border-radius: 10px;
+        padding: 12px;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 1000;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .header-actions.show {
+        display: flex;
+    }
+
+    .header-actions .btn-header {
+        width: 100%;
+    }
+}
 
 .btn-primary {
     background-color: var(--primary-purple);
@@ -253,7 +304,7 @@ body {
 input:checked + .slider { background-color: var(--primary-purple); }
 input:checked + .slider:before { transform: translateX(16px); }
 
-.table-container { background-color: var(--surface-color); border: 1px solid var(--border-color); border-radius: 12px; overflow-x: auto; margin-bottom: 60px; }
+.table-container { background-color: var(--surface-color); border: 1px solid var(--border-color); border-radius: 12px; overflow-x: auto; margin-bottom: 20px; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
 th {
     background-color: #1B1B20;
@@ -373,12 +424,12 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     .player-time { font-size: 0.7rem; min-width: 28px; text-align: center; }
     .volume-container { display: none; }
 }
-/* Feedback táctil para las leyendas en dispositivos móviles */
+
 .touchable-legend-item {
     cursor: pointer;
     user-select: none;
     -webkit-tap-highlight-color: rgba(139, 92, 246, 0.2);
-    padding: 8px 4px; /* Amplía la zona táctil para los dedos */
+    padding: 8px 4px;
     border-radius: 6px;
     transition: background-color 0.15s ease;
 }
@@ -410,4 +461,22 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* FOOTER SEMÁNTICO & LANDMARKS */
+.app-footer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 16px 12px;
+    margin-top: 24px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-subtle);
+    font-size: 11px;
+    text-align: center;
+}
+
+.app-footer p {
+    margin: 0;
+    letter-spacing: 0.5px;
 }
