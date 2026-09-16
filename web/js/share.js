@@ -9,7 +9,17 @@
 export async function shareTrackCard(track) {
     if (!track) return;
 
-    // 1. Crear contenedor temporal para la plantilla del Cromo
+    // 1. Cargar html2canvas dinámicamente solo al requerir la acción (Lazy Loading)
+    let html2canvas;
+    try {
+        const module = await import('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        html2canvas = module.default || window.html2canvas;
+    } catch (importErr) {
+        console.error('Error al cargar html2canvas dinámicamente:', importErr);
+        return;
+    }
+
+    // 2. Crear contenedor temporal para la plantilla del Cromo
     const cardContainer = document.createElement('div');
     cardContainer.id = 'tempTrackCard';
     cardContainer.style.cssText = `
@@ -76,20 +86,20 @@ export async function shareTrackCard(track) {
     document.body.appendChild(cardContainer);
 
     try {
-        // 2. Renderizar el DOM a Canvas mediante html2canvas
+        // 3. Renderizar el DOM a Canvas mediante html2canvas importado dinámicamente
         const canvas = await html2canvas(cardContainer, {
             useCORS: true,
             scale: 2,
             backgroundColor: '#18181B'
         });
 
-        // 3. Convertir el Canvas a Blob (PNG)
+        // 4. Convertir el Canvas a Blob (PNG)
         canvas.toBlob(async (blob) => {
             if (!blob) return;
 
             const file = new File([blob], `cromo-${track.id || 'track'}.png`, { type: 'image/png' });
 
-            // 4. Compartir por Web Share API (Móviles / WhatsApp)
+            // 5. Compartir por Web Share API (Móviles / WhatsApp)
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
                 try {
                     await navigator.share({

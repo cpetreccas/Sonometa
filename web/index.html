@@ -7,12 +7,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Sonometa">
     <title>Sonometa Cloud - Mi Colección</title>
-    <link rel="icon" type="image/x-icon" href="assets/logo.png">
+    <link rel="icon" type="image/x-icon" href="assets/logo.webp">
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -307,6 +306,12 @@
             </div>
 
             <span class="player-time">0:20</span>
+
+            <select id="speedSelector" class="speed-select" onchange="changePlaybackSpeed(this.value)" title="Velocidad de reproducción">
+                <option value="1.0" selected>1x</option>
+                <option value="1.10">1.10x</option>
+                <option value="1.20">1.20x</option>
+            </select>
 
             <div class="volume-container">
                 <svg class="volume-icon" viewBox="0 0 24 24" fill="currentColor">

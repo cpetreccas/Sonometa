@@ -21,16 +21,19 @@ export async function fetchAllTracks() {
         const { data, error } = await supabase
             .from('tracks')
             .select('id, filename, artist, title, mix_artist, album, genre, publisher, year, duration, cue_count, rating, cover_url, preview_audio_url')
+
             .range(from, from + step - 1);
 
-        if (error) throw error;
+        if (error) {
+            console.error('Error fetching tracks:', error);
+            break;
+        }
 
         if (data && data.length > 0) {
             fetchedTracks = fetchedTracks.concat(data);
+            from += step;
             if (data.length < step) {
                 hasMore = false;
-            } else {
-                from += step;
             }
         } else {
             hasMore = false;
@@ -39,4 +42,3 @@ export async function fetchAllTracks() {
 
     return fetchedTracks;
 }
-

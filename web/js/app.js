@@ -28,7 +28,8 @@ import {
     togglePlayPause,
     toggleShuffle,
     seekAudio,
-    changeVolume
+    changeVolume,
+    changePlaybackSpeed
 } from './player.js';
 
 // ============================================================================
@@ -140,6 +141,7 @@ window.togglePlayPause = togglePlayPause;
 window.toggleShuffle = toggleShuffle;
 window.seekAudio = seekAudio;
 window.changeVolume = changeVolume;
+window.changePlaybackSpeed = changePlaybackSpeed;
 
 // ============================================================================
 // 3. Funciones Auxiliares

@@ -4,6 +4,8 @@
 
 import { context } from './app_context.js';
 
+let currentSpeed = 1.0;
+
 /**
  * Inicia la reproducción de una canción
  * @param {Object} track - Objeto track con todos los metadatos
@@ -36,6 +38,10 @@ export function playTrack(track) {
 
     if (mainAudio) {
         mainAudio.src = track.preview_audio_url;
+
+        // Aplicar la velocidad y el pitch estilo vinilo
+        applyPitchAndSpeed(mainAudio, currentSpeed);
+
         mainAudio.play().then(() => updatePlayIcon(true)).catch(console.error);
 
         mainAudio.ontimeupdate = function() {
@@ -62,6 +68,29 @@ export function playTrack(track) {
             playNextTrack();
         };
     }
+}
+
+/**
+ * Cambia la velocidad de reproducción y altera el tono (efecto vinilo)
+ * @param {Number} rate - Velocidad (1.0, 1.10, 1.20)
+ */
+export function changePlaybackSpeed(rate = 1.0) {
+    currentSpeed = parseFloat(rate);
+    const mainAudio = document.getElementById('mainAudio');
+    if (mainAudio) {
+        applyPitchAndSpeed(mainAudio, currentSpeed);
+    }
+}
+
+/**
+ * Aplica la velocidad deshabilitando la corrección de tono (preservesPitch = false)
+ */
+function applyPitchAndSpeed(audioElem, rate) {
+    audioElem.playbackRate = rate;
+    // Desactivar corrección de tono para apitufar la voz al subir velocidad (efecto vinilo)
+    audioElem.preservesPitch = false;
+    audioElem.webkitPreservesPitch = false;
+    audioElem.mozPreservesPitch = false;
 }
 
 /**
@@ -170,4 +199,3 @@ export function changeVolume(val) {
     const mainAudio = document.getElementById('mainAudio');
     if (mainAudio) mainAudio.volume = parseFloat(val);
 }
-

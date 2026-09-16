@@ -5,12 +5,17 @@ FUNCIONALIDADES GENERALES:
 - Integrar búsquedas en Google para el nombre y carátulas
 - Problema de rendimiento (más de 60 peticiones a Discogs por minuto falla) (Meter un 2º token??)
 - Instalador para MAC
+- Detección de Falsos 320 kbps (Fake Bitrate / Spek check)
+- Detección de Temas Descompensados (Volumen y LUFS)
+- Detección de Clipping / Distorsión Digital
+- Archivos Corruptos o Incompletos
 
 Panel de filtros avanzados:
 - Se pierde la ordenación cuando seleccionas un álbum y luego le das a TODOS
 - Limpiar
 
 WebApp:
+- Añadir wantlist y colección a la WebApp
 - En archivos flac no se guarda la caratula.
 - Configura Python en el escritorio para consultar las playlists creadas en la nube y generar los archivos locales compatibles (.m3u8, XML Traktor/Rekordbox).
 - Módulo de Compartición (Social & Web Share API): Añade el botón "Compartir" en la WebApp usando navigator.share (Web Share API) o copiado de enlace.

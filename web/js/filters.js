@@ -3,16 +3,25 @@
  * ✅ Corregido: Cross-filtering de gráficas (handleChartClick)
  * ✅ Corregido: Manejo completo de filtro por Rating (1-5 estrellas)
  * ✅ Corregido: Persistencia de rating en resetAllFilters()
- * ✅ Corregido: Validación correcta en populateSelectFilters()
+ * ✅ Corregido: Búsqueda insensible a acentos/diacríticos
+ * ✅ Añadido: Memoización para rendimiento y Toast de feedback visual
  */
 
 import { context } from './app_context.js';
 import { updateDashboard } from './dashboard.js';
 import { loadTableData } from './collection_view.js';
 
+let lastFiltersCache = null;
+let lastResultsCache = null;
+
+// Función para normalizar texto (convierte a minúsculas y quita acentos)
+function normalizeText(text) {
+    if (!text) return '';
+    return text.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 /**
  * Popula los selectores de filtros dinámicamente según los tracks actuales
- * ✅ Incluye validación para rating específico
  */
 export function populateSelectFilters() {
     const filterDefs = [
@@ -35,12 +44,12 @@ export function populateSelectFilters() {
         context.allTracks.forEach(track => {
             let match = true;
 
-            // Validar búsqueda
+            // Validar búsqueda (normalizada con acentos)
             if (context.currentFilters.search) {
-                const q = context.currentFilters.search.toLowerCase();
-                const fn = (track.filename || '').toLowerCase();
-                const title = (track.title || '').toLowerCase();
-                const artist = (track.artist || '').toLowerCase();
+                const q = normalizeText(context.currentFilters.search);
+                const fn = normalizeText(track.filename);
+                const title = normalizeText(track.title);
+                const artist = normalizeText(track.artist);
                 if (!fn.includes(q) && !title.includes(q) && !artist.includes(q)) match = false;
             }
 
@@ -62,12 +71,9 @@ export function populateSelectFilters() {
             if (context.currentFilters.noCues && track.cue_count > 0) match = false;
             if (context.currentFilters.noCover && track.cover_url) match = false;
 
-            // ✅ CORREGIDO: Validación completa de rating
-            // Si noRating está activo, excluir tracks con rating
             if (context.currentFilters.noRating && Number(track.rating || 0) > 0) {
                 match = false;
             }
-            // Si rating específico está seleccionado, validar coincidencia exacta
             if (context.currentFilters.rating && String(track.rating) !== String(context.currentFilters.rating)) {
                 match = false;
             }
@@ -132,7 +138,6 @@ export function handleFilterChange(key, value) {
 
 /**
  * Actualiza la barra visual de resumen de filtros activos
- * ✅ CORREGIDO: Incluye badge de rating cuando está activo
  */
 export function updateFilterSummaryBar() {
     let activeCount = 0;
@@ -155,7 +160,6 @@ export function updateFilterSummaryBar() {
     if (context.currentFilters.noCues) { activeCount++; activeNames.push('Sin Cues'); }
     if (context.currentFilters.noCover) { activeCount++; activeNames.push('Sin Carátula'); }
 
-    // ✅ CORREGIDO: Mostrar badge de rating cuando está activo
     if (context.currentFilters.noRating) {
         activeCount++;
         activeNames.push('Sin Rating');
@@ -181,7 +185,6 @@ export function updateFilterSummaryBar() {
         resetBtn.style.display = activeCount > 0 ? 'inline-block' : 'none';
     }
 
-    // Actualizar estados de botones toggle
     ['noCues', 'noCover', 'noRating'].forEach(key => {
         const capitalized = key.charAt(0).toUpperCase() + key.slice(1);
         const btnDesktop = document.getElementById(`btnToggle${capitalized}`);
@@ -203,22 +206,29 @@ export function toggleFilterFlag(key) {
 }
 
 /**
- * Aplica los filtros actuales a la colección de tracks
- * ✅ CORREGIDO: Validación completa de rating
+ * Aplica los filtros actuales a la colección de tracks con memoización y búsqueda insensible a acentos
  */
 export function applyFilters() {
-    const q = (context.currentFilters.search || '').toLowerCase();
+    const currentFiltersStr = JSON.stringify(context.currentFilters);
+
+    // Memoización: evitar filtrado en memoria si los criterios no cambiaron
+    if (currentFiltersStr === lastFiltersCache && lastResultsCache) {
+        context.filteredTracks = lastResultsCache;
+        return;
+    }
+
+    const q = normalizeText(context.currentFilters.search);
 
     context.filteredTracks = context.allTracks.filter(t => {
-        // Validar búsqueda
+        // Búsqueda insensible a acentos
         if (q) {
-            const fn = (t.filename || '').toLowerCase();
-            const title = (t.title || '').toLowerCase();
-            const artist = (t.artist || '').toLowerCase();
+            const fn = normalizeText(t.filename);
+            const title = normalizeText(t.title);
+            const artist = normalizeText(t.artist);
             if (!fn.includes(q) && !title.includes(q) && !artist.includes(q)) return false;
         }
 
-        // Validar filtros de campos
+        // Filtros por campos
         for (const key of ['album', 'genre', 'publisher', 'year']) {
             const filterVal = context.currentFilters[key];
             if (!filterVal) continue;
@@ -231,16 +241,19 @@ export function applyFilters() {
             }
         }
 
-        // Validar flags especiales
+        // Flags especiales
         if (context.currentFilters.noCues && Number(t.cue_count || 0) > 0) return false;
         if (context.currentFilters.noCover && t.cover_url && String(t.cover_url).trim() !== '') return false;
 
-        // ✅ CORREGIDO: Validación completa de rating
+        // Rating
         if (context.currentFilters.noRating && Number(t.rating || 0) > 0) return false;
         if (context.currentFilters.rating && String(t.rating) !== String(context.currentFilters.rating)) return false;
 
         return true;
     });
+
+    lastFiltersCache = currentFiltersStr;
+    lastResultsCache = context.filteredTracks;
 
     populateSelectFilters();
     updateDashboard(context.filteredTracks);
@@ -255,7 +268,6 @@ export function applyFiltersAndClose() {
 
 /**
  * Resetea todos los filtros a su estado inicial
- * ✅ CORREGIDO: Incluye rating en el reset
  */
 export function resetAllFilters() {
     context.currentFilters = {
@@ -264,7 +276,7 @@ export function resetAllFilters() {
         genre: '',
         publisher: '',
         year: '',
-        rating: '',        // ✅ CORREGIDO: Agregada esta línea
+        rating: '',
         noCues: false,
         noCover: false,
         noRating: false
@@ -289,41 +301,49 @@ export function closeFilterModal() {
 }
 
 /**
- * ✅ CORREGIDO COMPLETAMENTE: Maneja el clic sobre elementos de las gráficas del Dashboard (Cross-Filtering)
- * Ahora soporta Rating completo (1-5 estrellas) y otros filtros
- *
- * ✅ MODIFICADO: Se mantiene en el Dashboard (no redirige a tabla)
- *
- * @param {string} key - La clave del filtro ('album', 'genre', 'publisher', 'year', 'rating')
- * @param {string} label - El valor seleccionado (ej: 'Album Name', '5', 'Sin valor', etc.)
- * @param {string} defaultLabel - La etiqueta por defecto si no hay valor (ej: 'Sin Valor', 'Sin Valor')
+ * Maneja el clic sobre elementos de las gráficas del Dashboard (Cross-Filtering)
  */
 export function handleChartClick(key, label, defaultLabel) {
-    // Determinar si es un clic en "vacío" o un valor válido
     const filterValue = (label === defaultLabel) ? '__EMPTY__' : label;
 
     if (key === 'rating') {
-        // ✅ CORREGIDO: Manejo completo de rating (1-5 estrellas + sin rating)
         if (filterValue === '__EMPTY__') {
-            // Clic en "Sin Valor" → activar noRating, limpiar rating específico
             context.currentFilters.noRating = true;
             context.currentFilters.rating = '';
         } else {
-            // Clic en 1, 2, 3, 4 o 5 estrellas → establecer rating específico
             context.currentFilters.noRating = false;
             context.currentFilters.rating = filterValue;
         }
     } else if (['album', 'genre', 'publisher', 'year'].includes(key)) {
-        // Filtros estándar: establecer el valor (o __EMPTY__ si es el default)
         context.currentFilters[key] = filterValue;
     }
 
-    // Aplicar filtros SIN cambiar de vista
-    // ✅ MODIFICADO: Se mantiene en Dashboard, no redirige a tabla
     applyFilters();
+    showFilterToast(`Filtro aplicado: ${key} = ${label}`);
+}
 
-    // NO redirige a tabla - mantiene el usuario en el Dashboard
-    // if (typeof window.switchView === 'function') {
-    //     window.switchView('table');
-    // }
+function showFilterToast(message) {
+    let toast = document.getElementById('filterToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'filterToast';
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: #8B5CF6;
+            color: #FFF;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10000;
+            transition: opacity 0.3s ease;
+        `;
+        document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.style.opacity = '1';
+    setTimeout(() => { toast.style.opacity = '0'; }, 2000);
 }
