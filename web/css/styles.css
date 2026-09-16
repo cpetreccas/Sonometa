@@ -480,3 +480,24 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     margin: 0;
     letter-spacing: 0.5px;
 }
+
+/* TRANSICIONES ENTRE VISTAS */
+.view-section {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+    will-change: opacity, transform;
+}
+
+/* Estado cuando la vista está saliendo o se oculta */
+.view-section.fade-out {
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+}
+
+/* Estado inicial cuando la vista entra */
+.view-section.fade-in-prepare {
+    opacity: 0;
+    transform: translateY(-8px);
+}

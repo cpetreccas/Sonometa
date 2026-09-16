@@ -184,15 +184,22 @@ export function syncMobileSearch(val) {
 
 window.syncMobileSearch = syncMobileSearch;
 
-export function switchView(view) {
+export async function switchView(view) {
     const isDashboard = view === 'dashboard';
     const dashView = document.getElementById('dashboardView');
     const tblView = document.getElementById('tableView');
     const btnDash = document.getElementById('btnDashboard');
     const btnTbl = document.getElementById('btnTable');
 
-    if (dashView) dashView.style.display = isDashboard ? 'block' : 'none';
-    if (tblView) tblView.style.display = isDashboard ? 'none' : 'block';
+    const currentView = isDashboard ? tblView : dashView;
+    const nextView = isDashboard ? dashView : tblView;
+
+    // Si la vista solicitada ya se está mostrando, no ejecutar
+    if (nextView && nextView.style.display !== 'none' && !nextView.classList.contains('hidden')) {
+        return;
+    }
+
+    // Actualizar visibilidad de botones en la cabecera
     if (btnDash) btnDash.style.display = isDashboard ? 'none' : 'inline-block';
     if (btnTbl) btnTbl.style.display = isDashboard ? 'inline-block' : 'none';
 
@@ -200,6 +207,25 @@ export function switchView(view) {
     const actions = document.getElementById('headerActions');
     if (actions && actions.classList.contains('show')) {
         actions.classList.remove('show');
+    }
+
+    if (currentView && nextView) {
+        // 1. Animación de salida (Fade Out)
+        currentView.classList.add('fade-out');
+        await new Promise(resolve => setTimeout(resolve, 250));
+
+        // 2. Ocultar la vista actual y preparar la entrada de la nueva
+        currentView.style.display = 'none';
+        currentView.classList.remove('fade-out');
+
+        nextView.classList.add('fade-in-prepare');
+        nextView.style.display = 'block';
+
+        // Forzar Reflow para que el navegador procese el estado inicial antes de transicionar
+        void nextView.offsetWidth;
+
+        // 3. Animación de entrada (Fade In)
+        nextView.classList.remove('fade-in-prepare');
     }
 }
 
