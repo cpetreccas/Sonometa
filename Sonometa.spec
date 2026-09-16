@@ -3,9 +3,9 @@
 
 a = Analysis(
     ['src/gui.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
-    datas=[('assets', 'assets'), ('scripts', 'scripts')],
+    datas=[('assets', 'assets'), ('scripts', 'scripts'), ('bin', 'bin')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

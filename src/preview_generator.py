@@ -1,10 +1,39 @@
 import io
 import os
+import sys
 import logging
 from typing import Optional, Tuple
 from PIL import Image
 
 logger = logging.getLogger("Sonometa")
+
+def setup_ffmpeg_path():
+    """Detecta la carpeta bin/ ubicada en la raíz del proyecto y la añade al PATH."""
+    if getattr(sys, 'frozen', False):
+        # Si se ejecuta empaquetado como executable (.exe)
+        base_dir = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+    else:
+        # En desarrollo: estamos en src/preview_generator.py, subimos un nivel a la raíz (..)
+        src_dir = os.path.dirname(os.path.abspath(__file__))
+        base_dir = os.path.abspath(os.path.join(src_dir, '..'))
+
+    ffmpeg_dir = os.path.join(base_dir, 'bin')
+
+    if os.path.exists(ffmpeg_dir):
+        # Añadir al PATH del proceso actual
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+
+        # Configurar pydub si está instalado
+        try:
+            from pydub import AudioSegment
+            AudioSegment.converter = os.path.join(ffmpeg_dir, "ffmpeg.exe")
+            AudioSegment.ffprobe = os.path.join(ffmpeg_dir, "ffprobe.exe")
+        except ImportError:
+            pass
+
+# Ejecutar automáticamente al importar el módulo
+setup_ffmpeg_path()
+
 
 class MediaProcessor:
     """Extrae portadas e imágenes y genera previews cortas de audio para la nube."""

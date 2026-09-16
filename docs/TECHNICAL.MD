@@ -202,7 +202,7 @@ No se observa archivo `.spec` versionado en la raiz. El flujo habitual es CLI di
 ### Comando base (Windows, modo windowed)
 
 ```powershell
-pyinstaller --noconfirm --windowed --name Sonometa --icon .\assets\logo_relleno.ico --add-data ".\assets;assets" --add-data ".\scripts;scripts" .\src\gui.py
+pyinstaller --noconfirm --windowed --name Sonometa --icon .\assets\logo_relleno.ico --paths . --add-data ".\assets;assets" --add-data ".\scripts;scripts" --add-data ".\bin;bin" .\src\gui.py
 ```
 
 ### Puntos a validar en build

@@ -162,7 +162,7 @@ body {
 .chart-flex-wrapper { display: flex; flex-direction: column; gap: 12px; align-items: center; }
 @media (min-width: 600px) { .chart-flex-wrapper { flex-direction: row; justify-content: space-between; align-items: center; } }
 .canvas-pie-container, .canvas-bar-container { position: relative; height: 180px; width: 100%; max-width: 180px; flex-shrink: 0; }
-.canvas-bar-container { max-width: 210px; }
+.canvas-bar-container { width: 100%; max-width: 100%; flex: 1; }
 .custom-legend { width: 100%; font-size: 11px; max-height: 180px; overflow-y: auto; padding-right: 4px; }
 .custom-legend::-webkit-scrollbar { width: 4px; }
 .custom-legend::-webkit-scrollbar-thumb { background: var(--border-highlight); border-radius: 2px; }
@@ -372,4 +372,42 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     .player-progress-wrapper { flex: 1; height: 5px; border-radius: 3px; }
     .player-time { font-size: 0.7rem; min-width: 28px; text-align: center; }
     .volume-container { display: none; }
+}
+/* Feedback táctil para las leyendas en dispositivos móviles */
+.touchable-legend-item {
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: rgba(139, 92, 246, 0.2);
+    padding: 8px 4px; /* Amplía la zona táctil para los dedos */
+    border-radius: 6px;
+    transition: background-color 0.15s ease;
+}
+
+.touchable-legend-item:active {
+    background-color: rgba(139, 92, 246, 0.25) !important;
+}
+
+@media (hover: hover) {
+    .touchable-legend-item:hover {
+        background-color: var(--surface-hover);
+    }
+}
+
+.health-diag-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    font-size: 12px;
+    color: #A1A1AA;
+    width: 100%;
+    text-align: left;
+    margin-top: 12px;
+}
+
+.health-diag-grid div {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

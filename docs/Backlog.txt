@@ -1,4 +1,5 @@
 FUNCIONALIDADES GENERALES:
+- Poder hacer Ctrl+C / Ctrl+V para pegar una lista filtrada directamente a un pen.
 - Hacer algo con la info de los CUEs? Meter ahí el inicio de la reproducción lite de la webapp??
 - Integrar Spotify si no se encuentra en Discogs (para producciones nuevas)
 - Integrar búsquedas en Google para el nombre y carátulas

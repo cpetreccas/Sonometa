@@ -3,10 +3,10 @@
 ; Non-commercial use only.
 
 #define MyAppName "Sonometa"
-#define MyAppVersion "1"
+#define MyAppVersion "2.0"
 #define MyAppPublisher "Claudio Petrecca"
 #define MyAppURL "https://www.labandadeltuvo.com/"
-#define MyAppExeName "gui.exe"
+#define MyAppExeName "Sonometa.exe"
 #define DoubleAmp(Value) StringChange(Value, "&", "&&")
 #define EscapeConstArgument(Value) StringChange(StringChange(StringChange(Value, "%", "%25"), ",", "%2c"), "}", "%7d")
 
@@ -34,7 +34,7 @@ DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 OutputDir=C:\Users\cpetreccas\Documents\Proyecto Sonometa
-OutputBaseFilename=Installer_Sonometa_v1
+OutputBaseFilename=Installer_Sonometa_v2.0
 SetupIconFile=C:\Users\cpetreccas\Documents\Proyecto Sonometa\assets\logo_relleno.ico
 Password=aXg41Mj11
 Encryption=yes
@@ -48,8 +48,8 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\cpetreccas\Documents\Proyecto Sonometa\dist\gui\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Users\cpetreccas\Documents\Proyecto Sonometa\dist\gui\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "C:\Users\cpetreccas\Documents\Proyecto Sonometa\dist\Sonometa\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\Users\cpetreccas\Documents\Proyecto Sonometa\dist\Sonometa\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
