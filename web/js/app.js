@@ -8,7 +8,6 @@ import {
     loadTableData,
     toggleColumnPicker,
     renderColumnPicker,
-    toggleVerDetalle,
     changePage
 } from './collection_view.js';
 import {
@@ -150,7 +149,6 @@ window.sortByColumn = sortByColumn;
 window.loadTableData = loadTableData;
 window.toggleColumnPicker = toggleColumnPicker;
 window.renderColumnPicker = renderColumnPicker;
-window.toggleVerDetalle = toggleVerDetalle;
 window.changePage = changePage;
 
 // Exponer funciones del reproductor

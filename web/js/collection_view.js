@@ -52,7 +52,7 @@ export function sortByColumn(key) {
 }
 
 /**
- * Carga y renderiza los datos de la tabla con paginación
+ * Carga y renderiza los datos de la tabla y las tarjetas móviles con paginación
  */
 export function loadTableData() {
     const chkVerDetalle = document.getElementById('chkVerDetalle');
@@ -152,6 +152,9 @@ export function loadTableData() {
         tbody.innerHTML = `<tr><td colspan="${activeCols.length || 1}" style="text-align: center;" class="text-subtle">No se encontraron registros.</td></tr>`;
     }
 
+    // Renderizar tarjetas para modo Mobile
+    renderMobileCards(pageTracks);
+
     const resultsCountElem = document.getElementById('resultsCount');
     if (resultsCountElem) {
         if (totalRecords === 0) {
@@ -166,6 +169,90 @@ export function loadTableData() {
     // Actualizar y mostrar/ocultar el control de paginación
     updatePaginationUI(totalPages);
 }
+
+/**
+ * Renderiza la vista en modo Card para pantallas móviles
+ * @param {Array} tracks - Temas a mostrar en la página actual
+ */
+function renderMobileCards(tracks) {
+    let cardsContainer = document.getElementById('mobileCardsContainer');
+    const tableContainer = document.querySelector('.table-container');
+
+    if (!cardsContainer && tableContainer) {
+        cardsContainer = document.createElement('div');
+        cardsContainer.id = 'mobileCardsContainer';
+        cardsContainer.className = 'mobile-cards-container';
+        tableContainer.parentNode.insertBefore(cardsContainer, tableContainer.nextSibling);
+    }
+
+    if (!cardsContainer) return;
+
+    cardsContainer.innerHTML = '';
+
+    if (tracks.length === 0) {
+        cardsContainer.innerHTML = '<div style="text-align: center; padding: 20px;" class="text-subtle">No se encontraron registros.</div>';
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    tracks.forEach(track => {
+        const card = document.createElement('div');
+        card.className = 'track-card';
+        card.setAttribute('data-track-id', track.id);
+
+        card.onclick = function() {
+            document.querySelectorAll('.track-card').forEach(c => c.classList.remove('selected-card'));
+            this.classList.add('selected-card');
+        };
+
+        const title = track.title || (track.filename ? track.filename.replace(/\.[^/.]+$/, "") : 'Sin título');
+        const artist = track.artist || 'Artista Desconocido';
+        const genre = track.genre || 'Género N/A';
+        const key = track.key || track.initial_key || '';
+        const bpm = track.bpm ? `${Math.round(track.bpm)} BPM` : '';
+
+        let coverHtml = `<div class="card-cover-badge">N/A</div>`;
+        if (track.cover_url) {
+            coverHtml = `<img src="${track.cover_url}" class="card-cover" loading="lazy" alt="Cover">`;
+        }
+
+        const ratingStars = track.rating ? `${Math.max(0, Math.min(5, track.rating))}★` : '';
+
+        card.innerHTML = `
+            <div class="card-cover-wrapper" onclick="event.stopPropagation(); window.openTrackDetailModal('${track.id}')">
+                ${coverHtml}
+            </div>
+            <div class="card-info" onclick="event.stopPropagation(); window.openTrackDetailModal('${track.id}')">
+                <div class="card-title">${title}</div>
+                <div class="card-artist">${artist}</div>
+                <div class="card-meta-row">
+                    <span>${genre}</span>
+                    ${bpm ? `<span>• ${bpm}</span>` : ''}
+                    ${key ? `<span>• ${key}</span>` : ''}
+                    ${ratingStars ? `<span style="color: #FBBF24;">• ${ratingStars}</span>` : ''}
+                </div>
+            </div>
+            <div class="card-actions">
+                <button class="btn-card-action" aria-label="Reproducir" onclick="event.stopPropagation(); window.playTrackFromCard('${track.id}')">
+                    ▶
+                </button>
+            </div>
+        `;
+
+        fragment.appendChild(card);
+    });
+
+    cardsContainer.appendChild(fragment);
+}
+
+// Handler auxiliar global para reproductor desde tarjetas
+window.playTrackFromCard = function(trackId) {
+    const track = context.allTracks.find(t => String(t.id) === String(trackId));
+    if (track) {
+        playTrack(track);
+    }
+};
 
 /**
  * Actualiza la interfaz de paginación
