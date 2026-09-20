@@ -15,7 +15,26 @@ import customtkinter as ctk
 import theme
 
 
-class ReplaceFilenameDialog(ctk.CTkToplevel):
+class SilentTitlebarMixin:
+    """Desactiva la gestión automática de cabecera de Windows de CustomTkinter
+    (CTkToplevel._windows_set_titlebar_color), que internamente hace su propio
+    withdraw()+update() forzado durante __init__ -antes de que nuestro propio
+    DialogManager.hide_until_ready tenga ocasión de ocultar la ventana con opacidad 0-
+    y es quien le da pie a Windows a pintar un frame en blanco antes de tiempo.
+    Solo se aplica a nuestras clases de diálogo modal: CustomMenuDropdown (el
+    desplegable de la barra de herramientas) sí depende de ese ciclo interno para
+    pintarse bien con su truco de color transparente, así que no se toca."""
+    _deactivate_windows_window_header_manipulation = True
+
+
+class _SilentCTkToplevel(SilentTitlebarMixin, ctk.CTkToplevel):
+    """CTkToplevel genérico (sin clase propia) usado por _new_modal, show_themed_dialog
+    y la ventana de logs. El tema oscuro del título se aplica manualmente en
+    DialogManager.apply_popup_style vía apply_dark_title_bar."""
+    pass
+
+
+class ReplaceFilenameDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     """Modal para buscar y reemplazar cadenas en los nombres de archivo (filename)."""
 
     def __init__(self, parent, target_items):
@@ -24,6 +43,7 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
         :param target_items: Lista de dicts: [{"row_id": id, "filename": name}, ...]
         """
         super().__init__(parent)
+        DialogManager.hide_until_ready(self)
         self.app = parent
         self.target_items = target_items  # Lista de dicts: [{"row_id": id, "filename": name}, ...]
         self.matches = []  # Ocurrencias encontradas: [{"row_id": id, "filename": name, "display_name": str, "ext": str}, ...]
@@ -312,11 +332,12 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
         self._find_matches()
 
 
-class MultiCoverSelectionDialog(ctk.CTkToplevel):
+class MultiCoverSelectionDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     """Ventana consolidada que muestra todas las canciones pendientes en filas con sus opciones en columnas."""
 
     def __init__(self, parent, pending_reviews):
         super().__init__(parent)
+        DialogManager.hide_until_ready(self)
         self.title("Selección de Carátulas - Sonometa")
 
         self.geometry("900x620")
@@ -682,11 +703,12 @@ def _safe_revert_withdraw(self):
 ctk_toplevel.CTkToplevel._revert_withdraw_after_windows_set_titlebar_color = _safe_revert_withdraw
 
 
-class ProgressDialog(ctk.CTkToplevel):
+class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     """Modal de progreso para operaciones pesadas con actualización segura desde hilos."""
 
     def __init__(self, parent, title_text="Procesando", message="Iniciando...", total=0):
         super().__init__(parent)
+        DialogManager.hide_until_ready(self)
         self.app = parent
         self._total = max(0, int(total or 0))
         self._current = 0
@@ -915,6 +937,18 @@ class DialogManager:
         return ProgressDialog(app, title_text=title_text, message=message, total=total)
 
     @staticmethod
+    def hide_until_ready(win):
+        """Oculta la ventana con opacidad 0 desde el instante de su creación.
+        Windows pinta el fondo blanco por defecto del HWND nativo del Toplevel antes de
+        que CustomTkinter termine de dibujar el contenido y el tema oscuro; llamar a esto
+        justo tras crear la ventana evita ese destello. Se revela en apply_popup_style
+        una vez la ventana ya está construida, posicionada y con el estilo aplicado."""
+        try:
+            win.attributes("-alpha", 0.0)
+        except Exception:
+            pass
+
+    @staticmethod
     def apply_popup_style(app, win, is_modal=True, owner=None):
         DialogManager.apply_dark_title_bar(win)
 
@@ -933,13 +967,24 @@ class DialogManager:
             win.lift()
             win.focus_force()
 
+        # Revela la ventana en el siguiente ciclo del mainloop (tras terminar de construir
+        # y posicionar todo su contenido), no de forma instantánea con deiconify().
+        def _reveal():
+            try:
+                win.attributes("-alpha", 1.0)
+            except Exception:
+                pass
+
+        win.after(60, _reveal)
+
     @staticmethod
     def _new_modal(app, title, width, height, *, parent=None, resizable=False, is_modal=True, on_escape=None):
         """Crea un CTkToplevel con el patrón estándar de diálogo Sonometa: título, geometría,
         atajo ESC, centrado sobre `parent` (o `app` si no se indica) y estilo corporativo aplicado.
         """
         owner = parent if parent is not None else app
-        win = ctk.CTkToplevel(owner)
+        win = _SilentCTkToplevel(owner)
+        DialogManager.hide_until_ready(win)
         win.title(title)
         win.geometry(f"{width}x{height}")
         if not resizable:
@@ -957,7 +1002,10 @@ class DialogManager:
         if sys.platform != "win32" or not win.winfo_exists():
             return
         try:
-            hwnd = win.winfo_id()
+            # GetParent() sube del HWND "cliente" que devuelve Tk al HWND real de la
+            # ventana decorada (el que tiene la barra de título); sin este paso,
+            # DwmSetWindowAttribute apunta al handle equivocado y no hace nada.
+            hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
             value = ctypes.c_int(1)
             for attr in (20, 19):
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
@@ -974,8 +1022,9 @@ class DialogManager:
         host = parent if parent is not None else app
         # fg_color igual al del frame interior: sin ese contraste, el margen entre la
         # ventana y la tarjeta deja de leerse como un "doble marco".
-        dialog = ctk.CTkToplevel(host, fg_color=theme.BG_CARD)
+        dialog = _SilentCTkToplevel(host, fg_color=theme.BG_CARD)
         dialog.withdraw()
+        DialogManager.hide_until_ready(dialog)
         # Título neutro de la barra del SO: el descriptivo ("Sin selección", etc.) vive
         # únicamente en la etiqueta en negrita del cuerpo.
         dialog.title("Sonometa")
@@ -1261,7 +1310,8 @@ class DialogManager:
             app.log_window.focus_force()
             return
 
-        app.log_window = ctk.CTkToplevel(app)
+        app.log_window = _SilentCTkToplevel(app)
+        DialogManager.hide_until_ready(app.log_window)
         app.log_window.title("Historial de Logs - Sonometa")
         app.log_window.geometry("750x480")
 

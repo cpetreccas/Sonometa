@@ -1,17 +1,18 @@
 import logging
 import threading
 import customtkinter as ctk
-from dialogs import DialogManager
+from dialogs import DialogManager, SilentTitlebarMixin
 import theme
 
 logger = logging.getLogger("Sonometa")
 
 
-class LoginDialog(ctk.CTkToplevel):
+class LoginDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     """Modal de inicio de sesión para Supabase Cloud siguiendo la estética Sonometa."""
 
     def __init__(self, parent, supabase_client, on_success_callback=None):
         super().__init__(parent)
+        DialogManager.hide_until_ready(self)
         self.app = parent
         self.supabase_client = supabase_client
         self.on_success_callback = on_success_callback

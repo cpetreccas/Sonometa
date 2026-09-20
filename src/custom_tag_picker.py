@@ -1,10 +1,10 @@
 import tkinter as tk
 import customtkinter as ctk
-from dialogs import DialogManager
+from dialogs import DialogManager, SilentTitlebarMixin
 import theme
 
 
-class CustomTagPicker(ctk.CTkToplevel):
+class CustomTagPicker(SilentTitlebarMixin, ctk.CTkToplevel):
     """Modal para la selección y gestión de etiquetas personalizadas (Custom Tags) con soporte multiselección."""
 
     def __init__(
@@ -23,6 +23,7 @@ class CustomTagPicker(ctk.CTkToplevel):
             **kwargs
     ):
         super().__init__(parent)
+        DialogManager.hide_until_ready(self)
         self.app = parent.app if hasattr(parent, "app") else parent
         self.on_save = on_save or on_apply
 
