@@ -4,6 +4,7 @@ import sys
 import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
+import theme
 
 class UiUtils:
     def __init__(self, widget, text):
@@ -47,9 +48,9 @@ class UiUtils:
         tw.wm_geometry(f"+{x}+{y}")
 
         label = tk.Label(tw, text=self.text, justify="left",
-                         background="#252526", foreground="#E0E0E0",
+                         background=theme.BG_CARD, foreground=theme.TEXT_MAIN,
                          relief="solid", borderwidth=1,
-                         font=("Segoe UI", 9))
+                         font=(theme.FONT_FAMILY, 9))
         label.pack(ipadx=5, ipady=3)
 
     @staticmethod

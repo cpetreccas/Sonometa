@@ -1,6 +1,7 @@
 import tkinter as tk
 import customtkinter as ctk
 from dialogs import DialogManager
+import theme
 
 
 class CustomMenuDropdown(ctk.CTkToplevel):
@@ -21,15 +22,15 @@ class CustomMenuDropdown(ctk.CTkToplevel):
         try:
             self.wm_attributes("-transparentcolor", transparent_key)
         except Exception:
-            self.configure(fg_color="#272727")
+            self.configure(fg_color=theme.BG_CARD_HOVER)
 
         # Contenedor principal con esquinas redondeadas y borde tenue estilo Fluent
         self.frame_border = ctk.CTkFrame(
             self,
-            fg_color="#272727",
-            border_color="#3A3A3A",
+            fg_color=theme.BG_CARD_HOVER,
+            border_color=theme.BORDER_FOCUS,
             border_width=1,
-            corner_radius=8
+            corner_radius=theme.RADIUS_CONTROL
         )
         self.frame_border.pack(fill="both", expand=True)
 
@@ -50,7 +51,7 @@ class CustomMenuDropdown(ctk.CTkToplevel):
                 sep_line = tk.Frame(
                     sep_container,
                     height=1,
-                    bg="#454545",
+                    bg=theme.BORDER_FOCUS,
                     bd=0,
                     highlightthickness=0
                 )
@@ -71,15 +72,15 @@ class CustomMenuDropdown(ctk.CTkToplevel):
                 item_frame.pack(fill="x", padx=4, pady=1)
                 item_frame.pack_propagate(False)
 
-                text_color = "#FFFFFF" if is_enabled else "#666666"
-                shortcut_color = "#999999" if is_enabled else "#555555"
+                text_color = theme.TEXT_MAIN if is_enabled else theme.TEXT_SUBTLE
+                shortcut_color = theme.TEXT_MUTED if is_enabled else theme.TEXT_SUBTLE
 
                 lbl_title = ctk.CTkLabel(
                     item_frame,
                     text=label_text,
                     anchor="w",
                     text_color=text_color,
-                    font=ctk.CTkFont(family="Segoe UI", size=12)
+                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12)
                 )
                 lbl_title.pack(side="left", padx=(10, 16), expand=True, fill="x")
 
@@ -90,12 +91,12 @@ class CustomMenuDropdown(ctk.CTkToplevel):
                         text=shortcut_text,
                         anchor="e",
                         text_color=shortcut_color,
-                        font=ctk.CTkFont(family="Segoe UI", size=11)
+                        font=ctk.CTkFont(family=theme.FONT_FAMILY, size=11)
                     )
                     lbl_shortcut.pack(side="right", padx=(0, 10))
 
                 if is_enabled:
-                    hover_bg = "#383838"
+                    hover_bg = theme.BG_CARD_HOVER
 
                     def _on_enter(e, f=item_frame):
                         f.configure(fg_color=hover_bg)
@@ -135,10 +136,10 @@ class CustomMenuDropdown(ctk.CTkToplevel):
                     checkbox_width=14,
                     checkbox_height=14,
                     border_width=1,
-                    fg_color=getattr(self.parent_panel.app, "CORP_COLOR", "#6B21A8"),
-                    hover_color=getattr(self.parent_panel.app, "CORP_HOVER", "#581C87"),
-                    text_color="#FFFFFF",
-                    font=ctk.CTkFont(family="Segoe UI", size=12),
+                    fg_color=getattr(self.parent_panel.app, "CORP_COLOR", theme.PRIMARY),
+                    hover_color=getattr(self.parent_panel.app, "CORP_HOVER", theme.PRIMARY_HOVER),
+                    text_color=theme.TEXT_MAIN,
+                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12),
                     command=lambda c=cmd: self._execute_command(c, keep_open=True)
                 )
                 chk.pack(side="left", padx=(8, 8), pady=5)
@@ -152,7 +153,7 @@ class CustomMenuDropdown(ctk.CTkToplevel):
 
 class ToolPanel(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
-        super().__init__(master, fg_color="#1E1E1E", height=28, corner_radius=0, **kwargs)
+        super().__init__(master, fg_color=theme.BG_CARD, height=28, corner_radius=0, **kwargs)
         self.pack_propagate(False)
 
         self.app = master
@@ -238,9 +239,9 @@ class ToolPanel(ctk.CTkFrame):
                 height=22,
                 corner_radius=4,
                 fg_color="transparent",
-                hover_color="#2A2D32",
-                text_color="#CCCCCC",
-                font=ctk.CTkFont(family="Segoe UI", size=12)
+                hover_color=theme.BG_CARD_HOVER,
+                text_color=theme.TEXT_MUTED,
+                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12)
             )
 
             btn.configure(command=lambda i=items, b=btn: self._on_button_click(i, b))
@@ -274,9 +275,9 @@ class ToolPanel(ctk.CTkFrame):
         self._destroy_active_dropdown()
 
         if self.active_button:
-            self.active_button.configure(fg_color="transparent", text_color="#CCCCCC")
+            self.active_button.configure(fg_color="transparent", text_color=theme.TEXT_MUTED)
 
-        button.configure(fg_color="#2A2D32", text_color="#FFFFFF")
+        button.configure(fg_color=theme.BG_CARD_HOVER, text_color=theme.TEXT_MAIN)
 
         self.active_button = button
         dropdown = CustomMenuDropdown(self, items)
@@ -344,5 +345,5 @@ class ToolPanel(ctk.CTkFrame):
         self._destroy_active_dropdown()
 
         if self.active_button:
-            self.active_button.configure(fg_color="transparent", text_color="#CCCCCC")
+            self.active_button.configure(fg_color="transparent", text_color=theme.TEXT_MUTED)
             self.active_button = None

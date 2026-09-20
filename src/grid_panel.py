@@ -11,6 +11,7 @@ from advanced_filter_panel import AdvancedFilterPanel
 from models import AdvancedFilterCriteria
 from tree_row_utils import build_column_index, get_row_value, set_row_value, map_row_values, build_row_values
 from ui_utils import UiUtils
+import theme
 
 
 class _CellEditSession:
@@ -379,24 +380,24 @@ class GridPanel:
 
         style.configure(
             self.tree_edit_combo_style,
-            fieldbackground="#181818",
-            background="#181818",
-            foreground="#E0E0E0",
-            selectbackground="#181818",
-            selectforeground="#E0E0E0",
-            arrowcolor="#181818",
+            fieldbackground=theme.BG_CARD,
+            background=theme.BG_CARD,
+            foreground=theme.TEXT_MAIN,
+            selectbackground=theme.BG_CARD,
+            selectforeground=theme.TEXT_MAIN,
+            arrowcolor=theme.BG_CARD,
             relief="flat",
             borderwidth=0,
             padding=(3, 2)
         )
         style.map(
             self.tree_edit_combo_style,
-            fieldbackground=[("readonly", "#181818"), ("focus", "#181818")],
-            background=[("readonly", "#181818"), ("focus", "#181818")],
-            foreground=[("readonly", "#E0E0E0"), ("focus", "#E0E0E0")],
-            selectbackground=[("readonly", "#181818"), ("focus", "#181818")],
-            selectforeground=[("readonly", "#E0E0E0"), ("focus", "#E0E0E0")],
-            arrowcolor=[("readonly", "#181818"), ("focus", "#181818")]
+            fieldbackground=[("readonly", theme.BG_CARD), ("focus", theme.BG_CARD)],
+            background=[("readonly", theme.BG_CARD), ("focus", theme.BG_CARD)],
+            foreground=[("readonly", theme.TEXT_MAIN), ("focus", theme.TEXT_MAIN)],
+            selectbackground=[("readonly", theme.BG_CARD), ("focus", theme.BG_CARD)],
+            selectforeground=[("readonly", theme.TEXT_MAIN), ("focus", theme.TEXT_MAIN)],
+            arrowcolor=[("readonly", theme.BG_CARD), ("focus", theme.BG_CARD)]
         )
 
         current_font_size = max(7, int(self.BASE_FONT_SIZE * self.zoom_level))
@@ -405,11 +406,11 @@ class GridPanel:
 
         style.configure(
             "Treeview",
-            background="#181818",
-            foreground="#E0E0E0",
-            fieldbackground="#181818",
+            background=theme.BG_CARD,
+            foreground=theme.TEXT_MAIN,
+            fieldbackground=theme.BG_CARD,
             rowheight=current_row_height,
-            font=('Segoe UI', current_font_size),
+            font=(theme.FONT_FAMILY, current_font_size),
             borderwidth=0,
             relief="flat"
         )
@@ -418,17 +419,17 @@ class GridPanel:
 
         style.configure(
             "Treeview.Heading",
-            background="#111111",
-            foreground="#D4D4D8",
-            font=('Segoe UI', current_heading_size, 'bold'),
+            background=theme.BG_MAIN,
+            foreground=theme.TEXT_MUTED,
+            font=(theme.FONT_FAMILY, current_heading_size, 'bold'),
             borderwidth=0,
             relief="flat",
             padding=(5, 5)
         )
 
-        selection_bg = getattr(self.app, "CORP_SELECTION", "#581C87")
+        selection_bg = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
         style.map("Treeview", background=[('selected', selection_bg)])
-        style.map("Treeview.Heading", background=[('active', '#2A2D32')])
+        style.map("Treeview.Heading", background=[('active', theme.BG_CARD_HOVER)])
 
     def set_zoom(self, factor):
         if self.cell_entry and self.cell_entry.winfo_exists():
@@ -495,8 +496,8 @@ class GridPanel:
                 stretch=cfg["stretch"]
             )
 
-        self.tree.tag_configure("even", background="#181818")
-        self.tree.tag_configure("odd", background="#1E1E1E")
+        self.tree.tag_configure("even", background=theme.BG_CARD)
+        self.tree.tag_configure("odd", background=theme.BG_CARD_HOVER)
 
         self.tree.bind("<ButtonPress-1>", self._on_header_press, add="+")
         self.tree.bind("<B1-Motion>", self._on_header_motion, add="+")
@@ -605,9 +606,9 @@ class GridPanel:
     def _setup_context_menu(self):
         self._tree_context_menu = tk.Menu(
             self.app, tearoff=0,
-            bg="#252526", fg="#FFFFFF",
-            activebackground=self.app.CORP_COLOR, activeforeground="#FFFFFF",
-            bd=1, relief="flat", font=('Segoe UI', 10)
+            bg=theme.BG_CARD, fg=theme.TEXT_MAIN,
+            activebackground=self.app.CORP_COLOR, activeforeground=theme.TEXT_MAIN,
+            bd=1, relief="flat", font=(theme.FONT_FAMILY, 10)
         )
         self._tree_context_menu.add_command(
             label="Procesar",
@@ -869,19 +870,19 @@ class GridPanel:
         style = ttk.Style()
         style.configure(
             "DarkGrid.TCombobox",
-            fieldbackground="#2B2B2B",
-            background="#3A3A3A",
-            foreground="#FFFFFF",
-            darkcolor="#2B2B2B",
-            lightcolor="#2B2B2B",
-            arrowcolor="#FFFFFF",
-            insertcolor="#FFFFFF"
+            fieldbackground=theme.BG_INPUT,
+            background=theme.BG_CARD_HOVER,
+            foreground=theme.TEXT_MAIN,
+            darkcolor=theme.BG_INPUT,
+            lightcolor=theme.BG_INPUT,
+            arrowcolor=theme.TEXT_MAIN,
+            insertcolor=theme.TEXT_MAIN
         )
         style.map(
             "DarkGrid.TCombobox",
-            fieldbackground=[("readonly", "#2B2B2B")],
-            selectbackground=[("readonly", "#7B2CBF")],
-            selectforeground=[("readonly", "#FFFFFF")]
+            fieldbackground=[("readonly", theme.BG_INPUT)],
+            selectbackground=[("readonly", theme.PRIMARY)],
+            selectforeground=[("readonly", theme.TEXT_MAIN)]
         )
 
         allowed_values_for_validation = None
@@ -917,21 +918,21 @@ class GridPanel:
                 exportselection=False
             )
 
-            self.app.option_add("*TCombobox*Listbox.background", "#2B2B2B")
-            self.app.option_add("*TCombobox*Listbox.foreground", "#FFFFFF")
-            self.app.option_add("*TCombobox*Listbox.selectBackground", "#7B2CBF")
-            self.app.option_add("*TCombobox*Listbox.selectForeground", "#FFFFFF")
+            self.app.option_add("*TCombobox*Listbox.background", theme.BG_INPUT)
+            self.app.option_add("*TCombobox*Listbox.foreground", theme.TEXT_MAIN)
+            self.app.option_add("*TCombobox*Listbox.selectBackground", theme.PRIMARY)
+            self.app.option_add("*TCombobox*Listbox.selectForeground", theme.TEXT_MAIN)
         else:
             entry = tk.Entry(
                 self.tree,
-                bg="#2B2B2B",
-                fg="#FFFFFF",
-                insertbackground="#FFFFFF",
+                bg=theme.BG_INPUT,
+                fg=theme.TEXT_MAIN,
+                insertbackground=theme.TEXT_MAIN,
                 relief="solid",
                 borderwidth=1,
                 highlightthickness=1,
-                highlightbackground="#7B2CBF",
-                highlightcolor="#7B2CBF"
+                highlightbackground=theme.PRIMARY,
+                highlightcolor=theme.PRIMARY
             )
 
         entry._is_cell_editing = True
@@ -1691,10 +1692,10 @@ class GridPanel:
     def _show_header_context_menu(self, event):
         header_menu = tk.Menu(
             self.app, tearoff=0,
-            bg="#252526", fg="#FFFFFF",
-            activebackground=self.app.CORP_COLOR, activeforeground="#FFFFFF",
-            selectcolor="#7B2CBF",
-            bd=1, relief="flat", font=('Segoe UI', 10)
+            bg=theme.BG_CARD, fg=theme.TEXT_MAIN,
+            activebackground=self.app.CORP_COLOR, activeforeground=theme.TEXT_MAIN,
+            selectcolor=theme.PRIMARY,
+            bd=1, relief="flat", font=(theme.FONT_FAMILY, 10)
         )
 
         col_titles = dict(self.col_titles)

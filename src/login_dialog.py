@@ -2,6 +2,7 @@ import logging
 import threading
 import customtkinter as ctk
 from dialogs import DialogManager
+import theme
 
 logger = logging.getLogger("Sonometa")
 
@@ -37,10 +38,10 @@ class LoginDialog(ctk.CTkToplevel):
             self.entry_email.focus_force()
 
     def _setup_ui(self):
-        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(self.app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
 
-        main_frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
+        main_frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD)
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
         # Header / Título
@@ -48,20 +49,20 @@ class LoginDialog(ctk.CTkToplevel):
             main_frame,
             text="☁️ Sonometa Cloud",
             font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="#F3F4F6",
+            text_color=theme.TEXT_MAIN,
         )
         lbl_title.pack(anchor="w", padx=5, pady=(5, 2))
 
         lbl_sub = ctk.CTkLabel(
             main_frame,
             text="Inicia sesión para sincronizar tus metadatos.",
-            text_color="#9CA3AF",
+            text_color=theme.TEXT_MUTED,
             font=ctk.CTkFont(size=12),
         )
         lbl_sub.pack(anchor="w", padx=5, pady=(0, 20))
 
         # Formulario
-        form_frame = ctk.CTkFrame(main_frame, fg_color="#262626", corner_radius=8)
+        form_frame = ctk.CTkFrame(main_frame, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
         form_frame.pack(fill="x", pady=(0, 15), padx=5, ipady=10)
 
         # Email
@@ -69,7 +70,7 @@ class LoginDialog(ctk.CTkToplevel):
             form_frame,
             text="Correo electrónico:",
             font=ctk.CTkFont(weight="bold"),
-            text_color="#E5E7EB",
+            text_color=theme.TEXT_MAIN,
         )
         lbl_email.pack(anchor="w", padx=15, pady=(10, 2))
 
@@ -77,8 +78,8 @@ class LoginDialog(ctk.CTkToplevel):
             form_frame,
             placeholder_text="tu@email.com",
             height=36,
-            fg_color="#181818",
-            border_color="#333333",
+            fg_color=theme.BG_INPUT,
+            border_color=theme.BORDER_FOCUS,
         )
         self.entry_email.pack(fill="x", padx=15, pady=(0, 10))
 
@@ -87,7 +88,7 @@ class LoginDialog(ctk.CTkToplevel):
             form_frame,
             text="Contraseña:",
             font=ctk.CTkFont(weight="bold"),
-            text_color="#E5E7EB",
+            text_color=theme.TEXT_MAIN,
         )
         lbl_password.pack(anchor="w", padx=15, pady=(0, 2))
 
@@ -96,8 +97,8 @@ class LoginDialog(ctk.CTkToplevel):
             placeholder_text="••••••••",
             show="•",
             height=36,
-            fg_color="#181818",
-            border_color="#333333",
+            fg_color=theme.BG_INPUT,
+            border_color=theme.BORDER_FOCUS,
         )
         self.entry_password.pack(fill="x", padx=15, pady=(0, 5))
 
@@ -106,7 +107,7 @@ class LoginDialog(ctk.CTkToplevel):
             main_frame,
             text="",
             font=ctk.CTkFont(size=11),
-            text_color="#EF4444",
+            text_color=theme.STATUS_DANGER,
             wraplength=360,
         )
         self.lbl_status.pack(fill="x", pady=(0, 10))
@@ -131,9 +132,9 @@ class LoginDialog(ctk.CTkToplevel):
             text="Cancelar",
             fg_color="transparent",
             border_width=1,
-            border_color="#6B7280",
-            text_color="#E5E7EB",
-            hover_color="#374151",
+            border_color=theme.BORDER_QUIET,
+            text_color=theme.TEXT_MAIN,
+            hover_color=theme.BG_CARD_HOVER,
             height=36,
             command=self.destroy,
         )
@@ -149,13 +150,13 @@ class LoginDialog(ctk.CTkToplevel):
 
         if not email or not password:
             self.lbl_status.configure(
-                text="Por favor, rellena todos los campos.", text_color="#EF4444"
+                text="Por favor, rellena todos los campos.", text_color=theme.STATUS_DANGER
             )
             return
 
         # Deshabilitar botón y mostrar estado sin bloquear la ventana
         self.btn_login.configure(state="disabled", text="Autenticando...")
-        self.lbl_status.configure(text="Conectando con Supabase...", text_color="#3B82F6")
+        self.lbl_status.configure(text="Conectando con Supabase...", text_color=theme.PRIMARY_LIGHT)
 
         # Ejecutar autenticación en background para no bloquear el hilo Tk
         threading.Thread(
@@ -203,11 +204,11 @@ class LoginDialog(ctk.CTkToplevel):
         """Callback ejecutado en el hilo UI al finalizar la autenticación."""
         if success:
             self.lbl_status.configure(
-                text="¡Sesión iniciada correctamente!", text_color="#22C55E"
+                text="¡Sesión iniciada correctamente!", text_color=theme.STATUS_SUCCESS
             )
             self.after(400, self._on_success)
         else:
             self.lbl_status.configure(
-                text=f"Error: {message}", text_color="#EF4444"
+                text=f"Error: {message}", text_color=theme.STATUS_DANGER
             )
             self.btn_login.configure(state="normal", text="Iniciar Sesión")

@@ -11,12 +11,13 @@ from ui_utils import UiUtils
 from undo_manager import HistoryAction
 from audio_player import AudioPlayer
 from log_handler import LogManager
+import theme
 
 
 class DetailPanel:
     """Panel lateral de metadatos y carátula desacoplado de la ventana principal."""
 
-    BORDER_DEFAULT = "#3F3F46"  # Borde fino sutil para cajas en reposo
+    BORDER_DEFAULT = theme.BORDER_FOCUS  # Borde fino sutil para cajas en reposo
 
     def __init__(self, app, parent, logger, get_resource_path, fallback_process_icon=None):
         self.app = app
@@ -81,13 +82,13 @@ class DetailPanel:
         self._entry_context_menu = tk.Menu(
             self.app,
             tearoff=0,
-            bg="#2B2B2B",
-            fg="#FFFFFF",
+            bg=theme.BG_INPUT,
+            fg=theme.TEXT_MAIN,
             activebackground=self.app.CORP_COLOR,
-            activeforeground="#FFFFFF",
+            activeforeground=theme.TEXT_MAIN,
             bd=1,
             relief="solid",
-            font=("Segoe UI", 9)
+            font=(theme.FONT_FAMILY, 9)
         )
         self._entry_context_menu.add_command(label="Cortar", command=lambda: self._entry_action("cut"))
         self._entry_context_menu.add_command(label="Copiar", command=lambda: self._entry_action("copy"))
@@ -161,10 +162,10 @@ class DetailPanel:
             pass
 
     def _on_widget_focus_out(self, widget, attr_name=None, is_combo=False, event=None):
-        """Restaura el borde original (#3F3F46) al perder el foco y procesa cambios."""
+        """Restaura el borde original al perder el foco y procesa cambios."""
         try:
             if widget == self.btn_clean:
-                widget.configure(border_color="#DC2626", border_width=1)
+                widget.configure(border_color=theme.STATUS_DANGER, border_width=1)
             elif widget == self.btn_process:
                 widget.configure(border_color=self.app.CORP_COLOR, border_width=1)
             else:
@@ -234,13 +235,13 @@ class DetailPanel:
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
 
         menu_style = {
-            "bg": "#2B2B2B",
-            "fg": "#FFFFFF",
+            "bg": theme.BG_INPUT,
+            "fg": theme.TEXT_MAIN,
             "activebackground": self.app.CORP_COLOR,
-            "activeforeground": "#FFFFFF",
+            "activeforeground": theme.TEXT_MAIN,
             "bd": 1,
             "relief": "solid",
-            "font": ("Segoe UI", 9)
+            "font": (theme.FONT_FAMILY, 9)
         }
 
         self._cover_context_menu = tk.Menu(self.app, tearoff=0, **menu_style)
@@ -298,7 +299,7 @@ class DetailPanel:
                 self.frame_sidebar,
                 text=label_text,
                 anchor="w",
-                font=ctk.CTkFont(family="Inter", size=11, weight="bold")
+                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=11, weight="bold")
             )
             lbl.pack(fill="x", padx=10, pady=(top_pad, 1))
 
@@ -314,7 +315,7 @@ class DetailPanel:
                     height=26,
                     border_width=1,
                     border_color=self.BORDER_DEFAULT,
-                    font=ctk.CTkFont(family="Inter", size=12),
+                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12),
                     command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
                 )
                 widget.set("")
@@ -336,7 +337,7 @@ class DetailPanel:
                     height=26,
                     border_width=1,
                     border_color=self.BORDER_DEFAULT,
-                    font=ctk.CTkFont(family="Inter", size=12)
+                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12)
                 )
                 widget.bind("<FocusIn>", lambda _e, _w=widget: self._on_widget_focus_in(_w))
                 widget.bind("<FocusOut>", lambda _e, _w=widget, _a=attr_name: self._on_widget_focus_out(_w, _a, is_combo=False))
@@ -409,8 +410,8 @@ class DetailPanel:
             width=150,
             height=150,
             fg_color="transparent",
-            text_color="gray",
-            border_color="#6B7280",
+            text_color=theme.TEXT_SUBTLE,
+            border_color=theme.BORDER_FOCUS,
             border_width=1,
             cursor="hand2"
         )
@@ -433,7 +434,7 @@ class DetailPanel:
             width=30,
             height=26,
             fg_color=self.app.CORP_COLOR,
-            hover_color="#581C87",
+            hover_color=self.app.CORP_HOVER,
             font=ctk.CTkFont(size=13, weight="bold"),
             command=lambda: self.audio_player.toggle_play_pause() if self.audio_player else None
         )
@@ -445,8 +446,8 @@ class DetailPanel:
             to=1,
             height=12,
             progress_color=self.app.CORP_COLOR,
-            button_color="#FFFFFF",
-            button_hover_color="#E0E0E0",
+            button_color=theme.TEXT_MAIN,
+            button_hover_color=theme.PRIMARY_LIGHT,
             command=lambda val: self.audio_player.on_seek_end(val) if self.audio_player else None
         )
         self.slider_audio.set(0)
@@ -456,7 +457,7 @@ class DetailPanel:
             self.frame_player,
             text="00:00 / 00:00",
             font=ctk.CTkFont(size=10),
-            text_color="gray"
+            text_color=theme.TEXT_SUBTLE
         )
         self.lbl_audio_time.pack(fill="x", pady=(2, 0))
 
@@ -470,7 +471,7 @@ class DetailPanel:
             image=self.icono_procesar or self.app.process_icon,
             compound="left",
             fg_color=self.app.CORP_COLOR,
-            hover_color="#6D28D9",
+            hover_color=self.app.CORP_HOVER,
             border_width=2,
             border_color=self.app.CORP_COLOR,
             font=ctk.CTkFont(size=13, weight="bold"),
@@ -491,11 +492,11 @@ class DetailPanel:
             image=self.app.broom_icon,
             compound="left",
             fg_color="transparent",
-            border_color="#DC2626",
+            border_color=theme.STATUS_DANGER,
             border_width=1,
-            text_color="#FFFFFF",
-            hover_color=("#FEE2E2", "#450A0A"),
-            corner_radius=8,
+            text_color=theme.TEXT_MAIN,
+            hover_color=theme.STATUS_DANGER_HOVER,
+            corner_radius=theme.RADIUS_CONTROL,
             font=ctk.CTkFont(size=13, weight="bold"),
             height=30,
             command=lambda: self.app.process_manager.clear_selected_metadata()
@@ -582,7 +583,7 @@ class DetailPanel:
     def _set_btn_hover(self, btn, is_hover):
         """Aplica visualmente el borde blanco al pasar el ratón por encima."""
         if is_hover:
-            btn.configure(border_color="#FFFFFF", border_width=2)
+            btn.configure(border_color=theme.TEXT_MAIN, border_width=2)
         else:
             btn.configure(border_color=self.app.CORP_COLOR, border_width=2)
 
@@ -616,7 +617,7 @@ class DetailPanel:
     def enter_multi_mode(self, selected_rows):
         if self.audio_player:
             self.audio_player.stop_and_unload()
-            self.btn_play.configure(state="disabled", fg_color="gray")
+            self.btn_play.configure(state="disabled", fg_color=theme.BORDER_FOCUS)
             self.slider_audio.configure(state="disabled")
             self.lbl_audio_time.configure(text="Multiedición activa")
 
@@ -767,7 +768,7 @@ class DetailPanel:
         has_any_cover = any(self.app.grid_panel.row_has_cover(row_id) for row_id in selected_rows)
         text = "Mantener carátulas" if has_any_cover else "Sin carátula"
         self._current_raw_cover_pil = None
-        self.label_cover.configure(image="", text=text, text_color="gray")
+        self.label_cover.configure(image="", text=text, text_color=theme.TEXT_SUBTLE)
         self.label_cover.image = None
 
     def refresh_process_button_text(self, selected_count=None):

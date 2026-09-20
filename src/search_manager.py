@@ -1,6 +1,7 @@
 import tkinter as tk
 import customtkinter as ctk
 import unicodedata
+import theme
 
 def remove_accents(text: str) -> str:
     """Normaliza y elimina tildes/diacríticos de una cadena de texto."""
@@ -51,8 +52,8 @@ class SearchManager:
             text="X",
             width=32,
             height=30,
-            fg_color="#374151",
-            hover_color="#1F2937",
+            fg_color=theme.BG_CARD_HOVER,
+            hover_color=theme.BORDER_FOCUS,
             command=self.hide_search_bar
         )
         self.btn_close_search.pack(side="right", padx=(0, 10), pady=6)

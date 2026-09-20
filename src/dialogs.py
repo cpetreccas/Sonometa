@@ -12,6 +12,7 @@ from PIL import Image
 from catalog_manager import CatalogManager
 from ui_utils import UiUtils
 import customtkinter as ctk
+import theme
 
 
 class ReplaceFilenameDialog(ctk.CTkToplevel):
@@ -52,34 +53,34 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
             self.entry_search.focus_force()
 
     def _setup_ui(self):
-        main_frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
+        main_frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD)
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
-        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(self.app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
 
         # Título y Descripción
         lbl_title = ctk.CTkLabel(
             main_frame,
             text="Buscar y Reemplazar en Filename",
             font=ctk.CTkFont(size=18, weight="bold"),
-            text_color="#F3F4F6"
+            text_color=theme.TEXT_MAIN
         )
         lbl_title.pack(anchor="w", padx=5, pady=(0, 2))
 
         lbl_sub = ctk.CTkLabel(
             main_frame,
             text=f"Analizando {len(self.target_items)} archivo(s) seleccionado(s).",
-            text_color="#9CA3AF"
+            text_color=theme.TEXT_MUTED
         )
         lbl_sub.pack(anchor="w", padx=5, pady=(0, 10))
 
         # Inputs de Búsqueda y Reemplazo
-        inputs_frame = ctk.CTkFrame(main_frame, fg_color="#262626", corner_radius=8)
+        inputs_frame = ctk.CTkFrame(main_frame, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
         inputs_frame.pack(fill="x", pady=(0, 10), padx=5, ipady=5)
 
         # Buscar
-        lbl_search = ctk.CTkLabel(inputs_frame, text="Buscar:", font=ctk.CTkFont(weight="bold"), text_color="#E5E7EB")
+        lbl_search = ctk.CTkLabel(inputs_frame, text="Buscar:", font=ctk.CTkFont(weight="bold"), text_color=theme.TEXT_MAIN)
         lbl_search.grid(row=0, column=0, padx=10, pady=8, sticky="w")
 
         self.search_var = ctk.StringVar()
@@ -94,7 +95,7 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
         self.entry_search.grid(row=0, column=1, columnspan=2, padx=10, pady=8, sticky="ew")
 
         # Reemplazar por
-        lbl_replace = ctk.CTkLabel(inputs_frame, text="Reemplazar por:", font=ctk.CTkFont(weight="bold"), text_color="#E5E7EB")
+        lbl_replace = ctk.CTkLabel(inputs_frame, text="Reemplazar por:", font=ctk.CTkFont(weight="bold"), text_color=theme.TEXT_MAIN)
         lbl_replace.grid(row=1, column=0, padx=10, pady=(0, 8), sticky="w")
 
         self.entry_replace = ctk.CTkEntry(inputs_frame, placeholder_text="Nuevo texto...", width=320)
@@ -119,11 +120,11 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
             main_frame,
             text="Coincidencias encontradas:",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#D1D5DB"
+            text_color=theme.TEXT_MUTED
         )
         lbl_matches_header.pack(anchor="w", padx=5, pady=(4, 4))
 
-        list_container = ctk.CTkFrame(main_frame, fg_color="#181818", corner_radius=8)
+        list_container = ctk.CTkFrame(main_frame, fg_color=theme.BG_INPUT, corner_radius=theme.RADIUS_CONTROL)
         list_container.pack(fill="both", expand=True, padx=5, pady=(0, 10))
 
         # Scrollbar y Listbox para selección de items sin aspecto de editor de texto ni cursor parpadeante
@@ -132,10 +133,10 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
 
         self.matches_listbox = tk.Listbox(
             list_container,
-            bg="#181818",
-            fg="#E5E7EB",
+            bg=theme.BG_INPUT,
+            fg=theme.TEXT_MAIN,
             selectbackground=corp_color,
-            selectforeground="#FFFFFF",
+            selectforeground=theme.TEXT_MAIN,
             font=("Consolas", 11),
             borderwidth=0,
             highlightthickness=0,
@@ -177,9 +178,9 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
             text="Cerrar",
             fg_color="transparent",
             border_width=1,
-            border_color="#6B7280",
-            text_color="#E5E7EB",
-            hover_color="#374151",
+            border_color=theme.BORDER_QUIET,
+            text_color=theme.TEXT_MAIN,
+            hover_color=theme.BG_CARD_HOVER,
             command=self.destroy
         )
         btn_close.pack(side="right")
@@ -229,17 +230,17 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
     def _update_buttons_state(self):
         has_matches = len(self.matches) > 0
         has_selection = len(self.matches_listbox.curselection()) > 0 and has_matches
-        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
+        corp_color = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
 
         if has_matches:
             self.btn_replace_all.configure(state="normal", fg_color=corp_color)
         else:
-            self.btn_replace_all.configure(state="disabled", fg_color="#374151")
+            self.btn_replace_all.configure(state="disabled", fg_color=theme.BG_CARD_HOVER)
 
         if has_selection:
             self.btn_replace_single.configure(state="normal", fg_color=corp_color)
         else:
-            self.btn_replace_single.configure(state="disabled", fg_color="#374151")
+            self.btn_replace_single.configure(state="disabled", fg_color=theme.BG_CARD_HOVER)
 
     def _replace_single_match(self):
         selected_indices = self.matches_listbox.curselection()
@@ -347,28 +348,28 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
 
     def _setup_ui(self):
-        main_frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
+        main_frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD)
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
         lbl_title = ctk.CTkLabel(
             main_frame,
             text="Revisión de Carátulas Encontradas",
             font=ctk.CTkFont(size=18, weight="bold"),
-            text_color="#F3F4F6"
+            text_color=theme.TEXT_MAIN
         )
         lbl_title.pack(anchor="w", padx=5, pady=(0, 2))
 
         lbl_subtitle = ctk.CTkLabel(
             main_frame,
             text=f"Revisando {len(self.pending_reviews)} elemento(s). Haz clic directamente sobre la portada deseada para seleccionarla.",
-            text_color="#9CA3AF"
+            text_color=theme.TEXT_MUTED
         )
         lbl_subtitle.pack(anchor="w", padx=5, pady=(0, 8))
 
-        self.scroll_frame = ctk.CTkScrollableFrame(main_frame, fg_color="#181818")
+        self.scroll_frame = ctk.CTkScrollableFrame(main_frame, fg_color=theme.BG_INPUT)
         self.scroll_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
+        corp_color = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
 
         def _forward_scroll(event):
             if sys.platform == "darwin":
@@ -398,7 +399,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
 
             self.cards_ui[row_id] = {}
 
-            card = ctk.CTkFrame(self.scroll_frame, fg_color="#262626", corner_radius=8)
+            card = ctk.CTkFrame(self.scroll_frame, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
             card.pack(fill="x", pady=6, padx=6, ipady=4)
 
             # Cabecera del item: Título y Toggle Box al lado
@@ -410,7 +411,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                 text=f"🎵 {filename}",
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
-                text_color="#E5E7EB"
+                text_color=theme.TEXT_MAIN
             )
             lbl_file.pack(side="left", fill="x", expand=True)
 
@@ -441,10 +442,10 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                     covers_container,
                     width=130,
                     height=155,
-                    fg_color=corp_color if is_selected else "#1E1E1E",
+                    fg_color=corp_color if is_selected else theme.BG_CARD,
                     border_color=corp_color,
                     border_width=2 if is_selected else 0,
-                    corner_radius=8,
+                    corner_radius=theme.RADIUS_CONTROL,
                     cursor="hand2"
                 )
                 col_frame.pack(side="left", padx=4, pady=2)
@@ -455,7 +456,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                     text="Cargando...",
                     width=115,
                     height=115,
-                    fg_color="#141414",
+                    fg_color=theme.BG_MAIN,
                     corner_radius=6,
                     cursor="hand2"
                 )
@@ -466,7 +467,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                     col_frame,
                     text=f"Opción #{img_idx + 1}",
                     font=ctk.CTkFont(size=10, weight="bold" if is_selected else "normal"),
-                    text_color="#FFFFFF" if is_selected else "#9CA3AF",
+                    text_color=theme.TEXT_MAIN if is_selected else theme.TEXT_MUTED,
                     cursor="hand2"
                 )
                 lbl_num.pack(padx=4, pady=(0, 3))
@@ -497,9 +498,9 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
             image=process_icon,
             compound="left",
             state="disabled",
-            text_color="#9CA3AF",
-            fg_color=getattr(self.app, "CORP_COLOR", "#6B21A8"),
-            hover_color=getattr(self.app, "CORP_HOVER", "#581C87"),
+            text_color=theme.TEXT_MUTED,
+            fg_color=getattr(self.app, "CORP_COLOR", theme.PRIMARY),
+            hover_color=getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER),
             command=self._on_confirm
         )
         self.btn_confirm.pack(side="right", padx=(8, 0))
@@ -509,9 +510,9 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
             text="Omitir Todas",
             fg_color="transparent",
             border_width=1,
-            border_color="#EF4444",
-            text_color="#EF4444",
-            hover_color="#7F1D1D",
+            border_color=theme.STATUS_DANGER,
+            text_color=theme.STATUS_DANGER,
+            hover_color=theme.STATUS_DANGER_HOVER,
             command=self._on_cancel
         )
         self.btn_omit.pack(side="right")
@@ -525,8 +526,8 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
                 lbl_num = ui_item["lbl_num"]
                 img_label = ui_item["img_label"]
 
-                frame.configure(fg_color="#181818", border_width=0, cursor="arrow")
-                lbl_num.configure(text_color="#4B5563", font=ctk.CTkFont(size=10, weight="normal"), cursor="arrow")
+                frame.configure(fg_color=theme.BG_INPUT, border_width=0, cursor="arrow")
+                lbl_num.configure(text_color=theme.TEXT_SUBTLE, font=ctk.CTkFont(size=10, weight="normal"), cursor="arrow")
                 img_label.configure(cursor="arrow")
         else:
             first_url = list(self.cards_ui[row_id].keys())[0] if self.cards_ui[row_id] else None
@@ -543,7 +544,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
             return
 
         self.selections[row_id] = selected_url
-        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
+        corp_color = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
 
         for url, ui_item in self.cards_ui[row_id].items():
             frame = ui_item["frame"]
@@ -551,10 +552,10 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
 
             if url == selected_url:
                 frame.configure(fg_color=corp_color, border_width=2)
-                lbl_num.configure(text_color="#FFFFFF", font=ctk.CTkFont(size=10, weight="bold"))
+                lbl_num.configure(text_color=theme.TEXT_MAIN, font=ctk.CTkFont(size=10, weight="bold"))
             else:
-                frame.configure(fg_color="#1E1E1E", border_width=0)
-                lbl_num.configure(text_color="#9CA3AF", font=ctk.CTkFont(size=10, weight="normal"))
+                frame.configure(fg_color=theme.BG_CARD, border_width=0)
+                lbl_num.configure(text_color=theme.TEXT_MUTED, font=ctk.CTkFont(size=10, weight="normal"))
 
     def _on_card_hover(self, row_id, url, is_hovering):
         if self.no_cover_vars[row_id].get() or self.selections.get(row_id) == url:
@@ -566,9 +567,9 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
 
         frame = ui_item["frame"]
         if is_hovering:
-            frame.configure(fg_color="#333333")
+            frame.configure(fg_color=theme.BORDER_FOCUS)
         else:
-            frame.configure(fg_color="#1E1E1E")
+            frame.configure(fg_color=theme.BG_CARD)
 
     def _load_images_async(self):
         def _worker():
@@ -642,7 +643,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
             self.btn_confirm.configure(
                 state="normal",
                 text="Confirmar Selección",
-                text_color="#FFFFFF",
+                text_color=theme.TEXT_MAIN,
                 image=process_icon,
                 compound="left"
             )
@@ -718,7 +719,7 @@ class ProgressDialog(ctk.CTkToplevel):
             self._ui_pump_after_id = None
 
     def _setup_ui(self, title_text, message):
-        frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
+        frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD)
         frame.pack(fill="both", expand=True, padx=14, pady=14)
 
         self.lbl_title = ctk.CTkLabel(
@@ -726,7 +727,7 @@ class ProgressDialog(ctk.CTkToplevel):
             text=title_text,
             anchor="w",
             font=ctk.CTkFont(size=15, weight="bold"),
-            text_color="#F3F4F6"
+            text_color=theme.TEXT_MAIN
         )
         self.lbl_title.pack(fill="x", pady=(0, 2))
 
@@ -735,11 +736,11 @@ class ProgressDialog(ctk.CTkToplevel):
             text=message,
             anchor="w",
             justify="left",
-            text_color="#D1D5DB"
+            text_color=theme.TEXT_MUTED
         )
         self.lbl_message.pack(fill="x", pady=(0, 10))
 
-        self.progress = ctk.CTkProgressBar(frame, progress_color=getattr(self.app, "CORP_COLOR", "#6B21A8"))
+        self.progress = ctk.CTkProgressBar(frame, progress_color=getattr(self.app, "CORP_COLOR", theme.PRIMARY))
         self.progress.pack(fill="x", pady=(0, 8))
         self.progress.set(0)
 
@@ -747,7 +748,7 @@ class ProgressDialog(ctk.CTkToplevel):
             frame,
             text="Procesando 0 / 0 canciones...",
             anchor="w",
-            text_color="#9CA3AF",
+            text_color=theme.TEXT_MUTED,
             font=ctk.CTkFont(size=11)
         )
         self.lbl_counter.pack(fill="x")
@@ -980,7 +981,7 @@ class DialogManager:
         DialogManager.center_popup_on_parent(dialog, host, width=460, height=210)
         DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=host)
 
-        frame = ctk.CTkFrame(dialog, fg_color="#1E1E1E")
+        frame = ctk.CTkFrame(dialog, fg_color=theme.BG_CARD)
         frame.pack(fill="both", expand=True, padx=12, pady=12)
 
         icon_text = "!" if level == "warning" else ("x" if level == "error" else "i")
@@ -992,8 +993,8 @@ class DialogManager:
             height=26,
             corner_radius=13,
             fg_color=app.CORP_COLOR,
-            text_color="white",
-            font=ctk.CTkFont(family="Inter", size=13, weight="bold")
+            text_color=theme.TEXT_MAIN,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=13, weight="bold")
         )
         lbl_icon.pack(anchor="w", pady=(2, 8))
 
@@ -1003,7 +1004,7 @@ class DialogManager:
             justify="left",
             anchor="w",
             wraplength=420,
-            text_color="#E5E7EB"
+            text_color=theme.TEXT_MAIN
         )
         lbl_msg.pack(fill="x", pady=(0, 12))
 
@@ -1022,7 +1023,7 @@ class DialogManager:
         if is_confirm:
             ctk.CTkButton(
                 btns, text="Cancelar", command=cancel,
-                fg_color="#374151", hover_color="#1F2937"
+                fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS
             ).pack(side="right", padx=(6, 0))
 
         btn_ok = ctk.CTkButton(
@@ -1044,7 +1045,7 @@ class DialogManager:
         """Muestra el diálogo modal de 'Acerca de' estilizado con el logo oficial respetando su aspecto original."""
         dialog = DialogManager._new_modal(app, "Acerca de Sonometa", 460, 300)
 
-        main_frame = ctk.CTkFrame(dialog, fg_color="#1E1E1E")
+        main_frame = ctk.CTkFrame(dialog, fg_color=theme.BG_CARD)
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
         # --- CARGA DEL LOGO (Mantenimiento de Aspect Ratio) ---
@@ -1078,7 +1079,7 @@ class DialogManager:
                 main_frame,
                 text="🎵 SONOMETA",
                 font=ctk.CTkFont(size=22, weight="bold"),
-                text_color="#F3F4F6"
+                text_color=theme.TEXT_MAIN
             )
             lbl_logo.pack(pady=(12, 10))
 
@@ -1087,7 +1088,7 @@ class DialogManager:
             main_frame,
             text="Audio Tag Suite & Metadata Automation",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#9CA3AF"
+            text_color=theme.TEXT_MUTED
         )
         lbl_subtitle.pack(pady=(0, 12))
 
@@ -1104,13 +1105,13 @@ class DialogManager:
             justify="center",
             wraplength=400,
             font=ctk.CTkFont(size=11),
-            text_color="#D1D5DB"
+            text_color=theme.TEXT_MUTED
         )
         lbl_desc.pack(fill="x", pady=(0, 18))
 
         # --- BOTÓN DE CIERRE ---
-        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(app, "CORP_HOVER", theme.PRIMARY_HOVER)
 
         btn_close = ctk.CTkButton(
             main_frame,
@@ -1216,12 +1217,12 @@ class DialogManager:
             top_frame,
             text="Filtrar nivel:",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#E5E7EB"
+            text_color=theme.TEXT_MAIN
         )
         lbl_filter.pack(side="left", padx=(5, 8))
 
-        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(app, "CORP_HOVER", theme.PRIMARY_HOVER)
 
         if not hasattr(app, "log_filter_var"):
             app.log_filter_var = tk.StringVar(value="TODOS")
@@ -1232,9 +1233,9 @@ class DialogManager:
             variable=app.log_filter_var,
             selected_color=corp_color,
             selected_hover_color=corp_hover,
-            unselected_color="#262626",
-            unselected_hover_color="#333333",
-            text_color="#FFFFFF",
+            unselected_color=theme.BG_CARD_HOVER,
+            unselected_hover_color=theme.BORDER_FOCUS,
+            text_color=theme.TEXT_MAIN,
             command=lambda selected: DialogManager._filter_and_render_logs(app)
         )
         seg_filter.pack(side="left")
@@ -1244,8 +1245,8 @@ class DialogManager:
             top_frame,
             text="Copiar",
             width=70,
-            fg_color="#374151",
-            hover_color="#1F2937",
+            fg_color=theme.BG_CARD_HOVER,
+            hover_color=theme.BORDER_FOCUS,
             command=lambda: DialogManager._copy_logs_to_clipboard(app)
         )
         btn_copy.pack(side="right", padx=(5, 0))
@@ -1254,8 +1255,8 @@ class DialogManager:
             top_frame,
             text="Exportar .txt",
             width=90,
-            fg_color="#374151",
-            hover_color="#1F2937",
+            fg_color=theme.BG_CARD_HOVER,
+            hover_color=theme.BORDER_FOCUS,
             command=lambda: DialogManager._export_logs_to_file(app)
         )
         btn_export.pack(side="right", padx=(5, 0))
@@ -1266,10 +1267,10 @@ class DialogManager:
 
         # Configuración de tags de formato de texto (sin negrita)
         raw_textbox = app.log_textbox._textbox
-        raw_textbox.tag_config("lvl_info", foreground="#22C55E", font=("Consolas", 11))      # Verde
-        raw_textbox.tag_config("lvl_warning", foreground="#EAB308", font=("Consolas", 11))   # Amarillo
-        raw_textbox.tag_config("lvl_error", foreground="#EF4444", font=("Consolas", 11))     # Rojo
-        raw_textbox.tag_config("lvl_purple", foreground="#A855F7", font=("Consolas", 11))    # Morado
+        raw_textbox.tag_config("lvl_info", foreground=theme.STATUS_SUCCESS, font=("Consolas", 11))      # Verde
+        raw_textbox.tag_config("lvl_warning", foreground=theme.STATUS_WARNING, font=("Consolas", 11))   # Amarillo
+        raw_textbox.tag_config("lvl_error", foreground=theme.STATUS_DANGER, font=("Consolas", 11))     # Rojo
+        raw_textbox.tag_config("lvl_purple", foreground=theme.PRIMARY, font=("Consolas", 11))    # Morado
 
         # Renderizar historial de logs actual
         DialogManager._filter_and_render_logs(app)
@@ -1286,11 +1287,11 @@ class DialogManager:
             image=broom_icon,
             compound="left",
             fg_color="transparent",
-            border_color="#DC2626",
+            border_color=theme.STATUS_DANGER,
             border_width=1,
-            text_color="#FFFFFF",
-            hover_color=("#FEE2E2", "#450A0A"),
-            corner_radius=8,
+            text_color=theme.TEXT_MAIN,
+            hover_color=theme.STATUS_DANGER_HOVER,
+            corner_radius=theme.RADIUS_CONTROL,
             font=ctk.CTkFont(size=13, weight="bold"),
             height=30,
             command=lambda: DialogManager._clear_console(app)
@@ -1357,15 +1358,15 @@ class DialogManager:
         raw_textbox = log_box._textbox
 
         # --- Configuración de etiquetas de estilo ---
-        raw_textbox.tag_config("lvl_info", foreground="#22C55E", font=("Consolas", 11))       # Verde
-        raw_textbox.tag_config("lvl_warning", foreground="#EAB308", font=("Consolas", 11))    # Amarillo
-        raw_textbox.tag_config("lvl_error", foreground="#EF4444", font=("Consolas", 11))      # Rojo
-        raw_textbox.tag_config("tag_purple", foreground="#A855F7", font=("Consolas", 11))     # Morado corporativo
+        raw_textbox.tag_config("lvl_info", foreground=theme.STATUS_SUCCESS, font=("Consolas", 11))       # Verde
+        raw_textbox.tag_config("lvl_warning", foreground=theme.STATUS_WARNING, font=("Consolas", 11))    # Amarillo
+        raw_textbox.tag_config("lvl_error", foreground=theme.STATUS_DANGER, font=("Consolas", 11))      # Rojo
+        raw_textbox.tag_config("tag_purple", foreground=theme.PRIMARY, font=("Consolas", 11))     # Morado corporativo
         raw_textbox.tag_config("tag_delete", foreground="#F97316", font=("Consolas", 11))     # Naranja
-        raw_textbox.tag_config("tree_branch", foreground="#4B5563", font=("Consolas", 11))    # Gris oscuro
+        raw_textbox.tag_config("tree_branch", foreground=theme.TEXT_SUBTLE, font=("Consolas", 11))    # Gris oscuro
         raw_textbox.tag_config("json_key", foreground="#38BDF8", font=("Consolas", 11))       # Cyan para claves ('Artist':)
-        raw_textbox.tag_config("json_val", foreground="#F3F4F6", font=("Consolas", 11))       # Blanco destacado para valores
-        raw_textbox.tag_config("text_body", foreground="#D1D5DB", font=("Consolas", 11))      # Blanco/Gris base
+        raw_textbox.tag_config("json_val", foreground=theme.TEXT_MAIN, font=("Consolas", 11))       # Blanco destacado para valores
+        raw_textbox.tag_config("text_body", foreground=theme.TEXT_MUTED, font=("Consolas", 11))      # Blanco/Gris base
 
         # Pattern para identificar tokens sin incluir horas/fechas
         token_pattern = re.compile(
@@ -1491,28 +1492,28 @@ class DialogManager:
             win,
             text="Gestión de Catálogos y Relaciones",
             font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="#F3F4F6"
+            text_color=theme.TEXT_MAIN
         )
         lbl_header.pack(anchor="w", padx=16, pady=(16, 4))
 
         lbl_sub = ctk.CTkLabel(
             win,
             text="Añade o elimina valores y asigna jerarquías entre ellos.",
-            text_color="#9CA3AF"
+            text_color=theme.TEXT_MUTED
         )
         lbl_sub.pack(anchor="w", padx=16, pady=(0, 4))
 
-        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(app, "CORP_HOVER", theme.PRIMARY_HOVER)
 
         tabview = ctk.CTkTabview(
             win,
-            segmented_button_fg_color="#181818",
+            segmented_button_fg_color=theme.BG_INPUT,
             segmented_button_selected_color=corp_color,
             segmented_button_selected_hover_color=corp_hover,
-            segmented_button_unselected_color="#262626",
-            segmented_button_unselected_hover_color="#333333",
-            text_color="#FFFFFF"
+            segmented_button_unselected_color=theme.BG_CARD_HOVER,
+            segmented_button_unselected_hover_color=theme.BORDER_FOCUS,
+            text_color=theme.TEXT_MAIN
         )
         tabview.pack(fill="both", expand=True, padx=16, pady=(4, 12))
 
@@ -1520,7 +1521,7 @@ class DialogManager:
             result = [None]
             dlg = DialogManager._new_modal(app, title, 400, 150, parent=win)
 
-            ctk.CTkLabel(dlg, text=prompt_text, text_color="#E5E7EB", font=ctk.CTkFont(weight="bold")).pack(pady=(15, 5))
+            ctk.CTkLabel(dlg, text=prompt_text, text_color=theme.TEXT_MAIN, font=ctk.CTkFont(weight="bold")).pack(pady=(15, 5))
 
             entry = ctk.CTkEntry(dlg, width=320)
             entry.pack(pady=5)
@@ -1618,13 +1619,13 @@ class DialogManager:
             left_panel = ctk.CTkFrame(content_frame, fg_color="transparent")
             left_panel.pack(side="left", fill="both", expand=True, padx=(0, 6))
 
-            listbox_frame = ctk.CTkFrame(left_panel, fg_color="#1E1E1E", corner_radius=6)
+            listbox_frame = ctk.CTkFrame(left_panel, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CONTROL)
             listbox_frame.pack(fill="both", expand=True, pady=(0, 10))
 
             lb = tk.Listbox(
                 listbox_frame,
-                bg="#1E1E1E",
-                fg="#E5E7EB",
+                bg=theme.BG_CARD,
+                fg=theme.TEXT_MAIN,
                 selectbackground=app.CORP_COLOR,
                 height=14,
                 selectmode=tk.EXTENDED,
@@ -1653,15 +1654,15 @@ class DialogManager:
                 command=lambda k=catalog_key, l=lb, ln=label_name: delete_value(k, l, ln),
                 fg_color="transparent",
                 border_width=1,
-                border_color="#EF4444",
-                text_color="#FFFFFF",
-                hover_color="#7F1D1D"
+                border_color=theme.STATUS_DANGER,
+                text_color=theme.TEXT_MAIN,
+                hover_color=theme.STATUS_DANGER_HOVER
             ).pack(side="left", expand=True, fill="x", padx=(4, 0))
 
             refresh_listbox(catalog_key, lb)
 
             if catalog_key in ("Album", "Genre"):
-                right_panel = ctk.CTkFrame(content_frame, fg_color="#181818", corner_radius=8)
+                right_panel = ctk.CTkFrame(content_frame, fg_color=theme.BG_INPUT, corner_radius=theme.RADIUS_CONTROL)
                 right_panel.pack(side="right", fill="both", expand=True, padx=(6, 0))
 
                 rel_title = "Géneros permitidos para los elementos seleccionados:" if catalog_key == "Album" else "Etiquetas permitidas para los elementos seleccionados:"
@@ -1671,8 +1672,8 @@ class DialogManager:
                 btn_rel_frame = ctk.CTkFrame(right_panel, fg_color="transparent")
                 btn_rel_frame.pack(fill="x", padx=12, pady=(0, 4))
 
-                ctk.CTkButton(btn_rel_frame, text="Sel. Todo", font=font_btn, height=24, fg_color="#374151", hover_color="#1F2937", command=lambda cv=check_vars: [v.set(True) for v in cv.values()]).pack(side="left", expand=True, fill="x", padx=(0, 2))
-                ctk.CTkButton(btn_rel_frame, text="Desel. Todo", font=font_btn, height=24, fg_color="#374151", hover_color="#1F2937", command=lambda cv=check_vars: [v.set(False) for v in cv.values()]).pack(side="left", expand=True, fill="x", padx=(2, 0))
+                ctk.CTkButton(btn_rel_frame, text="Sel. Todo", font=font_btn, height=24, fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS, command=lambda cv=check_vars: [v.set(True) for v in cv.values()]).pack(side="left", expand=True, fill="x", padx=(0, 2))
+                ctk.CTkButton(btn_rel_frame, text="Desel. Todo", font=font_btn, height=24, fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS, command=lambda cv=check_vars: [v.set(False) for v in cv.values()]).pack(side="left", expand=True, fill="x", padx=(2, 0))
 
                 scroll_rel = ctk.CTkScrollableFrame(right_panel, fg_color="transparent")
                 scroll_rel.pack(fill="both", expand=True, padx=8, pady=4)
@@ -1684,7 +1685,7 @@ class DialogManager:
 
                     sel = listbox.curselection()
                     if not sel:
-                        ctk.CTkLabel(scroll, text="Selecciona al menos un registro a la izquierda", text_color="gray", font=ctk.CTkFont(size=11)).pack(pady=20)
+                        ctk.CTkLabel(scroll, text="Selecciona al menos un registro a la izquierda", text_color=theme.TEXT_SUBTLE, font=ctk.CTkFont(size=11)).pack(pady=20)
                         return
 
                     parent_val = app.catalog_manager.catalog_values[k][sel[0]]
@@ -1749,11 +1750,11 @@ class DialogManager:
             text="Cerrar Panel",
             font=font_btn,
             command=win.destroy,
-            fg_color="#262626",
-            border_color="#333333",
+            fg_color=theme.BG_CARD_HOVER,
+            border_color=theme.BORDER_FOCUS,
             border_width=1,
-            text_color="#9CA3AF",
-            hover_color="#333333",
+            text_color=theme.TEXT_MUTED,
+            hover_color=theme.BORDER_FOCUS,
             height=32,
             width=120
         )
@@ -1766,26 +1767,26 @@ class DialogManager:
         win = DialogManager._new_modal(app, "Personalizar Columnas Visibles - Sonometa", 450, 520)
 
         font_btn = ctk.CTkFont(size=12, weight="bold")
-        corp_color = getattr(app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(app, "CORP_HOVER", theme.PRIMARY_HOVER)
 
         lbl_header = ctk.CTkLabel(
             win,
             text="Personalización de Columnas",
             font=ctk.CTkFont(size=18, weight="bold"),
-            text_color="#F3F4F6"
+            text_color=theme.TEXT_MAIN
         )
         lbl_header.pack(anchor="w", padx=16, pady=(16, 4))
 
         lbl_sub = ctk.CTkLabel(
             win,
             text="Selecciona los campos que deseas mostrar u ocultar en la grilla.",
-            text_color="#9CA3AF"
+            text_color=theme.TEXT_MUTED
         )
         lbl_sub.pack(anchor="w", padx=16, pady=(0, 10))
 
         # Panel desplazable para la lista de checkboxes
-        scroll_frame = ctk.CTkScrollableFrame(win, fg_color="#181818", corner_radius=8)
+        scroll_frame = ctk.CTkScrollableFrame(win, fg_color=theme.BG_INPUT, corner_radius=theme.RADIUS_CONTROL)
         scroll_frame.pack(fill="both", expand=True, padx=16, pady=(0, 12))
 
         col_titles = {
@@ -1803,7 +1804,7 @@ class DialogManager:
 
         grid_panel = getattr(app, "grid_panel", None)
         if not grid_panel or not hasattr(grid_panel, "tree"):
-            ctk.CTkLabel(scroll_frame, text="No hay grilla disponible.", text_color="gray").pack(pady=20)
+            ctk.CTkLabel(scroll_frame, text="No hay grilla disponible.", text_color=theme.TEXT_SUBTLE).pack(pady=20)
         else:
             tree = grid_panel.tree
             all_cols = getattr(grid_panel, "columns", [])
@@ -1841,7 +1842,7 @@ class DialogManager:
                     chk_frame,
                     text=title,
                     variable=var,
-                    font=ctk.CTkFont(family="Segoe UI", size=12),
+                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12),
                     fg_color=corp_color,
                     hover_color=corp_hover,
                     command=lambda c=col, v=var: _toggle_column(c, v)

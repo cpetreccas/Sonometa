@@ -1,5 +1,6 @@
 import customtkinter as ctk
 from models import AdvancedFilterCriteria
+import theme
 
 
 class AdvancedFilterPanel(ctk.CTkFrame):
@@ -9,7 +10,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
         self.on_filter_change = on_filter_change_callback
 
         # Configuración estética del panel
-        self.configure(fg_color="#1E1E1E", corner_radius=6, border_width=1, border_color="#2A2A2A")
+        self.configure(fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD, border_width=1, border_color=theme.BORDER_QUIET)
 
         # Variables de control
         self.text_vars = {
@@ -44,7 +45,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             sub_frame = ctk.CTkFrame(frame_text, fg_color="transparent")
             sub_frame.pack(side="left", expand=True, fill="x", padx=4)
 
-            lbl = ctk.CTkLabel(sub_frame, text=col_name.upper(), font=("Segoe UI", 10, "bold"), text_color="#A0A0A0")
+            lbl = ctk.CTkLabel(sub_frame, text=col_name.upper(), font=(theme.FONT_FAMILY, 10, "bold"), text_color=theme.TEXT_MUTED)
             lbl.pack(anchor="w", pady=(0, 2))
 
             entry = ctk.CTkEntry(
@@ -52,8 +53,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
                 textvariable=self.text_vars[col_name],
                 placeholder_text=f"Buscar {col_name}...",
                 height=28,
-                fg_color="#2B2B2B",
-                border_color="#3A3A3A"
+                fg_color=theme.BG_INPUT,
+                border_color=theme.BORDER_FOCUS
             )
             entry.pack(fill="x")
 
@@ -71,7 +72,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             sub_frame = ctk.CTkFrame(frame_combos, fg_color="transparent")
             sub_frame.pack(side="left", expand=True, fill="x", padx=4)
 
-            lbl = ctk.CTkLabel(sub_frame, text=col_name.upper(), font=("Segoe UI", 10, "bold"), text_color="#A0A0A0")
+            lbl = ctk.CTkLabel(sub_frame, text=col_name.upper(), font=(theme.FONT_FAMILY, 10, "bold"), text_color=theme.TEXT_MUTED)
             lbl.pack(anchor="w", pady=(0, 2))
 
             combo = ctk.CTkComboBox(
@@ -79,9 +80,9 @@ class AdvancedFilterPanel(ctk.CTkFrame):
                 variable=self.combo_vars[col_name],
                 values=["[ Todos ]"],
                 height=28,
-                fg_color="#2B2B2B",
-                button_color="#3A3A3A",
-                border_color="#3A3A3A",
+                fg_color=theme.BG_INPUT,
+                button_color=theme.BORDER_FOCUS,
+                border_color=theme.BORDER_FOCUS,
                 state="readonly",
                 command=lambda val: self._trigger_filter()
             )
@@ -101,8 +102,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             text="Sin Año",
             variable=self.toggle_vars["no_year"],
             command=self._trigger_filter,
-            progress_color="#7B2CBF",
-            font=("Segoe UI", 11)
+            progress_color=theme.PRIMARY,
+            font=(theme.FONT_FAMILY, 11)
         )
         sw_year.pack(side="left", padx=(4, 15))
 
@@ -111,8 +112,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             text="Sin Carátula",
             variable=self.toggle_vars["no_cover"],
             command=self._trigger_filter,
-            progress_color="#7B2CBF",
-            font=("Segoe UI", 11)
+            progress_color=theme.PRIMARY,
+            font=(theme.FONT_FAMILY, 11)
         )
         sw_cover.pack(side="left", padx=15)
 
@@ -121,8 +122,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             text="Sin Comentarios",
             variable=self.toggle_vars["no_comment"],
             command=self._trigger_filter,
-            progress_color="#7B2CBF",
-            font=("Segoe UI", 11)
+            progress_color=theme.PRIMARY,
+            font=(theme.FONT_FAMILY, 11)
         )
         sw_comment.pack(side="left", padx=15)
 
@@ -131,8 +132,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             text="Sin Cues",
             variable=self.toggle_vars["no_cues"],
             command=self._trigger_filter,
-            progress_color="#7B2CBF",
-            font=("Segoe UI", 11)
+            progress_color=theme.PRIMARY,
+            font=(theme.FONT_FAMILY, 11)
         )
         sw_cues.pack(side="left", padx=15)
 
@@ -141,8 +142,12 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             text="Limpiar Filtros",
             width=110,
             height=26,
-            fg_color="#3A3A3A",
-            hover_color="#4A4A4A",
+            fg_color="transparent",
+            border_width=1,
+            border_color=theme.BORDER_QUIET,
+            text_color=theme.TEXT_MAIN,
+            hover_color=theme.BG_CARD_HOVER,
+            corner_radius=theme.RADIUS_CONTROL,
             command=self.reset_filters
         )
         btn_reset.pack(side="right", padx=4)

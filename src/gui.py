@@ -29,13 +29,14 @@ from search_manager import SearchManager
 from process_manager import ProcessManager
 from header_panel import HeaderPanel
 from undo_manager import UndoManager
+import theme
 
 
 class App(ctk.CTk):
-    CORP_COLOR = "#6B21A8"
-    CORP_HOVER = "#581C87"
-    DANGER_COLOR = "#B91C1C"
-    DANGER_HOVER = "#991B1B"
+    CORP_COLOR = theme.PRIMARY
+    CORP_HOVER = theme.PRIMARY_HOVER
+    DANGER_COLOR = theme.STATUS_DANGER
+    DANGER_HOVER = "#DC2626"
     CLEAR_OPTION = "<Limpiar>"
     KEEP_VALUE = "<Mantener>"
 
@@ -81,6 +82,7 @@ class App(ctk.CTk):
 
     def _configure_window(self):
         self.title("Sonometa v2.0 - Audio Tag Suite")
+        self.configure(fg_color=theme.BG_MAIN)
         self.geometry("1180x780")
         self.minsize(1000, 680)
         self.after(100, lambda: UiUtils.maximize_window(self))
@@ -235,8 +237,8 @@ class App(ctk.CTk):
             self.frame_bottom,
             text="Listo",
             anchor="w",
-            font=ctk.CTkFont(family="Inter", size=11),
-            text_color="#9CA3AF"
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=11),
+            text_color=theme.TEXT_MUTED
         )
         self.label_status.pack(fill="x", padx=12, pady=(2, 6))
 

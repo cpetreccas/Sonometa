@@ -1,6 +1,7 @@
 import tkinter as tk
 import customtkinter as ctk
 from dialogs import DialogManager
+import theme
 
 
 class CustomTagPicker(ctk.CTkToplevel):
@@ -112,11 +113,11 @@ class CustomTagPicker(ctk.CTkToplevel):
             self.entry_new_tag.focus_force()
 
     def _setup_ui(self):
-        main_frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
+        main_frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD)
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
-        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(self.app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
         font_btn = ctk.CTkFont(size=12, weight="bold")
 
         # Cabecera
@@ -124,7 +125,7 @@ class CustomTagPicker(ctk.CTkToplevel):
             main_frame,
             text="Etiquetas Personalizadas",
             font=ctk.CTkFont(size=18, weight="bold"),
-            text_color="#F3F4F6"
+            text_color=theme.TEXT_MAIN
         )
         lbl_title.pack(anchor="w", padx=5, pady=(0, 2))
 
@@ -138,19 +139,19 @@ class CustomTagPicker(ctk.CTkToplevel):
         lbl_sub = ctk.CTkLabel(
             main_frame,
             text=sub_text,
-            text_color="#9CA3AF"
+            text_color=theme.TEXT_MUTED
         )
         lbl_sub.pack(anchor="w", padx=5, pady=(0, 10))
 
         # Entrada para nueva etiqueta
-        add_frame = ctk.CTkFrame(main_frame, fg_color="#262626", corner_radius=8)
+        add_frame = ctk.CTkFrame(main_frame, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
         add_frame.pack(fill="x", pady=(0, 10), padx=5, ipady=4)
 
         lbl_add = ctk.CTkLabel(
             add_frame,
             text="Nueva etiqueta:",
             font=ctk.CTkFont(weight="bold"),
-            text_color="#E5E7EB"
+            text_color=theme.TEXT_MAIN
         )
         lbl_add.pack(side="left", padx=(10, 8))
 
@@ -177,11 +178,11 @@ class CustomTagPicker(ctk.CTkToplevel):
             main_frame,
             text="Etiquetas disponibles:",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#D1D5DB"
+            text_color=theme.TEXT_MUTED
         )
         lbl_list.pack(anchor="w", padx=5, pady=(4, 4))
 
-        self.scroll_tags = ctk.CTkScrollableFrame(main_frame, fg_color="#181818", corner_radius=8)
+        self.scroll_tags = ctk.CTkScrollableFrame(main_frame, fg_color=theme.BG_INPUT, corner_radius=theme.RADIUS_CONTROL)
         self.scroll_tags.pack(fill="both", expand=True, padx=5, pady=(0, 12))
 
         self.checkbox_vars = {}
@@ -207,9 +208,9 @@ class CustomTagPicker(ctk.CTkToplevel):
             font=font_btn,
             fg_color="transparent",
             border_width=1,
-            border_color="#6B7280",
-            text_color="#E5E7EB",
-            hover_color="#374151",
+            border_color=theme.BORDER_QUIET,
+            text_color=theme.TEXT_MAIN,
+            hover_color=theme.BG_CARD_HOVER,
             command=self.destroy
         )
         btn_cancel.pack(side="right")
@@ -219,8 +220,8 @@ class CustomTagPicker(ctk.CTkToplevel):
         for child in self.scroll_tags.winfo_children():
             child.destroy()
 
-        corp_color = getattr(self.app, "CORP_COLOR", "#6B21A8")
-        corp_hover = getattr(self.app, "CORP_HOVER", "#581C87")
+        corp_color = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
+        corp_hover = getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
 
         clean_available = [str(t).strip() for t in self.available_tags if str(t).strip()]
         clean_selected = [str(t).strip() for t in self.selected_tags if str(t).strip()]
@@ -231,7 +232,7 @@ class CustomTagPicker(ctk.CTkToplevel):
             lbl_empty = ctk.CTkLabel(
                 self.scroll_tags,
                 text="No hay etiquetas creadas. Añade una arriba.",
-                text_color="#6B7280",
+                text_color=theme.TEXT_SUBTLE,
                 font=ctk.CTkFont(size=11)
             )
             lbl_empty.pack(pady=20)

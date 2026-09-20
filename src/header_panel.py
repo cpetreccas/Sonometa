@@ -1,9 +1,10 @@
 import customtkinter as ctk
+import theme
 
 class HeaderPanel(ctk.CTkFrame):
     def __init__(self, parent, app, logo_pil):
         # Header con el fondo unificado
-        super().__init__(parent, fg_color="#242429", corner_radius=0)
+        super().__init__(parent, fg_color=theme.BG_CARD, corner_radius=0)
         self.app = app
 
         self.pack(fill="x", padx=0, pady=0)
@@ -38,10 +39,10 @@ class HeaderPanel(ctk.CTkFrame):
         # --- 2. ÁREA DE RUTA Y REFRESCAR (Columna 1 - Exactamente sobre el Grid) ---
         self.path_card = ctk.CTkFrame(
             self.inner_frame,
-            fg_color="#18181B",
+            fg_color=theme.BG_CARD,
             border_width=1,
-            border_color="#3F3F46",
-            corner_radius=6
+            border_color=theme.BORDER_FOCUS,
+            corner_radius=theme.RADIUS_CONTROL
         )
         self.path_card.grid(row=0, column=1, sticky="ew", padx=(0, 15), ipady=1)
 
@@ -54,7 +55,7 @@ class HeaderPanel(ctk.CTkFrame):
             fg_color=self.app.CORP_COLOR,
             hover_color=self.app.CORP_HOVER,
             font=ctk.CTkFont(size=16, weight="bold"),
-            corner_radius=4,
+            corner_radius=theme.RADIUS_CONTROL,
             command=self.app.refresh_folder
         )
         self.btn_refresh.pack(side="left", padx=(4, 8), pady=3)
@@ -64,15 +65,15 @@ class HeaderPanel(ctk.CTkFrame):
             self.path_card,
             text="📁",
             font=ctk.CTkFont(size=18),
-            text_color="#A1A1AA"
+            text_color=theme.TEXT_MUTED
         )
         self.lbl_folder_icon.pack(side="left", padx=(4, 6), pady=(0, 5))
 
         self.label_folder = ctk.CTkLabel(
             self.path_card,
             text="Haz clic aquí para seleccionar una carpeta...",
-            text_color="#A1A1AA",
-            font=ctk.CTkFont(family="Inter", size=12),
+            text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12),
             anchor="w",
             cursor="hand2"
         )
@@ -87,13 +88,13 @@ class HeaderPanel(ctk.CTkFrame):
             width=280,
             height=36,
             placeholder_text="🔍  Buscar en la lista...",
-            fg_color="#18181B",
-            border_color="#3F3F46",
+            fg_color=theme.BG_INPUT,
+            border_color=theme.BORDER_FOCUS,
             border_width=1,
-            text_color="#F4F4F5",
-            placeholder_text_color="#71717A",
-            corner_radius=6,
-            font=ctk.CTkFont(family="Inter", size=12)
+            text_color=theme.TEXT_MAIN,
+            placeholder_text_color=theme.TEXT_SUBTLE,
+            corner_radius=theme.RADIUS_CONTROL,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12)
         )
         self.entry_search.grid(row=0, column=2, sticky="e")
 
@@ -151,8 +152,8 @@ class HeaderPanel(ctk.CTkFrame):
 
     def set_folder_path(self, path):
         if path:
-            self.label_folder.configure(text=path, text_color="#F4F4F5")
-            self.lbl_folder_icon.configure(text_color="#A855F7")
+            self.label_folder.configure(text=path, text_color=theme.TEXT_MAIN)
+            self.lbl_folder_icon.configure(text_color=theme.PRIMARY_LIGHT)
         else:
-            self.label_folder.configure(text="Haz clic aquí para seleccionar una carpeta...", text_color="#A1A1AA")
-            self.lbl_folder_icon.configure(text_color="#A1A1AA")
+            self.label_folder.configure(text="Haz clic aquí para seleccionar una carpeta...", text_color=theme.TEXT_MUTED)
+            self.lbl_folder_icon.configure(text_color=theme.TEXT_MUTED)
