@@ -135,14 +135,6 @@ class App(ctk.CTk):
             except Exception as e:
                 self.logger.warning(f"No se pudo establecer el icono de la app: {e}")
 
-    def _on_advanced_filter_changed(self, criteria):
-        """Procesa los criterios del panel avanzado y aplica el filtro en SearchManager."""
-        if hasattr(self, "search_manager"):
-            if hasattr(self.search_manager, "apply_advanced_filter"):
-                self.search_manager.apply_advanced_filter(criteria)
-            else:
-                self.search_manager.apply_search_filter()
-
     def _setup_ui(self):
         self.tool_panel = ToolPanel(self)
         self.tool_panel.pack(side="top", fill="x")
@@ -224,17 +216,6 @@ class App(ctk.CTk):
         except Exception as e:
             self.logger.error(f"Error iniciando CloudSyncWorker: {e}")
 
-    def show_legacy_export_deprecated(self):
-        """Notifica que la exportación HTML/Netlify legacy quedó fuera del flujo principal."""
-        self.logger.info("[MIGRACION] Exportador HTML/Netlify legacy desactivado en UI principal.")
-        DialogManager.show_themed_dialog(
-            self,
-            "Función desactivada",
-            "La exportación HTML local y el despliegue directo a Netlify fueron retirados del flujo principal.\n\n"
-            "La WebApp/PWA ahora se despliega de forma independiente y consume datos desde Supabase Cloud.",
-            level="info"
-        )
-
     def _on_toggle_manual_cover_review(self):
         """Callback directo al cambiar la opción 'revisar carátulas manualmente'."""
         val = self.review_covers_var.get()
@@ -300,13 +281,6 @@ class App(ctk.CTk):
             return default
         val = values[idx]
         return default if val is None else val
-
-    def set_tree_value(self, values, column_name, new_value):
-        idx = self.get_tree_column_index(column_name)
-        if idx is None or idx >= len(values):
-            return False
-        values[idx] = new_value
-        return True
 
     @property
     def catalog_values(self):

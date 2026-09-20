@@ -3,7 +3,6 @@ import os
 import re
 import sys
 import ctypes
-import webbrowser
 import queue
 import threading
 import urllib.request
@@ -934,28 +933,6 @@ class DialogManager:
             win.focus_force()
 
     @staticmethod
-    def center_popup_on_screen(win):
-        win.update_idletasks()
-        geometry = win.geometry().split("+")[0]
-        if "x" in geometry:
-            width_str, height_str = geometry.split("x", 1)
-            try:
-                width = int(width_str)
-                height = int(height_str)
-            except ValueError:
-                width = win.winfo_reqwidth()
-                height = win.winfo_reqheight()
-        else:
-            width = win.winfo_reqwidth()
-            height = win.winfo_reqheight()
-
-        screen_w = win.winfo_screenwidth()
-        screen_h = win.winfo_screenheight()
-        pos_x = max(0, (screen_w - width) // 2)
-        pos_y = max(0, (screen_h - height) // 2)
-        win.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
-
-    @staticmethod
     def apply_dark_title_bar(win):
         if sys.platform != "win32" or not win.winfo_exists():
             return
@@ -1207,61 +1184,6 @@ class DialogManager:
         )
         btn_close.pack(fill="x", pady=(12, 0))
         btn_close.focus_force()
-
-    @staticmethod
-    def show_settings_dialog(app, logger_inst):
-        win = ctk.CTkToplevel(app)
-        win.title("Configuración")
-        win.geometry("450x180")
-        win.resizable(False, False)
-
-        # Cierre con ESC
-        win.bind("<Escape>", lambda e: win.destroy())
-
-        DialogManager.center_popup_on_parent(win, app, width=450, height=180)
-        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
-
-        frame = ctk.CTkFrame(win, fg_color="#1E1E1E")
-        frame.pack(fill="both", expand=True, padx=16, pady=16)
-
-        ctk.CTkLabel(
-            frame, text="Opciones de Procesamiento",
-            font=ctk.CTkFont(size=13, weight="bold"), anchor="w"
-        ).pack(fill="x", pady=(0, 10))
-
-        current_val = getattr(app.catalog_manager, "manual_cover_selection", True)
-        manual_cover_var = tk.BooleanVar(value=current_val)
-
-        chk_manual_cover = ctk.CTkCheckBox(
-            frame,
-            text="Seleccionar manualmente la carátula",
-            variable=manual_cover_var,
-            font=ctk.CTkFont(size=12),
-            fg_color=app.CORP_COLOR,
-            hover_color=app.CORP_HOVER
-        )
-        chk_manual_cover.pack(anchor="w", pady=(5, 15))
-
-        def save_settings():
-            new_val = manual_cover_var.get()
-            app.catalog_manager.manual_cover_selection = new_val
-            app.catalog_manager.save_settings()
-            logger_inst.info(f"Configuración guardada -> Selección manual de carátula: {new_val}")
-            win.destroy()
-
-        btns = ctk.CTkFrame(frame, fg_color="transparent")
-        btns.pack(fill="x", side="bottom")
-        ctk.CTkButton(
-            btns, text="Cancelar", fg_color="#374151", hover_color="#1F2937",
-            command=win.destroy
-        ).pack(side="right", padx=(6, 0))
-
-        btn_save = ctk.CTkButton(
-            btns, text="Guardar", fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER,
-            command=save_settings
-        )
-        btn_save.pack(side="right")
-        btn_save.focus_force()
 
     @staticmethod
     def show_logs_dialog(app):
@@ -1969,101 +1891,4 @@ class DialogManager:
         dialog = MultiCoverSelectionDialog(app, items_to_review)
         app.wait_window(dialog)
         return dialog.selections
-
-    @staticmethod
-    def select_discogs_cover_dialog(app, image_urls):
-        if not image_urls:
-            return None
-        if len(image_urls) == 1:
-            return image_urls[0]
-
-        mock_item = [{
-            "row_id": "single_select",
-            "filename": "Selección individual",
-            "images": image_urls
-        }]
-        result = DialogManager.process_pending_covers_dialog(app, mock_item)
-        return result.get("single_select")
-
-    @staticmethod
-    def show_netlify_deploy_url_dialog(app, deploy_url):
-        """Muestra la URL publica del deploy con opcion de copia al portapapeles."""
-        dialog = ctk.CTkToplevel(app)
-        dialog.title("Despliegue Netlify - Sonometa")
-        dialog.geometry("620x220")
-        dialog.resizable(False, False)
-        dialog.bind("<Escape>", lambda e: dialog.destroy())
-
-        DialogManager.center_popup_on_parent(dialog, app, width=620, height=220)
-        DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=app)
-
-        frame = ctk.CTkFrame(dialog, fg_color="#1E1E1E")
-        frame.pack(fill="both", expand=True, padx=14, pady=14)
-
-        ctk.CTkLabel(
-            frame,
-            text="WebApp desplegada correctamente",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            text_color="#22C55E",
-            anchor="w"
-        ).pack(fill="x", pady=(0, 8))
-
-        ctk.CTkLabel(
-            frame,
-            text="URL publica:",
-            text_color="#D1D5DB",
-            anchor="w"
-        ).pack(fill="x")
-
-        entry_url = ctk.CTkEntry(frame)
-        entry_url.pack(fill="x", pady=(6, 10))
-        entry_url.insert(0, deploy_url or "")
-        entry_url.configure(state="readonly")
-
-        lbl_feedback = ctk.CTkLabel(frame, text="", text_color="#9CA3AF", anchor="w")
-        lbl_feedback.pack(fill="x", pady=(0, 8))
-
-        btn_row = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_row.pack(fill="x", side="bottom")
-
-        def _copy_url():
-            app.clipboard_clear()
-            app.clipboard_append(deploy_url or "")
-            lbl_feedback.configure(text="URL copiada al portapapeles.", text_color="#22C55E")
-
-        def _open_url():
-            url = (deploy_url or "").strip()
-            if url.lower().startswith(("http://", "https://")):
-                webbrowser.open(url)
-                lbl_feedback.configure(text="URL abierta en el navegador.", text_color="#22C55E")
-            else:
-                lbl_feedback.configure(text="No se pudo abrir: URL invalida.", text_color="#EF4444")
-
-        ctk.CTkButton(
-            btn_row,
-            text="Cerrar",
-            fg_color="#374151",
-            hover_color="#1F2937",
-            command=dialog.destroy
-        ).pack(side="right")
-
-        ctk.CTkButton(
-            btn_row,
-            text="Copiar URL",
-            fg_color=app.CORP_COLOR,
-            hover_color=app.CORP_HOVER,
-            command=_copy_url
-        ).pack(side="right", padx=(0, 8))
-
-        ctk.CTkButton(
-            btn_row,
-            text="Abrir URL",
-            fg_color="#0F766E",
-            hover_color="#115E59",
-            command=_open_url
-        ).pack(side="right", padx=(0, 8))
-
-        dialog.wait_window()
-        if app and app.winfo_exists():
-            app.focus_force()
 
