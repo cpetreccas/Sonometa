@@ -103,15 +103,14 @@ class App(ctk.CTk):
 
         self.DEFAULT_COVER_PATH = UiUtils.get_resource_path("assets/no_cover_art.jpg")
 
-        self.discogs_token = os.getenv("DISCOGS_TOKEN", "RYvclJgMalquxdkpdHutNJEQqGjlaiqtuBvipCfq").strip()
+        self.discogs_token = os.getenv("DISCOGS_TOKEN", "").strip()
 
         self.catalog_manager = CatalogManager(self)
         self.catalog_manager.load_catalog_values()
         self.catalog_manager.load_settings()
 
         # 'Revisar carátulas' activado por defecto
-        settings_dict = getattr(self.catalog_manager, "settings", {})
-        manual_rev = settings_dict.get("manual_cover_review", True) if isinstance(settings_dict, dict) else True
+        manual_rev = getattr(self.catalog_manager, "manual_cover_selection", True)
         self.review_covers_var = tk.BooleanVar(value=manual_rev)
 
         self.discogs_client = DiscogsClient(
@@ -219,8 +218,7 @@ class App(ctk.CTk):
     def _on_toggle_manual_cover_review(self):
         """Callback directo al cambiar la opción 'revisar carátulas manualmente'."""
         val = self.review_covers_var.get()
-        if hasattr(self.catalog_manager, "settings") and isinstance(self.catalog_manager.settings, dict):
-            self.catalog_manager.settings["manual_cover_review"] = val
+        self.catalog_manager.manual_cover_selection = val
         self.catalog_manager.save_settings()
         msg = "Activada" if val else "Desactivada"
         self.logger.info(f"Revisión manual de carátulas: {msg}")

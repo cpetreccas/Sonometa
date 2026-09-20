@@ -22,7 +22,6 @@ class CatalogManager:
             "Comment": "Comentarios",
         }
         self.catalog_values: Dict[str, List[str]] = {field: [] for field in self.catalog_fields}
-        self.settings: Dict[str, object] = {}
 
         self.album_genres: Dict[str, List[str]] = {}
         self.genre_publishers: Dict[str, List[str]] = {}
@@ -96,28 +95,22 @@ class CatalogManager:
         except Exception as e:
             logger.error(f"No se pudieron guardar los catálogos: {str(e)}")
 
-    def load_settings(self) -> str:
+    def load_settings(self) -> None:
         if not os.path.exists(self.settings_file_path):
-            return ""
+            return
         try:
             with open(self.settings_file_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
-            token = data.get("discogs_token", "").strip()
             self.manual_cover_selection = data.get("manual_cover_selection", True)
 
             if hasattr(self.app, "review_covers_var") and self.app.review_covers_var is not None:
                 self.app.review_covers_var.set(self.manual_cover_selection)
-
-            return token
         except Exception as e:
             logger.warning(f"No se pudo cargar la configuración: {str(e)}")
-            return ""
 
-    def save_settings(self, token: str = "") -> None:
+    def save_settings(self) -> None:
         try:
-            current_token = token if token else getattr(self.app, "discogs_token", "")
             data = {
-                "discogs_token": current_token,
                 "manual_cover_selection": getattr(self, "manual_cover_selection", True)
             }
             with open(self.settings_file_path, "w", encoding="utf-8") as f:
