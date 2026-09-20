@@ -4,10 +4,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox
 from io import BytesIO
-import threading
-from collections import OrderedDict
 import customtkinter as ctk
-from mutagen import File as MutagenFile
 from PIL import Image, ImageGrab
 
 from ui_utils import UiUtils
@@ -35,8 +32,6 @@ class DetailPanel:
         self._resize_timer = None
         self._deferred_row_sync_after_id = None
         self._deferred_row_sync_token = 0
-        self._duration_cache = OrderedDict()
-        self._duration_cache_lock = threading.Lock()
 
         # Guarda el ID de la fila que se estaba editando antes de cambiar de selección
         self._editing_row_id = None
@@ -68,56 +63,6 @@ class DetailPanel:
         self._setup_entry_context_menu()
         self._setup_tag_panel()
         self.audio_player = AudioPlayer(self)
-
-    @staticmethod
-    def get_fast_audio_duration(file_path):
-        """Lee únicamente el header del archivo sin decodificar audio completo."""
-        audio = None
-        try:
-            audio = MutagenFile(file_path)
-            if audio and audio.info and hasattr(audio.info, "length"):
-                return float(audio.info.length)
-        except Exception:
-            pass
-        finally:
-            close_fn = getattr(audio, "close", None)
-            if callable(close_fn):
-                try:
-                    close_fn()
-                except Exception:
-                    pass
-        return 0.0
-
-    @staticmethod
-    def _build_duration_cache_key(file_path):
-        try:
-            stat = os.stat(file_path)
-            return (os.path.abspath(file_path), stat.st_mtime_ns, stat.st_size)
-        except Exception:
-            return None
-
-    def _get_cached_duration(self, file_path):
-        key = self._build_duration_cache_key(file_path)
-        if not key:
-            return self.get_fast_audio_duration(file_path)
-
-        with self._duration_cache_lock:
-            if key in self._duration_cache:
-                self._duration_cache.move_to_end(key)
-                return self._duration_cache[key]
-
-        duration = self.get_fast_audio_duration(file_path)
-        with self._duration_cache_lock:
-            if key in self._duration_cache:
-                self._duration_cache.move_to_end(key)
-            self._duration_cache[key] = duration
-            while len(self._duration_cache) > 5000:
-                self._duration_cache.popitem(last=False)
-        return duration
-
-    def clear_runtime_caches(self):
-        with self._duration_cache_lock:
-            self._duration_cache.clear()
 
     def handle_space_toggle(self):
         """Maneja el evento global de la tecla Espacio sobre el reproductor de audio."""
@@ -402,6 +347,8 @@ class DetailPanel:
                 if hasattr(widget, "_entry"):
                     widget._entry.bind(btn_right, self._show_entry_context_menu)
 
+                UiUtils.bind_entry_selection_fix(widget._entry if hasattr(widget, "_entry") else widget)
+
             widget.pack(fill="x")
             self.tag_entries[attr_name] = widget
 
@@ -435,6 +382,7 @@ class DetailPanel:
                 multi_widget.bind(btn_right, self._show_entry_context_menu)
                 if hasattr(multi_widget, "_entry"):
                     multi_widget._entry.bind(btn_right, self._show_entry_context_menu)
+                    UiUtils.bind_entry_selection_fix(multi_widget._entry)
             else:
                 multi_widget.bind("<FocusOut>", lambda _e, _w=multi_widget: self._on_widget_focus_out(_w))
                 multi_widget.bind("<Up>", lambda _e, _w=multi_widget: self._toggle_combo_dropdown(_w))
@@ -594,7 +542,7 @@ class DetailPanel:
 
         self.display_cover_art(file_path)
 
-        total_duration = self._get_cached_duration(file_path)
+        total_duration = self.app.audio_manager.get_cached_duration(file_path)
 
         if self.audio_player:
             self.audio_player.load_track(file_path)
@@ -720,7 +668,7 @@ class DetailPanel:
             if selected:
                 file_path = self.app.file_paths_map.get(selected[0])
                 if file_path:
-                    total_dur = self._get_cached_duration(file_path)
+                    total_dur = self.app.audio_manager.get_cached_duration(file_path)
                     self.update_audio_time_display(0, total_dur)
                 else:
                     self.lbl_audio_time.configure(text="00:00 / 00:00")
@@ -1068,7 +1016,7 @@ class DetailPanel:
 
         # Si hay un archivo seleccionado, mantenemos su duración visible y lista para reproducir
         if current_file and os.path.exists(current_file):
-            total_duration = self._get_cached_duration(current_file)
+            total_duration = self.app.audio_manager.get_cached_duration(current_file)
             if total_duration > 0:
                 if self.audio_player:
                     self.audio_player.load_track(current_file)
@@ -1124,10 +1072,8 @@ class DetailPanel:
                 return
 
             buffer = BytesIO()
-            if image.mode not in ("RGB", "L"):
-                image = image.convert("RGB")
-            image.save(buffer, format="JPEG")
-            image_bytes = buffer.getvalue()
+            image.save(buffer, format="PNG")
+            image_bytes = self.app.audio_manager.normalize_cover_image_bytes(buffer.getvalue())
 
             self.display_cover_art(image_bytes)
 

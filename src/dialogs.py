@@ -933,6 +933,25 @@ class DialogManager:
             win.focus_force()
 
     @staticmethod
+    def _new_modal(app, title, width, height, *, parent=None, resizable=False, is_modal=True, on_escape=None):
+        """Crea un CTkToplevel con el patrón estándar de diálogo Sonometa: título, geometría,
+        atajo ESC, centrado sobre `parent` (o `app` si no se indica) y estilo corporativo aplicado.
+        """
+        owner = parent if parent is not None else app
+        win = ctk.CTkToplevel(owner)
+        win.title(title)
+        win.geometry(f"{width}x{height}")
+        if not resizable:
+            win.resizable(False, False)
+
+        win.bind("<Escape>", on_escape if on_escape is not None else (lambda e: win.destroy()))
+
+        DialogManager.center_popup_on_parent(win, owner, width=width, height=height)
+        DialogManager.apply_popup_style(app, win, is_modal=is_modal, owner=owner)
+
+        return win
+
+    @staticmethod
     def apply_dark_title_bar(win):
         if sys.platform != "win32" or not win.winfo_exists():
             return
@@ -1023,16 +1042,7 @@ class DialogManager:
     @staticmethod
     def show_about_dialog(app):
         """Muestra el diálogo modal de 'Acerca de' estilizado con el logo oficial respetando su aspecto original."""
-        dialog = ctk.CTkToplevel(app)
-        dialog.title("Acerca de Sonometa")
-        dialog.geometry("460x300")
-        dialog.resizable(False, False)
-
-        # Atajo ESC para cerrar
-        dialog.bind("<Escape>", lambda e: dialog.destroy())
-
-        DialogManager.center_popup_on_parent(dialog, app, width=460, height=300)
-        DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=app)
+        dialog = DialogManager._new_modal(app, "Acerca de Sonometa", 460, 300)
 
         main_frame = ctk.CTkFrame(dialog, fg_color="#1E1E1E")
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
@@ -1119,15 +1129,7 @@ class DialogManager:
 
     @staticmethod
     def show_keyboard_shortcuts_dialog(app):
-        shortcuts_win = ctk.CTkToplevel(app)
-        shortcuts_win.title("Atajos de Teclado")
-        shortcuts_win.geometry("500x380")
-
-        # Cierre con ESC
-        shortcuts_win.bind("<Escape>", lambda e: shortcuts_win.destroy())
-
-        DialogManager.center_popup_on_parent(shortcuts_win, app, width=500, height=380)
-        DialogManager.apply_popup_style(app, shortcuts_win, is_modal=True, owner=app)
+        shortcuts_win = DialogManager._new_modal(app, "Atajos de Teclado", 500, 380, resizable=True)
 
         frame_content = ctk.CTkFrame(shortcuts_win)
         frame_content.pack(fill="both", expand=True, padx=15, pady=15)
@@ -1481,15 +1483,7 @@ class DialogManager:
 
     @staticmethod
     def open_unified_catalog_manager(app):
-        win = ctk.CTkToplevel(app)
-        win.title("Gestor Unificado de Catálogos")
-        win.geometry("820x600")
-
-        # Cierre con ESC
-        win.bind("<Escape>", lambda e: win.destroy())
-
-        DialogManager.center_popup_on_parent(win, app, width=820, height=600)
-        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
+        win = DialogManager._new_modal(app, "Gestor Unificado de Catálogos", 820, 600)
 
         font_btn = ctk.CTkFont(size=12, weight="bold")
 
@@ -1524,14 +1518,7 @@ class DialogManager:
 
         def prompt_for_value(title, prompt_text, default_value=""):
             result = [None]
-            dlg = ctk.CTkToplevel(win)
-            dlg.title(title)
-            dlg.geometry("400x150")
-
-            dlg.bind("<Escape>", lambda e: dlg.destroy())
-
-            DialogManager.center_popup_on_parent(dlg, win, width=400, height=150)
-            DialogManager.apply_popup_style(app, dlg, is_modal=True, owner=win)
+            dlg = DialogManager._new_modal(app, title, 400, 150, parent=win)
 
             ctk.CTkLabel(dlg, text=prompt_text, text_color="#E5E7EB", font=ctk.CTkFont(weight="bold")).pack(pady=(15, 5))
 
@@ -1776,16 +1763,7 @@ class DialogManager:
     @staticmethod
     def open_column_customization_dialog(app):
         """Abre un modal para seleccionar las columnas visibles en la grilla principal."""
-        win = ctk.CTkToplevel(app)
-        win.title("Personalizar Columnas Visibles - Sonometa")
-        win.geometry("450x520")
-        win.resizable(False, False)
-
-        # Cierre con ESC
-        win.bind("<Escape>", lambda e: win.destroy())
-
-        DialogManager.center_popup_on_parent(win, app, width=450, height=520)
-        DialogManager.apply_popup_style(app, win, is_modal=True, owner=app)
+        win = DialogManager._new_modal(app, "Personalizar Columnas Visibles - Sonometa", 450, 520)
 
         font_btn = ctk.CTkFont(size=12, weight="bold")
         corp_color = getattr(app, "CORP_COLOR", "#6B21A8")

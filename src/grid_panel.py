@@ -10,9 +10,31 @@ from log_handler import LogManager
 from advanced_filter_panel import AdvancedFilterPanel
 from models import AdvancedFilterCriteria
 from tree_row_utils import build_column_index, get_row_value, set_row_value, map_row_values, build_row_values
+from ui_utils import UiUtils
+
+
+class _CellEditSession:
+    """Estado de una edición de celda en curso, compartido entre los pasos de guardado/navegación."""
+
+    __slots__ = (
+        "entry", "row_id", "col_index", "col_name", "current_value_str",
+        "allowed_values_for_validation", "finalized", "pending_nav",
+    )
+
+    def __init__(self, entry, row_id, col_index, col_name, current_value_str, allowed_values_for_validation):
+        self.entry = entry
+        self.row_id = row_id
+        self.col_index = col_index
+        self.col_name = col_name
+        self.current_value_str = current_value_str
+        self.allowed_values_for_validation = allowed_values_for_validation
+        self.finalized = False
+        self.pending_nav = {"dir": None}
 
 
 class GridPanel:
+    MANAGED_GRID_FIELDS = frozenset({"Album", "Genre", "Publisher"})
+
     def __init__(self, app, parent, logger):
         self.app = app
         self.parent = parent
@@ -844,8 +866,6 @@ class GridPanel:
             return
         current_value = row_values[col_index]
 
-        managed_grid_fields = {"Album", "Genre", "Publisher"}
-
         style = ttk.Style()
         style.configure(
             "DarkGrid.TCombobox",
@@ -866,7 +886,7 @@ class GridPanel:
 
         allowed_values_for_validation = None
 
-        if col_name in managed_grid_fields:
+        if col_name in self.MANAGED_GRID_FIELDS:
             if col_name == "Publisher":
                 current_genre = str(self.get_value_by_column(row_values, "Genre", "")).strip()
                 if hasattr(self.app.catalog_manager, "get_allowed_publishers_for_genre") and current_genre:
@@ -922,7 +942,7 @@ class GridPanel:
             current_stem, _ = os.path.splitext(current_value_str)
             entry.insert(0, current_stem)
         else:
-            if col_name in managed_grid_fields:
+            if col_name in self.MANAGED_GRID_FIELDS:
                 current_options = [str(v) for v in entry.cget("values")]
 
                 if current_value_str and current_value_str not in current_options and current_value_str != self.app.CLEAR_OPTION:
@@ -937,313 +957,353 @@ class GridPanel:
             else:
                 entry.insert(0, current_value_str)
 
-        if col_name not in managed_grid_fields:
+        if col_name not in self.MANAGED_GRID_FIELDS:
             entry.select_range(0, "end")
+            UiUtils.bind_entry_selection_fix(entry)
 
         entry.focus_set()
         entry.place(x=x, y=y, width=w, height=h)
 
-        if col_name in managed_grid_fields and open_dropdown:
+        if col_name in self.MANAGED_GRID_FIELDS and open_dropdown:
             entry.after(50, lambda: self._open_tree_combo_dropdown(entry) if entry.winfo_exists() else None)
 
-        finalized = False
-        pending_nav = {"dir": None}
+        session = _CellEditSession(
+            entry=entry,
+            row_id=row_id,
+            col_index=col_index,
+            col_name=col_name,
+            current_value_str=current_value_str,
+            allowed_values_for_validation=allowed_values_for_validation,
+        )
 
-        def queue_nav(direction):
-            pending_nav["dir"] = direction
+        if col_name in self.MANAGED_GRID_FIELDS:
+            entry.bind("<<ComboboxSelected>>", lambda e: self._cell_edit_on_combo_selected(session, e))
 
-        def save_edit(evt=None, commit_value=True):
-            nonlocal finalized
-            if finalized:
-                return True
-            finalized = True
-            self._active_cell_tab_navigator = None
+            bind_popdown = lambda e=None: self._cell_edit_bind_popdown_events(session, e)
+            bind_popdown()
+            entry.bind("<Map>", bind_popdown)
+            entry.bind("<Button-1>", bind_popdown, add="+")
+            entry.bind("<Down>", bind_popdown, add="+")
+            entry.bind("<F4>", bind_popdown, add="+")
 
-            if not entry.winfo_exists():
-                self.cell_entry = None
-                return True
+        entry.bind("<Tab>", lambda e: (self._cell_edit_queue_nav(session, "tab"), self._cell_edit_navigate(session, "tab", e))[1])
+        entry.bind("<Shift-Tab>", lambda e: (self._cell_edit_queue_nav(session, "shift_tab"), self._cell_edit_navigate(session, "shift_tab", e))[1])
+        entry.bind("<ISO_Left_Tab>", lambda e: (self._cell_edit_queue_nav(session, "shift_tab"), self._cell_edit_navigate(session, "shift_tab", e))[1])
+        entry.bind("<Return>", lambda e: self._cell_edit_navigate(session, "enter", e))
+        entry.bind("<KP_Enter>", lambda e: self._cell_edit_navigate(session, "enter", e))
+        entry.bind("<Shift-Return>", lambda e: self._cell_edit_navigate(session, "shift_enter", e))
+        entry.bind("<Escape>", lambda e: self._cell_edit_cancel(session, e))
+        entry.bind("<FocusOut>", lambda e: self._cell_edit_on_focus_out(session, e))
 
-            self._close_tree_combo_dropdown(entry)
+        self.cell_entry = entry
+        self._active_cell_tab_navigator = lambda direction: self._cell_edit_navigate_from_global_tab(session, direction)
 
-            if not commit_value:
-                new_value = current_value_str
-            else:
-                try:
-                    new_value = entry.get().strip()
-                except Exception:
-                    new_value = current_value_str
+    def _cell_edit_queue_nav(self, session, direction):
+        session.pending_nav["dir"] = direction
 
-            if hasattr(entry, "_is_cell_editing"):
-                try:
-                    del entry._is_cell_editing
-                except AttributeError:
-                    pass
+    def _cell_edit_save(self, session, evt=None, commit_value=True):
+        if session.finalized:
+            return True
+        session.finalized = True
+        self._active_cell_tab_navigator = None
 
-            try:
-                entry.destroy()
-            except Exception:
-                pass
+        entry = session.entry
+        row_id = session.row_id
+        col_index = session.col_index
+        col_name = session.col_name
+        current_value_str = session.current_value_str
+
+        if not entry.winfo_exists():
             self.cell_entry = None
+            return True
 
+        self._close_tree_combo_dropdown(entry)
+
+        if not commit_value:
+            new_value = current_value_str
+        else:
+            try:
+                new_value = entry.get().strip()
+            except Exception:
+                new_value = current_value_str
+
+        if hasattr(entry, "_is_cell_editing"):
+            try:
+                del entry._is_cell_editing
+            except AttributeError:
+                pass
+
+        try:
+            entry.destroy()
+        except Exception:
+            pass
+        self.cell_entry = None
+
+        # Solo reclamar el foco de teclado para la grilla si nada más lo tomó ya
+        # (p. ej. si el usuario hizo click en un campo del Detail Panel mientras se
+        # cerraba la edición, ese click ya movió el foco legítimamente y no debe robársele).
+        focus_target = self.app.focus_get()
+        if focus_target is None or focus_target is self.tree:
             self.tree.focus_set()
 
-            active_selection = self.tree.selection()
-            if not active_selection:
-                if row_id and row_id in self.tree.get_children():
-                    self.tree.selection_set(row_id)
-                    self.tree.focus(row_id)
-                    self.tree.see(row_id)
+        active_selection = self.tree.selection()
+        if not active_selection:
+            if row_id and row_id in self.tree.get_children():
+                self.tree.selection_set(row_id)
+                self.tree.focus(row_id)
+                self.tree.see(row_id)
 
-            if not commit_value:
-                return True
+        if not commit_value:
+            return True
 
-            if col_name in managed_grid_fields:
-                if new_value == self.app.CLEAR_OPTION:
-                    new_value = ""
-                else:
-                    new_value = self.app.catalog_manager.normalize_catalog_text(new_value)
+        if col_name in self.MANAGED_GRID_FIELDS:
+            if new_value == self.app.CLEAR_OPTION:
+                new_value = ""
+            else:
+                new_value = self.app.catalog_manager.normalize_catalog_text(new_value)
 
-                if new_value:
-                    valid_set = allowed_values_for_validation
-                    if valid_set is None or len(valid_set) == 0:
-                        valid_set = set(self.app.catalog_manager.get_catalog_combo_values(col_name))
+            if new_value:
+                valid_set = session.allowed_values_for_validation
+                if valid_set is None or len(valid_set) == 0:
+                    valid_set = set(self.app.catalog_manager.get_catalog_combo_values(col_name))
 
-                    if valid_set and new_value not in valid_set:
-                        self.logger.warning(f"Valor '{new_value}' no permitido para la columna {col_name}.")
-                        self.app.show_themed_dialog(
-                            "Valor no válido",
-                            f"El valor '{new_value}' no pertenece al catálogo o a las opciones permitidas para {col_name}.",
-                            level="warning"
-                        )
-                        return False
-
-            if col_name == "Filename":
-                if not new_value:
-                    self.logger.warning("Nombre de archivo vacío: se cancela el renombrado.")
-                    self.app.show_themed_dialog("Nombre no válido", "El nombre del archivo no puede estar vacío.", level="warning")
-                    return False
-
-                safe_name = new_value.replace("/", "_").replace("\\", "_").rstrip(".").strip()
-                if not safe_name:
-                    self.logger.warning("Nombre de archivo inválido: se cancela el renombrado.")
-                    self.app.show_themed_dialog("Nombre no válido", "El nombre del archivo no es válido.", level="warning")
-                    return False
-
-                original_filename = current_value_str
-                _, original_ext = os.path.splitext(original_filename)
-                final_filename = f"{safe_name}{original_ext}"
-
-                if final_filename == original_filename:
-                    return True
-
-                file_path = self.app.file_paths_map.get(row_id)
-                if not file_path or not os.path.exists(file_path):
-                    self.logger.error("No se puede renombrar: archivo no encontrado.")
-                    self.app.show_themed_dialog("Archivo no encontrado", "No se puede renombrar porque el archivo ya no existe en disco.", level="error")
-                    return False
-
-                target_path = os.path.join(os.path.dirname(file_path), final_filename)
-                if os.path.normcase(target_path) != os.path.normcase(file_path) and os.path.exists(target_path):
-                    self.logger.warning(f"Ya existe un archivo con ese nombre: {final_filename}")
-                    self.app.show_themed_dialog("Nombre en uso", f"Ya existe un archivo con el nombre:\n{final_filename}", level="warning")
-                    return False
-
-                try:
-                    os.rename(file_path, target_path)
-                    self.app.file_paths_map[row_id] = target_path
-
-                    values = list(self.tree.item(row_id, "values"))
-                    values[col_index] = final_filename
-                    self.tree.item(row_id, values=values)
-                    self.app.detail_panel.on_row_select(None)
-
-                    log_msg = LogManager.format_tree_log(
-                        context="GRID",
-                        action="Renombrado",
-                        filename=final_filename,
-                        prev_vals={"Filename": original_filename},
-                        new_vals={"Filename": final_filename}
+                if valid_set and new_value not in valid_set:
+                    self.logger.warning(f"Valor '{new_value}' no permitido para la columna {col_name}.")
+                    self.app.show_themed_dialog(
+                        "Valor no válido",
+                        f"El valor '{new_value}' no pertenece al catálogo o a las opciones permitidas para {col_name}.",
+                        level="warning"
                     )
-                    self.logger.info(log_msg)
-                except Exception as e:
-                    self.logger.error(f"No se pudo renombrar el archivo '{original_filename}': {str(e)}")
-                    self.app.show_themed_dialog("Error al renombrar", f"No se pudo renombrar el archivo:\n{str(e)}", level="error")
                     return False
 
-                return True
+        if col_name == "Filename":
+            if not new_value:
+                self.logger.warning("Nombre de archivo vacío: se cancela el renombrado.")
+                self.app.show_themed_dialog("Nombre no válido", "El nombre del archivo no puede estar vacío.", level="warning")
+                return False
 
-            if new_value == current_value_str:
+            safe_name = new_value.replace("/", "_").replace("\\", "_").rstrip(".").strip()
+            if not safe_name:
+                self.logger.warning("Nombre de archivo inválido: se cancela el renombrado.")
+                self.app.show_themed_dialog("Nombre no válido", "El nombre del archivo no es válido.", level="warning")
+                return False
+
+            original_filename = current_value_str
+            _, original_ext = os.path.splitext(original_filename)
+            final_filename = f"{safe_name}{original_ext}"
+
+            if final_filename == original_filename:
                 return True
 
             file_path = self.app.file_paths_map.get(row_id)
-            if hasattr(self.app, "undo_manager"):
-                action = HistoryAction(
-                    file_path,
-                    row_id,
-                    col_name,
-                    col_index,
-                    current_value_str,
-                    new_value,
-                    col_name=col_name,
-                )
-                self.app.undo_manager.record_action(action)
+            if not file_path or not os.path.exists(file_path):
+                self.logger.error("No se puede renombrar: archivo no encontrado.")
+                self.app.show_themed_dialog("Archivo no encontrado", "No se puede renombrar porque el archivo ya no existe en disco.", level="error")
+                return False
 
-            values = list(self.tree.item(row_id, "values"))
-            values[col_index] = new_value
+            target_path = os.path.join(os.path.dirname(file_path), final_filename)
+            if os.path.normcase(target_path) != os.path.normcase(file_path) and os.path.exists(target_path):
+                self.logger.warning(f"Ya existe un archivo con ese nombre: {final_filename}")
+                self.app.show_themed_dialog("Nombre en uso", f"Ya existe un archivo con el nombre:\n{final_filename}", level="warning")
+                return False
 
-            self.tree.item(row_id, values=values)
+            try:
+                os.rename(file_path, target_path)
+                self.app.file_paths_map[row_id] = target_path
 
-            if hasattr(self.app, "detail_panel"):
+                values = list(self.tree.item(row_id, "values"))
+                values[col_index] = final_filename
+                self.tree.item(row_id, values=values)
                 self.app.detail_panel.on_row_select(None)
 
-            if file_path:
-                self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
-                filename = os.path.basename(file_path)
                 log_msg = LogManager.format_tree_log(
                     context="GRID",
-                    action="Modificado",
-                    filename=filename,
-                    prev_vals={col_name: current_value_str if current_value_str else None},
-                    new_vals={col_name: new_value if new_value else None}
+                    action="Renombrado",
+                    filename=final_filename,
+                    prev_vals={"Filename": original_filename},
+                    new_vals={"Filename": final_filename}
                 )
                 self.logger.info(log_msg)
+            except Exception as e:
+                self.logger.error(f"No se pudo renombrar el archivo '{original_filename}': {str(e)}")
+                self.app.show_themed_dialog("Error al renombrar", f"No se pudo renombrar el archivo:\n{str(e)}", level="error")
+                return False
 
             return True
 
-        def cancel_edit(evt=None):
-            nonlocal finalized
-            if finalized:
-                return "break"
-            finalized = True
-            self._active_cell_tab_navigator = None
+        if new_value == current_value_str:
+            return True
 
-            self._close_tree_combo_dropdown(entry)
+        file_path = self.app.file_paths_map.get(row_id)
+        if hasattr(self.app, "undo_manager"):
+            action = HistoryAction(
+                file_path,
+                row_id,
+                col_name,
+                col_index,
+                current_value_str,
+                new_value,
+                col_name=col_name,
+            )
+            self.app.undo_manager.record_action(action)
 
-            if hasattr(entry, "_is_cell_editing"):
-                del entry._is_cell_editing
+        values = list(self.tree.item(row_id, "values"))
+        values[col_index] = new_value
 
-            entry.destroy()
-            self.cell_entry = None
-            self.tree.focus_set()
+        self.tree.item(row_id, values=values)
+
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.on_row_select(None)
+
+        if file_path:
+            self.app.audio_manager.save_single_tag(file_path, col_name, new_value)
+            filename = os.path.basename(file_path)
+            log_msg = LogManager.format_tree_log(
+                context="GRID",
+                action="Modificado",
+                filename=filename,
+                prev_vals={col_name: current_value_str if current_value_str else None},
+                new_vals={col_name: new_value if new_value else None}
+            )
+            self.logger.info(log_msg)
+
+        return True
+
+    def _cell_edit_cancel(self, session, evt=None):
+        if session.finalized:
             return "break"
+        session.finalized = True
+        self._active_cell_tab_navigator = None
 
-        def execute_navigation(direction):
-            try:
-                if not entry.winfo_exists():
-                    return
+        entry = session.entry
+        self._close_tree_combo_dropdown(entry)
 
-                is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
+        if hasattr(entry, "_is_cell_editing"):
+            del entry._is_cell_editing
 
-                if is_open:
-                    self._close_tree_combo_dropdown(entry)
+        entry.destroy()
+        self.cell_entry = None
+        self.tree.focus_set()
+        return "break"
 
-                if save_edit(commit_value=True):
-                    next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
-                    if next_target:
-                        next_row_id, next_col_index = next_target
-                        self.tree.selection_set(next_row_id)
-                        self.tree.focus(next_row_id)
-                        self.tree.see(next_row_id)
-
-                        if hasattr(self.app, "detail_panel"):
-                            self.app.detail_panel.on_row_select(None)
-
-                        self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
-            finally:
-                pending_nav["dir"] = None
-                self.app.after(80, lambda: setattr(self, "_nav_lock", False))
-
-        def navigate(direction, evt=None):
-            if getattr(self, "_nav_lock", False):
-                return "break"
-
+    def _cell_edit_execute_navigation(self, session, direction):
+        entry = session.entry
+        row_id = session.row_id
+        col_index = session.col_index
+        col_name = session.col_name
+        try:
             if not entry.winfo_exists():
-                return "break"
+                return
 
-            is_open = col_name in managed_grid_fields and self._is_tree_combo_dropdown_open(entry)
+            is_open = col_name in self.MANAGED_GRID_FIELDS and self._is_tree_combo_dropdown_open(entry)
 
-            if col_name in managed_grid_fields and direction in ("enter", "shift_enter"):
-                pending_nav["dir"] = None
-                if is_open:
-                    self._close_tree_combo_dropdown(entry)
-                entry.focus_set()
-                return "break"
+            if is_open:
+                self._close_tree_combo_dropdown(entry)
 
-            self._nav_lock = True
-            self.app.after_idle(lambda: execute_navigation(direction))
+            if self._cell_edit_save(session, commit_value=True):
+                next_target = self._get_next_tree_edit_target(row_id, col_index, direction)
+                if next_target:
+                    next_row_id, next_col_index = next_target
+                    self.tree.selection_set(next_row_id)
+                    self.tree.focus(next_row_id)
+                    self.tree.see(next_row_id)
+
+                    if hasattr(self.app, "detail_panel"):
+                        self.app.detail_panel.on_row_select(None)
+
+                    self.app.after(10, lambda r=next_row_id, c=next_col_index: self._start_tree_cell_edit(r, c, open_dropdown=False))
+        finally:
+            session.pending_nav["dir"] = None
+            self.app.after(80, lambda: setattr(self, "_nav_lock", False))
+
+    def _cell_edit_navigate(self, session, direction, evt=None):
+        if getattr(self, "_nav_lock", False):
             return "break"
 
-        def navigate_from_global_tab(direction):
-            if direction == "shift_tab":
-                queue_nav("shift_tab")
-                return navigate("shift_tab")
-            queue_nav("tab")
-            return navigate("tab")
+        entry = session.entry
+        col_name = session.col_name
 
-        def on_focus_out(evt=None):
-            def commit_if_closed():
-                if not entry.winfo_exists():
+        if not entry.winfo_exists():
+            return "break"
+
+        is_open = col_name in self.MANAGED_GRID_FIELDS and self._is_tree_combo_dropdown_open(entry)
+
+        if col_name in self.MANAGED_GRID_FIELDS and direction in ("enter", "shift_enter"):
+            session.pending_nav["dir"] = None
+            if is_open:
+                self._close_tree_combo_dropdown(entry)
+            entry.focus_set()
+            return "break"
+
+        self._nav_lock = True
+        self.app.after_idle(lambda: self._cell_edit_execute_navigation(session, direction))
+        return "break"
+
+    def _cell_edit_navigate_from_global_tab(self, session, direction):
+        if direction == "shift_tab":
+            self._cell_edit_queue_nav(session, "shift_tab")
+            return self._cell_edit_navigate(session, "shift_tab")
+        self._cell_edit_queue_nav(session, "tab")
+        return self._cell_edit_navigate(session, "tab")
+
+    def _cell_edit_on_focus_out(self, session, evt=None):
+        def commit_if_closed():
+            entry = session.entry
+            if not entry.winfo_exists():
+                return
+
+            if getattr(self, "_nav_lock", False):
+                return
+
+            pending_direction = session.pending_nav.get("dir")
+            if pending_direction:
+                self._nav_lock = True
+                self.app.after_idle(lambda d=pending_direction: self._cell_edit_execute_navigation(session, d))
+                return
+
+            if session.col_name in self.MANAGED_GRID_FIELDS:
+                if self._is_tree_combo_dropdown_open(entry):
+                    return
+                focus_widget = self.app.focus_get()
+                if focus_widget is entry:
                     return
 
-                if getattr(self, "_nav_lock", False):
-                    return
+            self._cell_edit_save(session)
 
-                pending_direction = pending_nav.get("dir")
-                if pending_direction:
-                    self._nav_lock = True
-                    self.app.after_idle(lambda d=pending_direction: execute_navigation(d))
-                    return
+        session.entry.after(150, commit_if_closed)
 
-                if col_name in managed_grid_fields:
-                    if self._is_tree_combo_dropdown_open(entry):
-                        return
-                    focus_widget = self.app.focus_get()
-                    if focus_widget is entry:
-                        return
+    def _cell_edit_on_combo_selected(self, session, _evt=None):
+        entry = session.entry
+        entry.after(0, lambda: entry.focus_set() if entry.winfo_exists() else None)
+        return "break"
 
-                save_edit()
+    def _cell_edit_bind_popdown_events(self, session, evt=None):
+        entry = session.entry
+        try:
+            popdown = entry.tk.eval(f"ttk::combobox::PopdownWindow {entry}")
+            popdown_widget = entry.nametowidget(popdown)
+            listbox = entry.nametowidget(f"{popdown}.f.l")
 
-            entry.after(150, commit_if_closed)
+            for target in (listbox, popdown_widget):
+                self._attach_editor_bindtag(target)
+                target.bind("<Tab>", lambda e: (self._cell_edit_queue_nav(session, "tab"), self._cell_edit_navigate(session, "tab", e))[1])
+                target.bind("<KeyPress-Tab>", lambda e: (self._cell_edit_queue_nav(session, "tab"), self._cell_edit_navigate(session, "tab", e))[1])
+                target.bind("<Shift-Tab>", lambda e: (self._cell_edit_queue_nav(session, "shift_tab"), self._cell_edit_navigate(session, "shift_tab", e))[1])
+                target.bind("<ISO_Left_Tab>", lambda e: (self._cell_edit_queue_nav(session, "shift_tab"), self._cell_edit_navigate(session, "shift_tab", e))[1])
+                # Absorbe la rueda del mouse aquí: si el evento llega al bind_all global de
+                # customtkinter (CTkScrollableFrame), revienta porque no reconoce este widget
+                # interno de ttk::combobox como un widget Python válido.
+                target.bind("<MouseWheel>", lambda e: self._cell_edit_popdown_scroll(listbox, e))
+        except Exception:
+            pass
 
-        if col_name in managed_grid_fields:
-            def on_combo_selected(_evt=None):
-                entry.after(0, lambda: entry.focus_set() if entry.winfo_exists() else None)
-                return "break"
-
-            entry.bind("<<ComboboxSelected>>", on_combo_selected)
-
-            def bind_popdown_events(evt=None):
-                try:
-                    popdown = entry.tk.eval(f"ttk::combobox::PopdownWindow {entry}")
-                    popdown_widget = entry.nametowidget(popdown)
-                    listbox = entry.nametowidget(f"{popdown}.f.l")
-
-                    for target in (listbox, popdown_widget):
-                        self._attach_editor_bindtag(target)
-                        target.bind("<Tab>", lambda e: (queue_nav("tab"), navigate("tab", e))[1])
-                        target.bind("<KeyPress-Tab>", lambda e: (queue_nav("tab"), navigate("tab", e))[1])
-                        target.bind("<Shift-Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
-                        target.bind("<ISO_Left_Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
-                except Exception:
-                    pass
-
-            bind_popdown_events()
-            entry.bind("<Map>", bind_popdown_events)
-            entry.bind("<Button-1>", bind_popdown_events, add="+")
-            entry.bind("<Down>", bind_popdown_events, add="+")
-            entry.bind("<F4>", bind_popdown_events, add="+")
-
-        entry.bind("<Tab>", lambda e: (queue_nav("tab"), navigate("tab", e))[1])
-        entry.bind("<Shift-Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
-        entry.bind("<ISO_Left_Tab>", lambda e: (queue_nav("shift_tab"), navigate("shift_tab", e))[1])
-        entry.bind("<Return>", lambda e: navigate("enter", e))
-        entry.bind("<KP_Enter>", lambda e: navigate("enter", e))
-        entry.bind("<Shift-Return>", lambda e: navigate("shift_enter", e))
-        entry.bind("<Escape>", cancel_edit)
-        entry.bind("<FocusOut>", on_focus_out)
-
-        self.cell_entry = entry
-        self._active_cell_tab_navigator = navigate_from_global_tab
+    def _cell_edit_popdown_scroll(self, listbox, event):
+        """Desplaza manualmente la lista del combo y absorbe el evento de rueda del mouse."""
+        try:
+            listbox.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+        return "break"
 
     def select_file_by_row_id(self, row_id):
         if not row_id or row_id not in self.tree.get_children():

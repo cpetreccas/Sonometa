@@ -1,7 +1,6 @@
 import io
 import os
 import logging
-import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 import threading
@@ -15,6 +14,7 @@ logger = logging.getLogger("Sonometa")
 MetadataDict = Dict[str, Any]
 MetadataCacheKey = Tuple[str, int, int]
 MAX_METADATA_CACHE = 8000
+MAX_DURATION_CACHE = 5000
 
 
 class AudioManager:
@@ -24,6 +24,8 @@ class AudioManager:
     def __init__(self, cache_manager=None) -> None:
         self._metadata_cache: "OrderedDict[MetadataCacheKey, MetadataDict]" = OrderedDict()
         self._cache_lock = threading.Lock()
+        self._duration_cache: "OrderedDict[MetadataCacheKey, float]" = OrderedDict()
+        self._duration_cache_lock = threading.Lock()
         self.cache_manager = cache_manager  # Caché persistente opcional
 
     @staticmethod
@@ -76,6 +78,45 @@ class AudioManager:
     def clear_runtime_caches(self) -> None:
         with self._cache_lock:
             self._metadata_cache.clear()
+        with self._duration_cache_lock:
+            self._duration_cache.clear()
+
+    @staticmethod
+    def get_fast_audio_duration(file_path: str) -> float:
+        """Lee únicamente el header del archivo sin decodificar audio completo (sin caché)."""
+        from mutagen import File as MutagenFile
+
+        audio = None
+        try:
+            audio = MutagenFile(file_path)
+            if audio and audio.info and hasattr(audio.info, "length"):
+                return float(audio.info.length)
+        except Exception:
+            pass
+        finally:
+            AudioManager._safe_close_audio(audio)
+        return 0.0
+
+    def get_cached_duration(self, file_path: str) -> float:
+        """Duración en segundos leída del header, cacheada en memoria (lectura ligera para la UI)."""
+        key = self._build_file_cache_key(file_path)
+        if not key:
+            return self.get_fast_audio_duration(file_path)
+
+        with self._duration_cache_lock:
+            cached = self._duration_cache.get(key)
+            if cached is not None:
+                self._duration_cache.move_to_end(key)
+                return cached
+
+        duration = self.get_fast_audio_duration(file_path)
+        with self._duration_cache_lock:
+            if key in self._duration_cache:
+                self._duration_cache.move_to_end(key)
+            self._duration_cache[key] = duration
+            while len(self._duration_cache) > MAX_DURATION_CACHE:
+                self._duration_cache.popitem(last=False)
+        return duration
 
     def _refresh_persistent_cache_after_mutation(self, file_path: str) -> None:
         """Recalcula metadatos y los guarda como pendientes de sincronización."""
@@ -310,33 +351,6 @@ class AudioManager:
             return 0
 
     @staticmethod
-    def _normalize_rating_value(raw_value) -> Optional[int]:
-        if raw_value is None:
-            return None
-
-        text = str(raw_value).strip()
-        if text == "":
-            return None
-
-        try:
-            value = float(text)
-        except Exception:
-            return None
-
-        if value <= 1:
-            stars = round(value * 5)
-        elif value <= 5:
-            stars = round(value)
-        elif value <= 100:
-            stars = round(value / 20)
-        elif value <= 255:
-            stars = round(value / 51)
-        else:
-            stars = round(value)
-
-        return max(0, min(5, int(stars)))
-
-    @staticmethod
     def _extract_traktor_xml_string(audio_obj) -> Optional[str]:
         xml_data_bytes = None
 
@@ -495,12 +509,50 @@ class AudioManager:
     # Escritura de etiquetas de texto
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _open_id3_or_wave_tags(file_path, ext):
+        """Abre (o crea si no existe) el contenedor de tags ID3/WAVE para escritura.
+
+        Devuelve (audio_wav, audio_tags, is_new_id3). audio_wav es None para MP3.
+        """
+        from mutagen.id3 import ID3, ID3NoHeaderError
+        from mutagen.wave import WAVE
+
+        audio_wav = None
+        is_new_id3 = False
+        if ext == ".wav":
+            audio_wav = WAVE(file_path)
+            if audio_wav.tags is None:
+                audio_wav.add_tags()
+            audio_tags = audio_wav.tags
+        else:
+            try:
+                audio_tags = ID3(file_path)
+            except ID3NoHeaderError:
+                audio_tags = ID3()
+                is_new_id3 = True
+
+        return audio_wav, audio_tags, is_new_id3
+
+    @staticmethod
+    def _save_id3_or_wave_tags(file_path, ext, audio_wav, audio_tags, is_new_id3):
+        """Guarda en disco los tags abiertos con _open_id3_or_wave_tags."""
+        if ext == ".wav" and audio_wav is not None:
+            audio_wav.save()
+        elif is_new_id3:
+            audio_tags.save(file_path, v2_version=4)
+        else:
+            audio_tags.save(file_path)
+
+    def _refresh_after_write(self, file_path):
+        """Invalida la caché en memoria y refresca la caché persistente tras una escritura exitosa."""
+        self._invalidate_metadata_cache(file_path)
+        if self.cache_manager:
+            self._refresh_persistent_cache_after_mutation(file_path)
+
     def save_single_tag(self, file_path, field_name, new_value, app=None):
         """Guarda (o elimina) una única etiqueta de texto en el archivo de audio."""
-        from mutagen.id3 import (
-            ID3, TIT2, TPE1, TPE4, TALB, TCON, TPUB, TDRC, COMM, TXXX, ID3NoHeaderError,
-        )
-        from mutagen.wave import WAVE
+        from mutagen.id3 import TIT2, TPE1, TPE4, TALB, TCON, TPUB, TDRC, COMM, TXXX
         from mutagen.flac import FLAC
         from mutagen.mp4 import MP4
         from mutagen import File as MutagenFile
@@ -514,19 +566,7 @@ class AudioManager:
 
         try:
             if ext in (".mp3", ".wav"):
-                audio_wav = None
-                is_new_id3 = False
-                if ext == ".wav":
-                    audio_wav = WAVE(file_path)
-                    if audio_wav.tags is None:
-                        audio_wav.add_tags()
-                    audio_tags = audio_wav.tags
-                else:
-                    try:
-                        audio_tags = ID3(file_path)
-                    except ID3NoHeaderError:
-                        audio_tags = ID3()
-                        is_new_id3 = True
+                audio_wav, audio_tags, is_new_id3 = self._open_id3_or_wave_tags(file_path, ext)
 
                 frame_map = {
                     "Title":     TIT2,
@@ -559,15 +599,8 @@ class AudioManager:
                         if field_name == "MixArtist":
                             audio_tags.delall("TXXX:REMIXEDBY")
 
-                if ext == ".wav" and audio_wav is not None:
-                    audio_wav.save()
-                    has_mutation = True
-                else:
-                    if is_new_id3:
-                        audio_tags.save(file_path, v2_version=4)
-                    else:
-                        audio_tags.save(file_path)
-                    has_mutation = True
+                self._save_id3_or_wave_tags(file_path, ext, audio_wav, audio_tags, is_new_id3)
+                has_mutation = True
 
             elif ext == ".flac":
                 audio = FLAC(file_path)
@@ -675,27 +708,14 @@ class AudioManager:
 
     def embed_cover_art(self, file_path, image_bytes):
         """Incrusta la carátula en el archivo de audio. Devuelve True si tiene éxito."""
-        from mutagen.id3 import ID3, APIC, ID3NoHeaderError
-        from mutagen.wave import WAVE
+        from mutagen.id3 import APIC
         from mutagen.flac import FLAC, Picture
         from mutagen.mp4 import MP4, MP4Cover
 
         ext = os.path.splitext(file_path)[1].lower()
         try:
             if ext in (".mp3", ".wav"):
-                audio_wav = None
-                is_new_id3 = False
-                if ext == ".wav":
-                    audio_wav = WAVE(file_path)
-                    if audio_wav.tags is None:
-                        audio_wav.add_tags()
-                    audio_tags = audio_wav.tags
-                else:
-                    try:
-                        audio_tags = ID3(file_path)
-                    except ID3NoHeaderError:
-                        audio_tags = ID3()
-                        is_new_id3 = True
+                audio_wav, audio_tags, is_new_id3 = self._open_id3_or_wave_tags(file_path, ext)
 
                 audio_tags.delall("APIC")
                 audio_tags.add(APIC(
@@ -706,13 +726,7 @@ class AudioManager:
                     data=image_bytes,
                 ))
 
-                if ext == ".wav" and audio_wav is not None:
-                    audio_wav.save()
-                else:
-                    if is_new_id3:
-                        audio_tags.save(file_path, v2_version=4)
-                    else:
-                        audio_tags.save(file_path)
+                self._save_id3_or_wave_tags(file_path, ext, audio_wav, audio_tags, is_new_id3)
 
             elif ext == ".flac":
                 audio = FLAC(file_path)
@@ -737,9 +751,7 @@ class AudioManager:
                 )
                 return False
 
-            self._invalidate_metadata_cache(file_path)
-            if self.cache_manager:
-                self._refresh_persistent_cache_after_mutation(file_path)
+            self._refresh_after_write(file_path)
             return True
 
         except Exception as e:
@@ -817,9 +829,7 @@ class AudioManager:
                     audio.save()
 
             logger.info(f"Carátula eliminada con éxito de: {os.path.basename(file_path)}")
-            self._invalidate_metadata_cache(file_path)
-            if self.cache_manager:
-                self._refresh_persistent_cache_after_mutation(file_path)
+            self._refresh_after_write(file_path)
 
         except Exception as e:
             logger.error(f"Error al eliminar carátula de {os.path.basename(file_path)}: {str(e)}")
@@ -964,9 +974,7 @@ class AudioManager:
                         del audio.tags[k]
                     audio.save()
 
-            self._invalidate_metadata_cache(file_path)
-            if self.cache_manager:
-                self._refresh_persistent_cache_after_mutation(file_path)
+            self._refresh_after_write(file_path)
             return True
 
         except Exception as e:

@@ -1,5 +1,4 @@
 FUNCIONALIDADES GENERALES:
-- Al tener texto seleccionado en una celda y moverte con ctrl+shift izq o der, hay un comportamiento raro.
 - Integrar búsquedas en Google para el nombre y carátulas
 - Exportar una lista de texto con la colección
 - Exportar una copia de los archivos seleccionados con Ctrl+C / Ctrl+V para pegar una lista filtrada directamente a un pen.
@@ -11,10 +10,6 @@ Salud en app de escritorio:
 - Detección de Temas Descompensados (Volumen y LUFS)
 - Detección de Clipping / Distorsión Digital
 - Archivos Corruptos o Incompletos
-
-Panel de filtros avanzados:
-- Se pierde la ordenación cuando seleccionas un álbum y luego le das a TODOS
-- Limpiar
 
 WebApp:
 - Añadir wantlist y colección a la WebApp

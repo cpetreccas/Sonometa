@@ -64,6 +64,76 @@ class UiUtils:
             self.tipwindow = None
 
     @staticmethod
+    def _word_boundary_index(text, index, direction):
+        """Calcula el índice del siguiente/anterior límite de palabra (estilo Ctrl+Flecha)."""
+        length = len(text)
+        if direction > 0:
+            i = index
+            while i < length and text[i].isspace():
+                i += 1
+            while i < length and not text[i].isspace():
+                i += 1
+            return i
+
+        i = index
+        while i > 0 and text[i - 1].isspace():
+            i -= 1
+        while i > 0 and not text[i - 1].isspace():
+            i -= 1
+        return i
+
+    @staticmethod
+    def extend_entry_selection(entry, target_index):
+        """Extiende o colapsa la selección de texto de un Entry hacia target_index.
+
+        El binding nativo de Tk para Shift-Home/End/Flechas usa 'selection adjust', que ajusta
+        el límite de selección más cercano al nuevo índice; si ese límite ya coincide con el
+        índice objetivo (p. ej. Ctrl+Shift+Home justo después de un Ctrl+Shift+End que dejó el
+        inicio de la selección en 0), no hace nada y la selección completa queda visualmente
+        intacta. Aquí se replica el modelo estándar de "ancla + cursor" de un editor de texto
+        para que la selección colapse correctamente cuando el cursor vuelve al punto de anclaje.
+        """
+        try:
+            target = entry.index(target_index)
+            if entry.selection_present():
+                sel_start = entry.index("sel.first")
+                sel_end = entry.index("sel.last")
+                cur = entry.index("insert")
+                anchor = sel_end if cur <= sel_start else sel_start
+            else:
+                anchor = entry.index("insert")
+
+            entry.icursor(target)
+            if anchor == target:
+                entry.selection_clear()
+            else:
+                entry.selection_range(min(anchor, target), max(anchor, target))
+        except Exception:
+            pass
+        return "break"
+
+    @staticmethod
+    def bind_entry_selection_fix(entry):
+        """Corrige Shift-Home/End y Ctrl-Shift-Izquierda/Derecha en un tk.Entry para que la
+        selección colapse correctamente al volver al punto de anclaje (ver extend_entry_selection).
+        Debe aplicarse sobre el Entry real; para CTkEntry usar su atributo interno `_entry`.
+        """
+        entry.bind("<Shift-Home>", lambda e: UiUtils.extend_entry_selection(entry, 0))
+        entry.bind("<Shift-End>", lambda e: UiUtils.extend_entry_selection(entry, "end"))
+        entry.bind(
+            "<Control-Shift-Right>",
+            lambda e: UiUtils.extend_entry_selection(
+                entry, UiUtils._word_boundary_index(entry.get(), entry.index("insert"), 1)
+            )
+        )
+        entry.bind(
+            "<Control-Shift-Left>",
+            lambda e: UiUtils.extend_entry_selection(
+                entry, UiUtils._word_boundary_index(entry.get(), entry.index("insert"), -1)
+            )
+        )
+
+    @staticmethod
     def build_discogs_query(artist, title, fallback_text=""):
         parts = [str(artist).strip(), str(title).strip()]
         query = " ".join(part for part in parts if part)

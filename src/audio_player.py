@@ -46,7 +46,7 @@ class AudioPlayer:
         self.current_file_path = file_path
 
         # Obtener duración al instante leyendo la cabecera del archivo
-        self.total_length = self.panel.get_fast_audio_duration(file_path)
+        self.total_length = self.app.audio_manager.get_fast_audio_duration(file_path)
         self.panel.update_audio_time_display(0, self.total_length)
         if hasattr(self.panel, "slider_audio") and self.panel.slider_audio:
             self.panel.slider_audio.set(0)
@@ -77,7 +77,7 @@ class AudioPlayer:
         """Carga el audio en memoria y reproduce desde la posición indicada."""
         try:
             if not self.total_length or self.total_length <= 0:
-                self.total_length = self.panel.get_fast_audio_duration(self.current_file_path)
+                self.total_length = self.app.audio_manager.get_fast_audio_duration(self.current_file_path)
 
             # Cargar archivo a búfer en memoria si no está cargado ya
             if self.audio_stream is None:
