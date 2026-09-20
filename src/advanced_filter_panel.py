@@ -258,10 +258,20 @@ class AdvancedFilterPanel(ctk.CTkFrame):
                 pass
             self._filter_debounce_id = None
 
+        # Reconstruir combos ignorando explícitamente '[ Todos ]'
+        active_combos = {}
+        for k, v in self.combo_vars.items():
+            val = v.get().strip()
+            if val and val != "[ Todos ]":
+                active_combos[k] = val
+
+        active_text = {k: v.get().strip().lower() for k, v in self.text_vars.items() if v.get().strip()}
+        active_toggles = {k: v.get() for k, v in self.toggle_vars.items()}
+
         criteria = AdvancedFilterCriteria(
-            text={k: v.get().strip().lower() for k, v in self.text_vars.items() if v.get().strip()},
-            combo={k: v.get() for k, v in self.combo_vars.items() if v.get() != "[ Todos ]"},
-            toggles={k: v.get() for k, v in self.toggle_vars.items()},
+            text=active_text,
+            combo=active_combos,
+            toggles=active_toggles,
         )
         self.on_filter_change(criteria)
 

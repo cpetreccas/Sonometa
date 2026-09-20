@@ -670,6 +670,18 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+import customtkinter.windows.ctk_toplevel as ctk_toplevel
+
+_original_revert = ctk_toplevel.CTkToplevel._revert_withdraw_after_windows_set_titlebar_color
+def _safe_revert_withdraw(self):
+    try:
+        if self.winfo_exists():
+            _original_revert(self)
+    except Exception:
+        pass  # Si el widget ya no existe en Tcl, capturamos el TclError silenciosamente
+ctk_toplevel.CTkToplevel._revert_withdraw_after_windows_set_titlebar_color = _safe_revert_withdraw
+
+
 class ProgressDialog(ctk.CTkToplevel):
     """Modal de progreso para operaciones pesadas con actualización segura desde hilos."""
 
@@ -680,11 +692,14 @@ class ProgressDialog(ctk.CTkToplevel):
         self._current = 0
         self._ui_queue = queue.Queue()
         self._ui_pump_after_id = None
+        self._is_closed = False
 
         self.title("Progreso - Sonometa")
         self.geometry("520x190")
         self.resizable(False, False)
         self.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        self.bind("<Destroy>", self._on_destroy_cleanup)
 
         self._setup_ui(title_text, message)
 
@@ -692,6 +707,16 @@ class ProgressDialog(ctk.CTkToplevel):
         DialogManager.center_popup_on_parent(self, self.app, width=520, height=190)
         DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
         self._start_ui_pump()
+
+    def _on_destroy_cleanup(self, event=None):
+        """Detiene cualquier temporizador activo cuando Tkinter destruye el widget."""
+        self._is_closed = True
+        if self._ui_pump_after_id is not None:
+            try:
+                self.after_cancel(self._ui_pump_after_id)
+            except Exception:
+                pass
+            self._ui_pump_after_id = None
 
     def _setup_ui(self, title_text, message):
         frame = ctk.CTkFrame(self, fg_color="#1E1E1E")
@@ -729,26 +754,40 @@ class ProgressDialog(ctk.CTkToplevel):
         self.lbl_counter.pack(fill="x")
 
     def close(self):
-        if self._ui_pump_after_id:
+        if self._is_closed:
+            return
+
+        self._on_destroy_cleanup()
+
+        def _do_destroy():
             try:
-                self.after_cancel(self._ui_pump_after_id)
+                self.grab_release()
             except Exception:
                 pass
-            self._ui_pump_after_id = None
 
+            try:
+                if self.winfo_exists():
+                    self.destroy()
+            except Exception:
+                pass
+
+        # Si se cierra inmediatamente al crearla (0 archivos), posponemos el destroy 50ms
+        # para darle tiempo a CustomTkinter a ejecutar su revert visual interno.
         try:
-            self.grab_release()
+            if self.winfo_exists():
+                self.after(50, _do_destroy)
+            else:
+                _do_destroy()
         except Exception:
-            pass
-        self.destroy()
+            _do_destroy()
 
     def set_progress(self, value):
         value = max(0.0, min(1.0, float(value)))
-        if self.winfo_exists():
+        if not self._is_closed and self.winfo_exists():
             self.progress.set(value)
 
     def set_text(self, title=None, message=None, counter_text=None):
-        if not self.winfo_exists():
+        if self._is_closed or not self.winfo_exists():
             return
         if title is not None:
             self.lbl_title.configure(text=title)
@@ -772,21 +811,28 @@ class ProgressDialog(ctk.CTkToplevel):
         self.set_progress(progress_value)
 
     def set_progress_threadsafe(self, value):
-        self._ui_queue.put(("progress", value))
+        if not self._is_closed:
+            self._ui_queue.put(("progress", value))
 
     def set_text_threadsafe(self, title=None, message=None, counter_text=None):
-        self._ui_queue.put(("text", {"title": title, "message": message, "counter_text": counter_text}))
+        if not self._is_closed:
+            self._ui_queue.put(("text", {"title": title, "message": message, "counter_text": counter_text}))
 
     def set_counter_threadsafe(self, current, total=None, current_file=""):
-        self._ui_queue.put(("counter", {"current": current, "total": total, "current_file": current_file}))
+        if not self._is_closed:
+            self._ui_queue.put(("counter", {"current": current, "total": total, "current_file": current_file}))
 
     def _start_ui_pump(self):
-        if self._ui_pump_after_id is None:
-            self._ui_pump_after_id = self.after(30, self._drain_ui_queue)
+        if not self._is_closed and self._ui_pump_after_id is None:
+            try:
+                self._ui_pump_after_id = self.after(30, self._drain_ui_queue)
+            except Exception:
+                pass
 
     def _drain_ui_queue(self):
         self._ui_pump_after_id = None
-        if not self.winfo_exists():
+
+        if self._is_closed or not self.winfo_exists():
             return
 
         processed = 0
@@ -804,7 +850,11 @@ class ProgressDialog(ctk.CTkToplevel):
             elif action == "counter":
                 self.set_counter(**payload)
 
-        self._ui_pump_after_id = self.after(30, self._drain_ui_queue)
+        if not self._is_closed and self.winfo_exists():
+            try:
+                self._ui_pump_after_id = self.after(30, self._drain_ui_queue)
+            except Exception:
+                pass
 
 
 class DialogManager:

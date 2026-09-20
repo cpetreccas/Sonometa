@@ -110,14 +110,17 @@ class GridPanel:
 
         return "break"
 
-    def apply_advanced_filters(self, criteria: dict):
+    def apply_advanced_filters(self, criteria):
+        """Recibe el criterio del panel, sobrescribe el estado previo por completo y filtra."""
         if isinstance(criteria, AdvancedFilterCriteria):
             criteria_obj = criteria
         else:
             criteria_obj = AdvancedFilterCriteria.from_dict(criteria)
 
+        # Sobrescribir estado completo (sin acumular filtros previos)
         self._advanced_criteria = criteria_obj
         self.active_filters = criteria_obj.to_dict()
+
         self.apply_combined_filters(criteria=criteria_obj)
 
     @staticmethod
@@ -187,7 +190,6 @@ class GridPanel:
 
         return True
 
-
     @staticmethod
     def _parse_cues_value(value: str) -> int:
         raw = str(value or "").strip()
@@ -202,12 +204,16 @@ class GridPanel:
         return any(bool(v) for v in criteria_obj.toggles.values())
 
     def apply_combined_filters(self, search_query=None, criteria=None):
-        """Aplica búsqueda textual y filtro avanzado de forma unificada con AND lógico."""
-        criteria_obj = self._advanced_criteria
+        """Aplica búsqueda textual y filtro avanzado respetando el orden actual de las columnas."""
         if criteria is not None:
-            criteria_obj = criteria if isinstance(criteria, AdvancedFilterCriteria) else AdvancedFilterCriteria.from_dict(criteria)
+            if isinstance(criteria, AdvancedFilterCriteria):
+                criteria_obj = criteria
+            else:
+                criteria_obj = AdvancedFilterCriteria.from_dict(criteria)
             self._advanced_criteria = criteria_obj
             self.active_filters = criteria_obj.to_dict()
+        else:
+            criteria_obj = self._advanced_criteria
 
         if search_query is None:
             raw_query = ""
@@ -217,15 +223,17 @@ class GridPanel:
         else:
             normalized_query = self._remove_accents(str(search_query).strip())
 
+        # 1. Obtener todos los ítems base
         if hasattr(self.app, "file_paths_map") and self.app.file_paths_map:
             all_rows = list(self.app.file_paths_map.keys())
         else:
-            all_rows = getattr(getattr(self.app, "search_manager", None), "_all_tree_items", list(self.tree.get_children("")))
+            all_rows = list(self.tree.get_children(""))
 
         cols = list(self.tree["columns"])
         col_index = build_column_index(cols)
         visible_rows = []
 
+        # 2. Filtrado de filas
         for row_id in all_rows:
             if not self.tree.exists(row_id):
                 continue
@@ -246,50 +254,40 @@ class GridPanel:
 
         visible_set = set(visible_rows)
         current_rows = list(self.tree.get_children(""))
-        current_set = set(current_rows)
-        changed_visibility = False
 
+        # 3. Ocultar los elementos que no cumplen los filtros
         to_detach = [row_id for row_id in current_rows if row_id not in visible_set]
         if to_detach:
             self.tree.detach(*to_detach)
-            changed_visibility = True
 
-        for idx, row_id in enumerate(visible_rows):
+        # 4. Volver a vincular los visibles que estaban desprendidos
+        for row_id in visible_rows:
+            if not self.tree.parent(row_id) and row_id not in self.tree.get_children(""):
+                self.tree.move(row_id, "", "end")
+
+        # 5. REAPLICAR EL ORDENAMIENTO ACTIVO (SOLUCIÓN CLAVE)
+        # Si hay un ordenamiento activo, reaplicarlo respetando su dirección
+        self.reapply_current_sort()
+
+        # 6. Re-aplicar colores alternados (zebra striping) tras ordenar
+        for idx, row_id in enumerate(self.tree.get_children("")):
             should_tag = "even" if idx % 2 == 0 else "odd"
-            current_tags = self.tree.item(row_id, "tags")
-            if not current_tags or current_tags[0] != should_tag:
-                self.tree.item(row_id, tags=(should_tag,))
+            self.tree.item(row_id, tags=(should_tag,))
 
-            if row_id not in current_set:
-                self.tree.reattach(row_id, "", idx)
-                changed_visibility = True
-                continue
-
-            try:
-                if self.tree.index(row_id) != idx:
-                    self.tree.reattach(row_id, "", idx)
-                    changed_visibility = True
-            except Exception:
-                self.tree.reattach(row_id, "", idx)
-                changed_visibility = True
-
+        # 7. Ajustar selección y botones
         current_selection = list(self.tree.selection())
         selected_visible = [row_id for row_id in current_selection if row_id in visible_set]
-        selection_changed = selected_visible != current_selection
-        if selection_changed:
+        if selected_visible != current_selection:
             self.tree.selection_set(selected_visible)
 
-        if changed_visibility or selection_changed:
-            if hasattr(self.app, "detail_panel"):
-                self.app.detail_panel.refresh_process_button_text(len(selected_visible))
-                self.app.detail_panel.on_row_select(None)
+        if hasattr(self.app, "detail_panel"):
+            self.app.detail_panel.refresh_process_button_text(len(selected_visible))
+            self.app.detail_panel.on_row_select(None)
 
-            if hasattr(self, "_update_tree_scrollbars"):
-                self._update_tree_scrollbars()
+        if hasattr(self, "_update_tree_scrollbars"):
+            self._update_tree_scrollbars()
 
-        self.logger.info(
-            f"Filtro combinado aplicado: {len(visible_rows)} de {len(all_rows)}."
-        )
+        self.logger.info(f"Filtro combinado y ordenación aplicados: {len(visible_rows)} de {len(all_rows)}.")
 
     def _install_editor_bindtag_guard(self):
         # Captura TAB antes del binding de clase TCombobox/TEntry.
@@ -1278,9 +1276,18 @@ class GridPanel:
             if row_id:
                 self._start_tree_cell_edit(row_id, col_index)
 
-    def sort_by_column(self, col):
+    def sort_by_column(self, col, toggle_direction=True):
         data = [(self.tree.set(child, col), child) for child in self.tree.get_children('')]
-        reverse = self.app.sort_directions.get(col, False)
+
+        if toggle_direction:
+            reverse = self.app.sort_directions.get(col, False)
+            self.app.sort_directions[col] = not reverse
+        else:
+            reverse = not self.app.sort_directions.get(col, True)
+
+        self._active_sort_col = col
+        self._last_sort_reverse = reverse
+
         data.sort(key=lambda x: str(x[0]).lower(), reverse=reverse)
 
         for index, item in enumerate(data):
@@ -1297,7 +1304,37 @@ class GridPanel:
         sorted_title = self.col_titles.get(col, col) + arrow
         self.tree.heading(col, text=sorted_title)
 
-        self.app.sort_directions[col] = not reverse
+    def reapply_current_sort(self):
+        """
+        Reaaplica la ordenación actualmente activa sin cambiar de dirección.
+        Se usa tras filtrado para mantener el orden respetado por el usuario.
+
+        Si no hay ordenación activa, no hace nada.
+        """
+        # Verificar si hay un ordenamiento activo
+        if not hasattr(self, "_active_sort_col") or not self._active_sort_col:
+            return
+
+        if not hasattr(self, "_last_sort_reverse"):
+            self._last_sort_reverse = False
+
+        col = self._active_sort_col
+        reverse = self._last_sort_reverse
+
+        # Obtener datos actuales (filas visibles)
+        data = [(self.tree.set(child, col), child) for child in self.tree.get_children('')]
+
+        if not data:
+            return
+
+        # Ordenar usando la dirección guardada
+        data.sort(key=lambda x: str(x[0]).lower(), reverse=reverse)
+
+        # Reposicionar filas en el nuevo orden
+        for index, item in enumerate(data):
+            self.tree.move(item[1], '', index)
+            tag = "even" if index % 2 == 0 else "odd"
+            self.tree.item(item[1], tags=(tag,))
 
     def select_all_rows(self):
         all_items = self.tree.get_children()
