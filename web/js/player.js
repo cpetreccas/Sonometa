@@ -22,6 +22,7 @@ export function playTrack(track) {
     const playerCoverContainer = document.getElementById('playerCoverContainer');
     const playerTitle = document.getElementById('playerTitle');
     const playerArtist = document.getElementById('playerArtist');
+    const playerDetails = document.querySelector('.player-details');
     const mainAudio = document.getElementById('mainAudio');
 
     if (playerBar) {
@@ -39,12 +40,62 @@ export function playTrack(track) {
         } else {
             playerCoverContainer.innerHTML = `<span class="cover-badge">N/A</span>`;
         }
+
+        playerCoverContainer.style.cursor = 'pointer';
+        playerCoverContainer.onclick = () => {
+            if (typeof window.openTrackDetailModal === 'function') {
+                window.openTrackDetailModal(track.id);
+            }
+        };
+    }
+
+    if (playerDetails) {
+        playerDetails.style.cursor = 'pointer';
+        playerDetails.onclick = () => {
+            if (typeof window.openTrackDetailModal === 'function') {
+                window.openTrackDetailModal(track.id);
+            }
+        };
+    }
+
+    // Configurar Metadatos para iOS Lockscreen / MediaSession
+    if ('mediaSession' in navigator) {
+        const titleText = track.title || track.filename || 'Tema desconocido';
+        const artistText = track.artist || 'Artista Desconocido';
+        const albumText = track.album || track.mix_artist || 'Sonometa Cloud';
+        const artworkUrl = track.cover_url && track.cover_url.trim() !== ''
+            ? track.cover_url
+            : 'https://via.placeholder.com/512?text=No+Cover';
+
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: titleText,
+            artist: artistText,
+            album: albumText,
+            artwork: [
+                { src: artworkUrl, sizes: '96x96',   type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '128x128', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '192x192', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '384x384', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }
+            ]
+        });
+
+        // Habilitar controles multimedia del centro de control de iOS
+        navigator.mediaSession.setActionHandler('play', () => {
+            if (mainAudio) mainAudio.play();
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+            if (mainAudio) mainAudio.pause();
+        });
+        navigator.mediaSession.setActionHandler('nexttrack', () => {
+            playNextTrack();
+        });
     }
 
     if (mainAudio) {
         mainAudio.src = track.preview_audio_url;
 
-        // Aplicar la velocidad y el pitch estilo vinilo
         applyPitchAndSpeed(mainAudio, currentSpeed);
 
         mainAudio.play().then(() => updatePlayIcon(true)).catch(console.error);

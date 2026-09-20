@@ -2,16 +2,18 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/icono_iphone_180.png">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Sonometa">
-    <title>Sonometa Cloud - Mi Colección</title>
+    <title>Sonometa Cloud</title>
     <link rel="icon" type="image/x-icon" href="assets/logo.webp">
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script type="module" src="js/dashboard.js?v=2.0"></script>
 </head>
 <body>
 
@@ -82,8 +84,8 @@
 
         <!-- Menú de Acciones -->
         <div id="headerActions" class="header-actions">
-            <button id="btnDashboard" class="btn-primary btn-header" style="display:none;" onclick="switchView('dashboard')">Ver dashboards</button>
-            <button id="btnTable" class="btn-primary btn-header" onclick="switchView('table')">Ver mi colección</button>
+            <button id="btnDashboard" class="btn-primary btn-header" style="display:none;" onclick="switchView('dashboard')">Dashboards</button>
+            <button id="btnTable" class="btn-primary btn-header" onclick="switchView('table')">Colección</button>
             <button id="btnLogout" class="btn-secondary">Salir</button>
         </div>
     </div>
@@ -208,13 +210,6 @@
                         <div class="col-picker-header">Visibilidad de columnas</div>
                         <div id="columnPickerList" class="col-picker-list"></div>
                     </div>
-                </div>
-                <div class="toggle-container no-select">
-                    <span class="toggle-label">Ver detalle</span>
-                    <label class="switch">
-                        <input type="checkbox" id="chkVerDetalle" onchange="toggleVerDetalle()">
-                        <span class="slider round"></span>
-                    </label>
                 </div>
             </div>
         </div>

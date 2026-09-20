@@ -2,10 +2,17 @@
 
 let chartInstances = {};
 
-// Paleta de colores
+// Paleta de colores ajustada a la Guía de Estilos de Sonometa (Dark UI / Purple Accent)
 const COLORS = [
-    '#10B981', '#F59E0B', '#3B82F6', '#EF4444',
-    '#9333EA', '#EC4899', '#14B8A6', '#8B5CF6', '#64748B'
+    '#8B5CF6', // Purple Primary
+    '#6366F1', // Indigo Accent
+    '#A855F7', // Purple Light
+    '#EC4899', // Pink Accent
+    '#3B82F6', // Blue Secondary
+    '#7C3AED', // Purple Dark Hover
+    '#C084FC', // Violet Soft
+    '#38BDF8', // Sky Blue
+    '#64748B'  // Neutral Muted
 ];
 
 /**
@@ -70,9 +77,6 @@ export function populateFilterDropdowns(allTracks = []) {
 /**
  * Renderiza la leyenda personalizada y asigna eventos táctiles
  */
-/**
- * Renderiza la leyenda personalizada y asigna eventos táctiles
- */
 function renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel) {
     const legendElem = document.getElementById(legendId);
     if (!legendElem) return;
@@ -130,9 +134,6 @@ function renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel) {
 /**
  * Calcula las métricas de completitud de 7 campos y renderiza el score, diagnóstico y Radar Chart
  */
-/**
- * Calcula las métricas de completitud de 7 campos y renderiza el score, diagnóstico y Radar Chart
- */
 function renderCollectionHealth(tracks = []) {
     const total = tracks.length;
     if (total === 0) return;
@@ -175,32 +176,42 @@ function renderCollectionHealth(tracks = []) {
         scoreCircle.style.strokeDashoffset = offset;
     }
 
-    // 2. Diagnóstico: Formato limpio y espaciado con badges
+    // 2. Diagnóstico: Formato limpio con iconos SVG vectoriales según Guía de Estilos
     const diagElem = document.getElementById('healthDiagnosis');
     if (diagElem) {
         let diagHtml = '';
 
-        const createBadge = (icon, count, label) => `
-            <div class="diag-item" style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: #A1A1AA;">
-                <span class="diag-icon" style="font-size: 0.95rem;">${icon}</span>
+        const DIAG_ICONS = {
+            cover: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#EC4899" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
+            rating: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+            cues: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`,
+            genre: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A855F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+            publisher: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`,
+            album: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C084FC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>`,
+            year: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`
+        };
+
+        const createBadge = (iconSvg, count, label) => `
+            <div class="diag-item" style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #A1A1AA;">
+                <span class="diag-icon" style="display: flex; align-items: center; justify-content: center;">${iconSvg}</span>
                 <strong class="diag-num" style="color: #F4F4F5; font-weight: 600;">${count.toLocaleString('es-ES')}</strong>
                 <span>${label}</span>
             </div>
         `;
 
-        if (hasCover < total) diagHtml += createBadge('🖼️', total - hasCover, 'sin carátula');
-        if (hasRating < total) diagHtml += createBadge('⭐', total - hasRating, 'sin valoración');
-        if (hasCues < total) diagHtml += createBadge('🎧', total - hasCues, 'sin Cue points');
-        if (hasGenre < total) diagHtml += createBadge('🎵', total - hasGenre, 'sin género');
-        if (hasPublisher < total) diagHtml += createBadge('🏷️', total - hasPublisher, 'sin etiqueta');
-        if (hasAlbum < total) diagHtml += createBadge('💿', total - hasAlbum, 'sin álbum');
-        if (hasYear < total) diagHtml += createBadge('📅', total - hasYear, 'sin año');
+        if (hasCover < total) diagHtml += createBadge(DIAG_ICONS.cover, total - hasCover, 'sin carátula');
+        if (hasRating < total) diagHtml += createBadge(DIAG_ICONS.rating, total - hasRating, 'sin valoración');
+        if (hasCues < total) diagHtml += createBadge(DIAG_ICONS.cues, total - hasCues, 'sin Cue points');
+        if (hasGenre < total) diagHtml += createBadge(DIAG_ICONS.genre, total - hasGenre, 'sin género');
+        if (hasPublisher < total) diagHtml += createBadge(DIAG_ICONS.publisher, total - hasPublisher, 'sin etiqueta');
+        if (hasAlbum < total) diagHtml += createBadge(DIAG_ICONS.album, total - hasAlbum, 'sin álbum');
+        if (hasYear < total) diagHtml += createBadge(DIAG_ICONS.year, total - hasYear, 'sin año');
 
         if (diagHtml === '') diagHtml = '<div style="color:#10B981; grid-column: span 2;">✨ Colección 100% completada</div>';
         diagElem.innerHTML = diagHtml;
     }
 
-    // 3. Renderizar Radar Chart con los 7 ejes
+    // 3. Renderizar Radar Chart
     const canvas = document.getElementById('healthRadarChart');
     if (!canvas || typeof Chart === 'undefined') return;
 
@@ -223,7 +234,7 @@ function renderCollectionHealth(tracks = []) {
                     metrics.cover,
                     metrics.year
                 ],
-                backgroundColor: 'rgba(139, 92, 246, 0.25)',
+                backgroundColor: 'rgba(139, 92, 246, 0.3)',
                 borderColor: '#8B5CF6',
                 borderWidth: 2,
                 pointBackgroundColor: '#EC4899',
@@ -241,14 +252,14 @@ function renderCollectionHealth(tracks = []) {
             },
             scales: {
                 r: {
-                    angleLines: { color: 'rgba(255, 255, 255, 0.1)' },
-                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                    angleLines: { color: 'rgba(255, 255, 255, 0.22)' },
+                    grid: { color: 'rgba(255, 255, 255, 0.18)' },
                     pointLabels: {
-                        color: '#A1A1AA',
-                        font: { size: 10, weight: '600' }
+                        color: '#F4F4F5',
+                        font: { size: 11, weight: '600' }
                     },
                     ticks: {
-                        color: '#71717A',
+                        color: '#B3B3AD',
                         backdropColor: 'transparent',
                         stepSize: 20
                     },
@@ -310,6 +321,7 @@ export function updateDashboard(tracksList = []) {
                 dataVals = labels.map(k => counts[k] || 0);
             }
 
+            // Aplicar la paleta de colores corporativa
             const sliceColors = labels.map((_, i) => COLORS[i % COLORS.length]);
 
             const chartCanvas = document.getElementById(canvasId);
@@ -326,8 +338,8 @@ export function updateDashboard(tracksList = []) {
 
             const datasetConfig = {
                 data: dataVals,
-                backgroundColor: chartType === 'line' ? 'rgba(99, 102, 241, 0.2)' : sliceColors,
-                borderColor: chartType === 'line' ? '#6366F1' : '#24242A',
+                backgroundColor: chartType === 'line' ? 'rgba(139, 92, 246, 0.25)' : sliceColors,
+                borderColor: chartType === 'line' ? '#8B5CF6' : '#24242A',
                 borderWidth: chartType === 'line' ? 2 : computedBorderWidth,
                 borderRadius: chartType === 'bar' ? 4 : 0,
                 fill: chartType === 'line',
@@ -366,9 +378,9 @@ export function updateDashboard(tracksList = []) {
                 chartConfig.options.scales = {
                     x: {
                         display: chartType === 'line',
-                        grid: { color: '#363640' },
+                        grid: { color: 'rgba(255, 255, 255, 0.08)' },
                         ticks: {
-                            color: '#A1A1AA',
+                            color: '#B3B3AD',
                             maxRotation: 45,
                             autoSkip: true,
                             maxTicksLimit: 15
@@ -376,8 +388,8 @@ export function updateDashboard(tracksList = []) {
                     },
                     y: {
                         beginAtZero: true,
-                        grid: { color: '#363640' },
-                        ticks: { color: '#A1A1AA' }
+                        grid: { color: 'rgba(255, 255, 255, 0.08)' },
+                        ticks: { color: '#B3B3AD' }
                     }
                 };
             }
@@ -388,14 +400,14 @@ export function updateDashboard(tracksList = []) {
             }
         };
 
-        // 1. Álbum y Género
+        // 1. Álbum y Género (Gráficos de tarta)
         buildChart('albumChart', 'albumLegend', 'album', 'Sin Álbum', 'pie');
         buildChart('genreChart', 'genreLegend', 'genre', 'Sin Género', 'pie');
 
-        // 2. Pistas por Etiqueta
+        // 2. Pistas por Etiqueta (Gráfico de barras)
         buildChart('publisherChart', 'publisherLegend', 'publisher', 'Sin Etiqueta', 'bar', false);
 
-        // 3. Agrupación dinámica SOLO de los años existentes
+        // 3. Agrupación dinámica SOLO de los años existentes (Gráfico de líneas)
         const yearCounts = {};
         tracksList.forEach(t => {
             const yr = parseInt(t.year, 10);

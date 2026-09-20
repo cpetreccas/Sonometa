@@ -2,6 +2,7 @@ import threading
 import logging
 import os
 import time
+import hashlib
 from typing import Any
 from src.supabase_client import SupabaseClientManager
 
@@ -109,7 +110,7 @@ class CloudSyncWorker(threading.Thread):
             if not filename:
                 filename = os.path.basename(filepath)
 
-            filename_hash = abs(hash(filepath))
+            filename_hash = hashlib.sha256(filepath.encode("utf-8")).hexdigest()
 
             # Extraer y subir portada si aplica
             cover_url = None

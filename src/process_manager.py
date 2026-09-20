@@ -297,20 +297,25 @@ class ProcessManager:
                 new_file_path = os.path.join(dir_name, new_filename)
 
                 if old_filename != new_filename:
-                    try:
-                        os.rename(file_path, new_file_path)
-                        file_path = new_file_path
-                        self._set_value(values, "Filename", new_filename)
-                        log_msg = LogManager.format_tree_log(
-                            context="PROCESS",
-                            action="Renombrado",
-                            filename=new_filename,
-                            prev_vals={"Filename": old_filename},
-                            new_vals={"Filename": new_filename}
+                    if os.path.normcase(new_file_path) != os.path.normcase(file_path) and os.path.exists(new_file_path):
+                        self.logger.warning(
+                            f"Renombrado omitido: ya existe un archivo llamado '{new_filename}'."
                         )
-                        self.logger.info(log_msg)
-                    except Exception as e:
-                        self.logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
+                    else:
+                        try:
+                            os.rename(file_path, new_file_path)
+                            file_path = new_file_path
+                            self._set_value(values, "Filename", new_filename)
+                            log_msg = LogManager.format_tree_log(
+                                context="PROCESS",
+                                action="Renombrado",
+                                filename=new_filename,
+                                prev_vals={"Filename": old_filename},
+                                new_vals={"Filename": new_filename}
+                            )
+                            self.logger.info(log_msg)
+                        except Exception as e:
+                            self.logger.error(f"No se pudo renombrar el archivo '{old_filename}': {str(e)}")
 
                 metadata_mappings = (
                     ("Artist", artist_parsed),

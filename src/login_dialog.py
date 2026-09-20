@@ -81,7 +81,6 @@ class LoginDialog(ctk.CTkToplevel):
             border_color="#333333",
         )
         self.entry_email.pack(fill="x", padx=15, pady=(0, 10))
-        self.entry_email.insert(0, "admin@sonometa.com")
 
         # Password
         lbl_password = ctk.CTkLabel(
@@ -101,7 +100,6 @@ class LoginDialog(ctk.CTkToplevel):
             border_color="#333333",
         )
         self.entry_password.pack(fill="x", padx=15, pady=(0, 5))
-        self.entry_password.insert(0, "aXg41Mj11!")
 
         # Mensajes de estado / error
         self.lbl_status = ctk.CTkLabel(

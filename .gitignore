@@ -24,7 +24,11 @@ Thumbs.db
 # Logs
 *.log
 
+# Local secrets
+.env
+
 # PyInstaller temp files
 *.manifest
 *.spec.bak
 
+/web

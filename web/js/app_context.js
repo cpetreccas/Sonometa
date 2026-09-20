@@ -3,7 +3,7 @@
  * Define constantes y propiedades mutables del estado global
  */
 
-export const PAGE_SIZE = 100;
+export const PAGE_SIZE = 50;
 
 export const ALL_COLUMNS = [
     { key: 'cover', label: 'Carátula', detailOnly: false },
@@ -38,19 +38,22 @@ export const context = {
         direction: 'asc'
     },
 
-    // Visibilidad de columnas
+    // Visibilidad de columnas por defecto
     columnVisibility: {
+        // Columnas fijas (excluidas del selector)
         cover: true,
+        filename: true,
         artist: true,
         title: true,
         mix_artist: true,
-        album: true,
-        genre: true,
-        publisher: true,
-        year: true,
-        cue_count: true,
-        rating: true,
-        filename: true
+
+        // Columnas seleccionables del ColumnPicker
+        year: true,         // Activa por defecto
+        rating: true,       // Activa por defecto
+        album: false,       // Oculta por defecto
+        genre: false,       // Oculta por defecto
+        publisher: false,   // Oculta por defecto
+        cue_count: false    // Oculta por defecto
     },
 
     // Filtros activos
@@ -65,4 +68,3 @@ export const context = {
         noRating: false
     }
 };
-

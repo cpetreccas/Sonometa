@@ -1,13 +1,22 @@
 import os
 import logging
 from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv
 from supabase import create_client, Client
 
 logger = logging.getLogger("Sonometa")
 
-# Se pueden cargar desde settings.json o variables de entorno
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://iwgpfqnyhjewuufrqali.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3Z3BmcW55aGpld3V1ZnJxYWxpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzMjcxNzAsImV4cCI6MjEwNDkwMzE3MH0.3cHCKKVaqrU2-NhKHFzNU7-SuFRIjWhv3h0by8hQOdE")
+load_dotenv()
+
+# Se cargan desde el archivo .env local (no versionado) o variables de entorno del sistema
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    logger.warning(
+        "SUPABASE_URL / SUPABASE_KEY no configuradas (ver .env.example). "
+        "La sincronización con la nube quedará deshabilitada."
+    )
 
 class SupabaseClientManager:
     """Gestiona la autenticación y las peticiones a Supabase Cloud."""

@@ -7,8 +7,6 @@ import { playTrack } from './player.js';
 
 /**
  * Ordena la colección de tracks según el estado de ordenación
- * @param {Array} tracks - Array de tracks a ordenar
- * @returns {Array} Array ordenado
  */
 export function sortCollection(tracks) {
     const { key, direction } = context.sortState;
@@ -35,11 +33,9 @@ export function sortCollection(tracks) {
 }
 
 /**
- * Ordena por una columna específica, alternando ascendente/descendente
- * @param {String} key - Clave de la columna
+ * Ordena por una columna específica
  */
 export function sortByColumn(key) {
-    // Evitar ordenar por carátula
     if (key === 'cover') return;
 
     if (context.sortState.key === key) {
@@ -52,13 +48,9 @@ export function sortByColumn(key) {
 }
 
 /**
- * Carga y renderiza los datos de la tabla y las tarjetas móviles con paginación
+ * Carga y renderiza los datos de la tabla y las tarjetas móviles
  */
 export function loadTableData() {
-    const chkVerDetalle = document.getElementById('chkVerDetalle');
-    const verDetalle = chkVerDetalle ? chkVerDetalle.checked : false;
-
-    // Aplicar ordenación seleccionada
     sortCollection(context.filteredTracks);
 
     const totalRecords = context.filteredTracks.length;
@@ -73,17 +65,8 @@ export function loadTableData() {
 
     if (!tbody || !thead) return;
 
-    // Construir columnas visibles según el modo (Detalle / Normal) y selector
-    const activeCols = ALL_COLUMNS.filter(c => {
-        if (!context.columnVisibility[c.key]) return false;
-        if (verDetalle) {
-            return !c.normalOnly;
-        } else {
-            return !c.detailOnly;
-        }
-    });
+    const activeCols = ALL_COLUMNS.filter(c => context.columnVisibility[c.key]);
 
-    // Renderizar cabecera (excluyendo interacción de orden en 'cover')
     let headerHtml = '<tr>';
     activeCols.forEach(col => {
         const isCover = col.key === 'cover';
@@ -102,7 +85,6 @@ export function loadTableData() {
     headerHtml += '</tr>';
     thead.innerHTML = headerHtml;
 
-    // Limpiar el contenido del tbody para evitar residuos de filas de 'sin registros'
     tbody.innerHTML = '';
 
     if (pageTracks.length > 0) {
@@ -112,7 +94,6 @@ export function loadTableData() {
             const tr = document.createElement('tr');
             tr.setAttribute('data-track-id', row.id);
 
-            // Seleccionar fila sin disparar la reproducción
             tr.onclick = function() {
                 document.querySelectorAll('#tableBody tr').forEach(r => r.classList.remove('selected-row'));
                 this.classList.add('selected-row');
@@ -152,7 +133,6 @@ export function loadTableData() {
         tbody.innerHTML = `<tr><td colspan="${activeCols.length || 1}" style="text-align: center;" class="text-subtle">No se encontraron registros.</td></tr>`;
     }
 
-    // Renderizar tarjetas para modo Mobile
     renderMobileCards(pageTracks);
 
     const resultsCountElem = document.getElementById('resultsCount');
@@ -166,13 +146,11 @@ export function loadTableData() {
         }
     }
 
-    // Actualizar y mostrar/ocultar el control de paginación
     updatePaginationUI(totalPages);
 }
 
 /**
  * Renderiza la vista en modo Card para pantallas móviles
- * @param {Array} tracks - Temas a mostrar en la página actual
  */
 function renderMobileCards(tracks) {
     let cardsContainer = document.getElementById('mobileCardsContainer');
@@ -208,30 +186,47 @@ function renderMobileCards(tracks) {
 
         const title = track.title || (track.filename ? track.filename.replace(/\.[^/.]+$/, "") : 'Sin título');
         const artist = track.artist || 'Artista Desconocido';
-        const genre = track.genre || 'Género N/A';
-        const key = track.key || track.initial_key || '';
-        const bpm = track.bpm ? `${Math.round(track.bpm)} BPM` : '';
+        const remixer = track.mix_artist || track.remixer || '';
 
-        let coverHtml = `<div class="card-cover-badge">N/A</div>`;
-        if (track.cover_url) {
-            coverHtml = `<img src="${track.cover_url}" class="card-cover" loading="lazy" alt="Cover">`;
+        let coverHtml = `<div class="card-cover-wrapper" onclick="event.stopPropagation(); window.openTrackDetailModal('${track.id}')">
+            ${track.cover_url ? `<img src="${track.cover_url}" class="card-cover" loading="lazy" alt="Cover">` : '<div class="card-cover-badge">N/A</div>'}
+        </div>`;
+
+        const metaItems = [];
+
+        if ((context.columnVisibility['mix_artist'] !== false || context.columnVisibility['remixer'] !== false) && remixer) {
+            metaItems.push(`<span>${remixer}</span>`);
+        }
+        if (context.columnVisibility['genre'] !== false && track.genre) {
+            metaItems.push(`<span>${track.genre}</span>`);
+        }
+        if (context.columnVisibility['year'] !== false && track.year) {
+            metaItems.push(`<span>${track.year}</span>`);
+        }
+        if (context.columnVisibility['album'] !== false && track.album) {
+            metaItems.push(`<span>${track.album}</span>`);
+        }
+        if (context.columnVisibility['publisher'] !== false && track.publisher) {
+            metaItems.push(`<span>${track.publisher}</span>`);
+        }
+        if (context.columnVisibility['cue_count'] !== false && Number(track.cue_count) > 0) {
+            metaItems.push(`<span>${track.cue_count} Cues</span>`);
+        }
+        if (context.columnVisibility['rating'] !== false && track.rating) {
+            const ratingStars = `${Math.max(0, Math.min(5, track.rating))}★`;
+            metaItems.push(`<span>${ratingStars}</span>`);
         }
 
-        const ratingStars = track.rating ? `${Math.max(0, Math.min(5, track.rating))}★` : '';
+        const metaRowHtml = metaItems.length > 0
+            ? `<div class="card-meta-row">${metaItems.join(' • ')}</div>`
+            : '';
 
         card.innerHTML = `
-            <div class="card-cover-wrapper" onclick="event.stopPropagation(); window.openTrackDetailModal('${track.id}')">
-                ${coverHtml}
-            </div>
+            ${coverHtml}
             <div class="card-info" onclick="event.stopPropagation(); window.openTrackDetailModal('${track.id}')">
                 <div class="card-title">${title}</div>
                 <div class="card-artist">${artist}</div>
-                <div class="card-meta-row">
-                    <span>${genre}</span>
-                    ${bpm ? `<span>• ${bpm}</span>` : ''}
-                    ${key ? `<span>• ${key}</span>` : ''}
-                    ${ratingStars ? `<span style="color: #FBBF24;">• ${ratingStars}</span>` : ''}
-                </div>
+                ${metaRowHtml}
             </div>
             <div class="card-actions">
                 <button class="btn-card-action" aria-label="Reproducir" onclick="event.stopPropagation(); window.playTrackFromCard('${track.id}')">
@@ -246,7 +241,6 @@ function renderMobileCards(tracks) {
     cardsContainer.appendChild(fragment);
 }
 
-// Handler auxiliar global para reproductor desde tarjetas
 window.playTrackFromCard = function(trackId) {
     const track = context.allTracks.find(t => String(t.id) === String(trackId));
     if (track) {
@@ -254,10 +248,6 @@ window.playTrackFromCard = function(trackId) {
     }
 };
 
-/**
- * Actualiza la interfaz de paginación
- * @param {Number} totalPages - Total de páginas
- */
 export function updatePaginationUI(totalPages) {
     const paginationControls = document.getElementById('paginationControls');
     const prevBtn = document.getElementById('prevBtn');
@@ -276,30 +266,21 @@ export function updatePaginationUI(totalPages) {
     }
 }
 
-/**
- * Alterna la visibilidad del selector de columnas
- * @param {Event} e - Evento del click
- */
 export function toggleColumnPicker(e) {
     e.stopPropagation();
     const dropdown = document.getElementById('columnPickerDropdown');
     if (dropdown) dropdown.classList.toggle('hidden');
 }
 
-/**
- * Renderiza el selector dinámico de visibilidad de columnas
- */
 export function renderColumnPicker() {
     const container = document.getElementById('columnPickerList');
     if (!container) return;
 
-    const chkVerDetalle = document.getElementById('chkVerDetalle');
-    const verDetalle = chkVerDetalle ? chkVerDetalle.checked : false;
-
     container.innerHTML = '';
+    const excludedKeys = ['cover', 'filename', 'artist', 'title', 'mix_artist'];
+
     ALL_COLUMNS.forEach(col => {
-        if (verDetalle && col.normalOnly) return;
-        if (!verDetalle && col.detailOnly) return;
+        if (excludedKeys.includes(col.key)) return;
 
         const item = document.createElement('label');
         item.className = 'col-picker-item no-select';
@@ -321,32 +302,33 @@ export function renderColumnPicker() {
     });
 }
 
-/**
- * Alterna entre vista detalle/normal
- */
-export function toggleVerDetalle() {
-    renderColumnPicker();
-    loadTableData();
-}
-
-/**
- * Cambia de página
- * @param {Number} delta - Delta a sumar/restar (1 o -1)
- */
 export function changePage(delta) {
     context.currentPage += delta;
     loadTableData();
 }
 
 /**
- * Abre el modal de detalle con los datos de la canción elegida
- * @param {String|Number} trackId - ID del track a mostrar
+ * Abre el modal de detalle mostrando el Remix debajo del autor y la rejilla de metadatos.
  */
 export function openTrackDetailModal(trackId) {
     const track = context.allTracks.find(t => String(t.id) === String(trackId));
     if (!track) return;
 
-    // Actualizar la cabecera con el filename
+    const formatVal = (val, suffix = '') => {
+        if (val !== undefined && val !== null && String(val).trim() !== '') {
+            return `${val}${suffix}`;
+        }
+        return '<span style="opacity: 0.4;">Sin especificar</span>';
+    };
+
+    const formatRating = (val) => {
+        if (val !== undefined && val !== null && Number(val) > 0) {
+            return `<span style="color: var(--primary-purple, #8B5CF6); font-weight: 600;">${Math.max(0, Math.min(5, Number(val)))}★</span>`;
+        }
+        return '<span style="opacity: 0.4;">Sin valoración</span>';
+    };
+
+    // 1. Cabecera, carátula, título y artista
     const modalHeaderFilename = document.getElementById('modalHeaderFilename');
     if (modalHeaderFilename) {
         modalHeaderFilename.textContent = track.filename || 'Detalle del Tema';
@@ -362,20 +344,39 @@ export function openTrackDetailModal(trackId) {
     const title = document.getElementById('detailTitle');
     if (title) title.textContent = track.title || track.filename || 'Título Desconocido';
 
+    // 2. Mostrar el Remix justo debajo del autor (Centrado y Morado)
     const remixerEl = document.getElementById('detailRemixer');
+    const mixVal = track.mix_artist || track.remixer;
     if (remixerEl) {
-        if (track.mix_artist) {
-            remixerEl.textContent = `Remix: ${track.mix_artist}`;
+        if (mixVal && String(mixVal).trim() !== '') {
+            remixerEl.textContent = `Remix: ${mixVal}`;
             remixerEl.style.display = 'block';
+            remixerEl.style.color = 'var(--primary-purple, #8B5CF6)';
+            remixerEl.style.textAlign = 'center';
+            remixerEl.style.fontWeight = '600';
+            remixerEl.style.margin = '0 0 8px 0';
         } else {
             remixerEl.style.display = 'none';
         }
     }
 
+    // 3. Grid con el resto de metadatos de la canción
     const yearEl = document.getElementById('detailYear');
-    if (yearEl) yearEl.textContent = track.year ? `Año: ${track.year}` : '';
+    if (yearEl) {
+        yearEl.innerHTML = `
+            <div id="detailMetadataGrid" style="text-align: left; margin: 15px 0; display: grid; gap: 6px; font-size: 13px; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 8px;">
+                <div><strong>Álbum:</strong> ${formatVal(track.album)}</div>
+                <div><strong>Género:</strong> ${formatVal(track.genre)}</div>
+                <div><strong>Etiqueta:</strong> ${formatVal(track.publisher)}</div>
+                <div><strong>Año:</strong> ${formatVal(track.year)}</div>
+                <div><strong>Cues:</strong> ${formatVal(track.cue_count)}</div>
+                <div><strong>Rating:</strong> ${formatRating(track.rating)}</div>
+                <div><strong>Archivo:</strong> ${formatVal(track.filename)}</div>
+            </div>
+        `;
+    }
 
-    // Asignar evento al botón de Reproducir
+    // 4. Botones de acción
     const playBtn = document.getElementById('btnPlayFromModal');
     if (playBtn) {
         playBtn.onclick = () => {
@@ -384,7 +385,6 @@ export function openTrackDetailModal(trackId) {
         };
     }
 
-    // Asignar evento al botón de Compartir Cromo
     const shareBtn = document.getElementById('btnShareFromModal');
     if (shareBtn) {
         shareBtn.onclick = () => {
@@ -394,18 +394,19 @@ export function openTrackDetailModal(trackId) {
         };
     }
 
+    // 5. Desplegar overlay
     document.getElementById('trackDetailOverlay')?.classList.add('active');
     document.getElementById('trackDetailModal')?.classList.add('active');
 }
 
 /**
- * Cierra el modal de detalle de canción
+ * Cierra el modal de detalle
  */
 export function closeTrackDetailModal() {
     document.getElementById('trackDetailOverlay')?.classList.remove('active');
     document.getElementById('trackDetailModal')?.classList.remove('active');
 }
 
-// Exposición global
+// Exposición al ámbito global
 window.openTrackDetailModal = openTrackDetailModal;
 window.closeTrackDetailModal = closeTrackDetailModal;
