@@ -11,7 +11,7 @@ class HeaderPanel(ctk.CTkFrame):
 
         # Contenedor interno con padding exactamente igual al de los paneles inferiores (15px)
         self.inner_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.inner_frame.pack(fill="x", padx=15, pady=6)
+        self.inner_frame.pack(fill="x", padx=theme.SPACE_MD, pady=6)
 
         # Ancho ajustado para que coincida exactamente con el panel izquierdo
         # (Si DetailPanel cambia, este valor sincroniza la columna 0)

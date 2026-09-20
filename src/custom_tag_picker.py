@@ -124,7 +124,7 @@ class CustomTagPicker(ctk.CTkToplevel):
         lbl_title = ctk.CTkLabel(
             main_frame,
             text="Etiquetas Personalizadas",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN
         )
         lbl_title.pack(anchor="w", padx=5, pady=(0, 2))

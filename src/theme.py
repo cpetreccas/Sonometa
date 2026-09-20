@@ -45,6 +45,11 @@ STATUS_SUCCESS = "#22C55E"  # Verde - completo / salud excelente
 STATUS_WARNING = "#F59E0B"  # Ámbar - falta algún metadato secundario
 STATUS_DANGER = "#EF4444"   # Rojo - falta metadato crítico
 STATUS_DANGER_HOVER = "#450A0A"  # Fondo hover sutil para botones destructivos ("transparent" + hover rojizo)
+STATUS_INFO = "#3B82F6"     # Azul - mensajes informativos neutros
+
+# Iconos de show_themed_dialog: verde esmeralda propio para "acción completada",
+# deliberadamente distinto de STATUS_SUCCESS (reservado a indicadores de salud/estado).
+MODAL_ICON_SUCCESS = "#10B981"
 
 # ------------------------------------------------------------------
 # Tipografía
@@ -65,9 +70,18 @@ RADIUS_CONTROL = 8          # Botones, inputs, combos, checkboxes
 RADIUS_CARD = 12            # Tarjetas y paneles elevados
 
 # ------------------------------------------------------------------
-# Espaciado estándar (padding interno de tarjetas/paneles)
+# Escala de espaciado (padding/gutters). Usar siempre uno de estos valores
+# en vez de números sueltos para mantener un ritmo visual consistente.
 # ------------------------------------------------------------------
-PADDING_CARD_SM = 16
+SPACE_XXS = 2
+SPACE_XS = 4
+SPACE_SM = 8
+SPACE_MD = 16
+SPACE_LG = 24
+SPACE_XL = 32
+
+# Alias semánticos usados en tarjetas/paneles elevados (ver guía, sección 3: 16px o 20px)
+PADDING_CARD_SM = SPACE_MD  # 16
 PADDING_CARD_LG = 20
 
 

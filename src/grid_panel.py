@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 import tkinter as tk
 import unicodedata
 from tkinter import ttk
@@ -52,6 +51,10 @@ class GridPanel:
         self._drag_col = None
         self._drag_x = 0
 
+        # Fila actualmente resaltada por hover del ratón
+        self._hovered_row_id = None
+        self._hovered_row_original_tags = ()
+
         # Estado del Panel de Filtro Avanzado
         self.filter_panel_visible = False
         self.active_filters = {}
@@ -91,7 +94,7 @@ class GridPanel:
             "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"}
         }
 
-        self.frame_grid = ctk.CTkFrame(self.parent)
+        self.frame_grid = ctk.CTkFrame(self.parent, fg_color=theme.BG_CARD)
         self.frame_grid.pack(side="top", fill="both", expand=True, padx=0, pady=0)
 
         # Usar pack para permitir intercalar el panel desplegable arriba de la grilla
@@ -153,7 +156,7 @@ class GridPanel:
         normalized = unicodedata.normalize("NFD", str(text))
         return "".join(c for c in normalized if unicodedata.category(c) != "Mn").lower()
 
-    def _build_row_search_text(self, values, columns, col_index):
+    def _build_row_search_text(self, values, col_index):
         searchable_columns = (
             "Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cues", "Rating"
         )
@@ -266,7 +269,7 @@ class GridPanel:
                 continue
 
             if normalized_query:
-                row_search_text = self._build_row_search_text(values, cols, col_index)
+                row_search_text = self._build_row_search_text(values, col_index)
                 if normalized_query not in row_search_text:
                     continue
 
@@ -301,7 +304,8 @@ class GridPanel:
         current_selection = list(self.tree.selection())
         selected_visible = [row_id for row_id in current_selection if row_id in visible_set]
         if selected_visible != current_selection:
-            self.tree.selection_set(selected_visible)
+            (self.tree.
+             selection_set(selected_visible))
 
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.refresh_process_button_text(len(selected_visible))
@@ -431,6 +435,25 @@ class GridPanel:
         style.map("Treeview", background=[('selected', selection_bg)])
         style.map("Treeview.Heading", background=[('active', theme.BG_CARD_HOVER)])
 
+        # Barras de desplazamiento integradas al tema oscuro (en vez del estilo nativo de Windows)
+        for orientation in ("Vertical", "Horizontal"):
+            scrollbar_style = f"{orientation}.TScrollbar"
+            style.configure(
+                scrollbar_style,
+                background=theme.BORDER_FOCUS,
+                troughcolor=theme.BG_CARD,
+                bordercolor=theme.BG_CARD,
+                arrowcolor=theme.TEXT_MUTED,
+                relief="flat",
+                borderwidth=0,
+                arrowsize=12,
+            )
+            style.map(
+                scrollbar_style,
+                background=[("active", theme.PRIMARY_LIGHT), ("pressed", selection_bg)],
+                arrowcolor=[("active", theme.TEXT_MAIN)],
+            )
+
     def set_zoom(self, factor):
         if self.cell_entry and self.cell_entry.winfo_exists():
             try:
@@ -497,7 +520,11 @@ class GridPanel:
             )
 
         self.tree.tag_configure("even", background=theme.BG_CARD)
-        self.tree.tag_configure("odd", background=theme.BG_CARD_HOVER)
+        self.tree.tag_configure("odd", background=theme.BG_CARD)
+        self.tree.tag_configure("hover", background=theme.BG_CARD_HOVER)
+
+        self.tree.bind("<Motion>", self._on_tree_row_hover, add="+")
+        self.tree.bind("<Leave>", self._on_tree_row_hover_leave, add="+")
 
         self.tree.bind("<ButtonPress-1>", self._on_header_press, add="+")
         self.tree.bind("<B1-Motion>", self._on_header_motion, add="+")
@@ -552,6 +579,84 @@ class GridPanel:
         self.tree.grid(row=0, column=0, sticky="nsew")
         self.vsb.grid(row=0, column=1, sticky="ns")
         self.hsb.grid(row=1, column=0, sticky="ew")
+
+        self._build_empty_state()
+        self.update_empty_state()
+
+    def _build_empty_state(self):
+        """Crea el mensaje centrado que se muestra cuando la grilla no tiene filas."""
+        self.empty_state_frame = ctk.CTkFrame(self.tree_container, fg_color="transparent")
+
+        lbl_icon = ctk.CTkLabel(
+            self.empty_state_frame,
+            text="🎵",
+            font=ctk.CTkFont(size=40),
+            text_color=theme.BORDER_FOCUS,
+        )
+        lbl_icon.pack(pady=(0, 8))
+
+        lbl_title = ctk.CTkLabel(
+            self.empty_state_frame,
+            text="No hay ninguna colección cargada",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H2, weight="bold"),
+            text_color=theme.TEXT_MUTED,
+        )
+        lbl_title.pack()
+
+        lbl_sub = ctk.CTkLabel(
+            self.empty_state_frame,
+            text="Abre una carpeta con archivos de audio para empezar.",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE),
+            text_color=theme.TEXT_SUBTLE,
+        )
+        lbl_sub.pack(pady=(2, 0))
+
+        for widget in (self.empty_state_frame, lbl_icon, lbl_title, lbl_sub):
+            widget.bind("<Button-1>", lambda e: self.app.browse_folder())
+            widget.configure(cursor="hand2")
+
+    def update_empty_state(self):
+        """Muestra u oculta el mensaje de estado vacío según si la grilla tiene filas."""
+        if not hasattr(self, "empty_state_frame"):
+            return
+        if self.tree.get_children():
+            self.empty_state_frame.place_forget()
+        else:
+            self.empty_state_frame.place(relx=0.5, rely=0.45, anchor="center")
+
+    def _on_tree_row_hover(self, event):
+        """Resalta la fila bajo el cursor (hover) sin afectar la selección activa.
+
+        Sustituye temporalmente los tags de la fila por uno solo ("hover") en vez de
+        añadirlo junto a "even"/"odd": con varios tags en la misma fila, Tkinter no
+        garantiza que el último de la tupla gane la resolución de color de fondo, así
+        que convivir con el tag de rayado podía dejar el hover invisible.
+        """
+        if self.tree.identify_region(event.x, event.y) != "cell":
+            self._clear_row_hover()
+            return
+
+        row_id = self.tree.identify_row(event.y)
+        if row_id == self._hovered_row_id:
+            return
+
+        self._clear_row_hover()
+
+        if row_id and self.tree.exists(row_id):
+            self._hovered_row_original_tags = tuple(self.tree.item(row_id, "tags") or ())
+            self.tree.item(row_id, tags=("hover",))
+            self._hovered_row_id = row_id
+
+    def _on_tree_row_hover_leave(self, event=None):
+        self._clear_row_hover()
+
+    def _clear_row_hover(self):
+        row_id = self._hovered_row_id
+        if row_id and self.tree.exists(row_id):
+            original_tags = getattr(self, "_hovered_row_original_tags", ())
+            self.tree.item(row_id, tags=original_tags)
+        self._hovered_row_id = None
+        self._hovered_row_original_tags = ()
 
     def _on_header_press(self, event):
         region = self.tree.identify_region(event.x, event.y)
@@ -856,7 +961,6 @@ class GridPanel:
             self.cell_entry.destroy()
             self.cell_entry = None
 
-        column_id = f"#{col_index + 1}"
         bbox = self.tree.bbox(row_id, col_name)
         if not bbox:
             return

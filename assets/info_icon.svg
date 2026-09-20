@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none">
+  <!-- Círculo azul informativo -->
+  <circle cx="12" cy="12" r="10" fill="#3B82F6" />
+  <!-- Icono de 'i' en blanco -->
+  <circle cx="12" cy="7.75" r="1.25" fill="#FFFFFF" />
+  <rect x="10.85" y="10.5" width="2.3" height="6.5" rx="1.15" fill="#FFFFFF" />
+</svg>

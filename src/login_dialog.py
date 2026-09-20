@@ -48,7 +48,7 @@ class LoginDialog(ctk.CTkToplevel):
         lbl_title = ctk.CTkLabel(
             main_frame,
             text="☁️ Sonometa Cloud",
-            font=ctk.CTkFont(size=20, weight="bold"),
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN,
         )
         lbl_title.pack(anchor="w", padx=5, pady=(5, 2))
@@ -72,7 +72,7 @@ class LoginDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(weight="bold"),
             text_color=theme.TEXT_MAIN,
         )
-        lbl_email.pack(anchor="w", padx=15, pady=(10, 2))
+        lbl_email.pack(anchor="w", padx=theme.SPACE_MD, pady=(10, 2))
 
         self.entry_email = ctk.CTkEntry(
             form_frame,
@@ -81,7 +81,7 @@ class LoginDialog(ctk.CTkToplevel):
             fg_color=theme.BG_INPUT,
             border_color=theme.BORDER_FOCUS,
         )
-        self.entry_email.pack(fill="x", padx=15, pady=(0, 10))
+        self.entry_email.pack(fill="x", padx=theme.SPACE_MD, pady=(0, 10))
 
         # Password
         lbl_password = ctk.CTkLabel(
@@ -90,7 +90,7 @@ class LoginDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(weight="bold"),
             text_color=theme.TEXT_MAIN,
         )
-        lbl_password.pack(anchor="w", padx=15, pady=(0, 2))
+        lbl_password.pack(anchor="w", padx=theme.SPACE_MD, pady=(0, 2))
 
         self.entry_password = ctk.CTkEntry(
             form_frame,
@@ -100,7 +100,7 @@ class LoginDialog(ctk.CTkToplevel):
             fg_color=theme.BG_INPUT,
             border_color=theme.BORDER_FOCUS,
         )
-        self.entry_password.pack(fill="x", padx=15, pady=(0, 5))
+        self.entry_password.pack(fill="x", padx=theme.SPACE_MD, pady=(0, 5))
 
         # Mensajes de estado / error
         self.lbl_status = ctk.CTkLabel(

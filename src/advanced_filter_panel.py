@@ -115,7 +115,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             progress_color=theme.PRIMARY,
             font=(theme.FONT_FAMILY, 11)
         )
-        sw_cover.pack(side="left", padx=15)
+        sw_cover.pack(side="left", padx=theme.SPACE_MD)
 
         sw_comment = ctk.CTkSwitch(
             frame_toggles,
@@ -125,7 +125,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             progress_color=theme.PRIMARY,
             font=(theme.FONT_FAMILY, 11)
         )
-        sw_comment.pack(side="left", padx=15)
+        sw_comment.pack(side="left", padx=theme.SPACE_MD)
 
         sw_cues = ctk.CTkSwitch(
             frame_toggles,
@@ -135,7 +135,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             progress_color=theme.PRIMARY,
             font=(theme.FONT_FAMILY, 11)
         )
-        sw_cues.pack(side="left", padx=15)
+        sw_cues.pack(side="left", padx=theme.SPACE_MD)
 
         btn_reset = ctk.CTkButton(
             frame_toggles,

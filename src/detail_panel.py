@@ -2,7 +2,6 @@ import io
 import os
 import sys
 import tkinter as tk
-from tkinter import messagebox
 from io import BytesIO
 import customtkinter as ctk
 from PIL import Image, ImageGrab
@@ -1069,7 +1068,7 @@ class DetailPanel:
             image = ImageGrab.grabclipboard()
 
             if image is None:
-                messagebox.showwarning("Portapapeles vacío", "No hay ninguna imagen en el portapapeles.")
+                self.app.show_themed_dialog("Portapapeles vacío", "No hay ninguna imagen en el portapapeles.", level="warning")
                 return
 
             buffer = BytesIO()
@@ -1096,12 +1095,12 @@ class DetailPanel:
                         self.logger.info(log_msg)
 
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo pegar la imagen: {e}")
+            self.app.show_themed_dialog("Error", f"No se pudo pegar la imagen: {e}", level="error")
 
     def apply_generic_cover(self, event=None):
         generic_bytes = self.app.process_manager._get_default_cover_bytes()
         if not generic_bytes:
-            messagebox.showerror("Error", "No se encontró la imagen de carátula por defecto.")
+            self.app.show_themed_dialog("Error", "No se encontró la imagen de carátula por defecto.", level="error")
             return
 
         selected_items = self.app.tree.selection()

@@ -25,9 +25,10 @@ class CustomMenuDropdown(ctk.CTkToplevel):
             self.configure(fg_color=theme.BG_CARD_HOVER)
 
         # Contenedor principal con esquinas redondeadas y borde tenue estilo Fluent
+        # (fondo BG_CARD para que el hover BG_CARD_HOVER de las filas resulte visible)
         self.frame_border = ctk.CTkFrame(
             self,
-            fg_color=theme.BG_CARD_HOVER,
+            fg_color=theme.BG_CARD,
             border_color=theme.BORDER_FOCUS,
             border_width=1,
             corner_radius=theme.RADIUS_CONTROL
@@ -143,6 +144,18 @@ class CustomMenuDropdown(ctk.CTkToplevel):
                     command=lambda c=cmd: self._execute_command(c, keep_open=True)
                 )
                 chk.pack(side="left", padx=(8, 8), pady=5)
+
+                hover_bg = theme.BG_CARD_HOVER
+
+                def _on_enter(e, f=item_frame):
+                    f.configure(fg_color=hover_bg)
+
+                def _on_leave(e, f=item_frame):
+                    f.configure(fg_color="transparent")
+
+                for w in (item_frame, chk):
+                    w.bind("<Enter>", _on_enter)
+                    w.bind("<Leave>", _on_leave)
 
     def _execute_command(self, cmd, keep_open=False):
         if callable(cmd):

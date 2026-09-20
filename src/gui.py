@@ -143,7 +143,7 @@ class App(ctk.CTk):
         self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.header_logo_pil)
 
         self.frame_main = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_main.pack(fill="both", expand=True, padx=15, pady=5)
+        self.frame_main.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=5)
 
         # 1. Panel Lateral Izquierdo (DetailPanel)
         self.detail_panel = DetailPanel(
@@ -227,7 +227,7 @@ class App(ctk.CTk):
 
     def _setup_footer(self):
         self.frame_bottom = ctk.CTkFrame(self)
-        self.frame_bottom.pack(fill="x", padx=15, pady=(5, 10))
+        self.frame_bottom.pack(fill="x", padx=theme.SPACE_MD, pady=(5, 10))
 
         self.progress_bar = ctk.CTkProgressBar(self.frame_bottom, progress_color=self.CORP_COLOR)
         self.progress_bar.pack(fill="x", padx=10, pady=2)
@@ -424,6 +424,7 @@ class App(ctk.CTk):
             self.tree.delete(row)
         self.file_paths_map.clear()
         self.search_manager.reset_all_tree_items()
+        self.grid_panel.update_empty_state()
 
         self.detail_panel.clear_fields()
         self.folder_path = ""
@@ -595,6 +596,7 @@ class App(ctk.CTk):
                 self.label_status.configure(text=f"Carga completada: {loaded_count:,} canciones.")
                 self.logger.info(f"Se encontraron {loaded_count} archivo(s) de audio compatibles.")
         finally:
+            self.grid_panel.update_empty_state()
             if self._progress_dialog and self._progress_dialog.winfo_exists():
                 self._progress_dialog.close()
             self._progress_dialog = None

@@ -63,7 +63,7 @@ class ReplaceFilenameDialog(ctk.CTkToplevel):
         lbl_title = ctk.CTkLabel(
             main_frame,
             text="Buscar y Reemplazar en Filename",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN
         )
         lbl_title.pack(anchor="w", padx=5, pady=(0, 2))
@@ -354,7 +354,7 @@ class MultiCoverSelectionDialog(ctk.CTkToplevel):
         lbl_title = ctk.CTkLabel(
             main_frame,
             text="Revisión de Carátulas Encontradas",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN
         )
         lbl_title.pack(anchor="w", padx=5, pady=(0, 2))
@@ -720,13 +720,13 @@ class ProgressDialog(ctk.CTkToplevel):
 
     def _setup_ui(self, title_text, message):
         frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD)
-        frame.pack(fill="both", expand=True, padx=14, pady=14)
+        frame.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
 
         self.lbl_title = ctk.CTkLabel(
             frame,
             text=title_text,
             anchor="w",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN
         )
         self.lbl_title.pack(fill="x", pady=(0, 2))
@@ -968,49 +968,20 @@ class DialogManager:
 
     @staticmethod
     def show_themed_dialog(app, title, message, level="info", is_confirm=False, parent=None):
-        """Muestra un diálogo modal y devuelve forzosamente el foco a la ventana padre o principal al cerrarse."""
+        """Diálogo modal estándar de Sonometa (icono, título y mensaje centrados en columna)
+        para avisos, errores, información y confirmaciones. Devuelve forzosamente el foco a la
+        ventana padre o principal al cerrarse, y bool en confirmaciones (True si se confirmó)."""
         host = parent if parent is not None else app
-        dialog = ctk.CTkToplevel(host)
-        dialog.title(title)
-        dialog.geometry("460x210")
+        # fg_color igual al del frame interior: sin ese contraste, el margen entre la
+        # ventana y la tarjeta deja de leerse como un "doble marco".
+        dialog = ctk.CTkToplevel(host, fg_color=theme.BG_CARD)
+        dialog.withdraw()
+        # Título neutro de la barra del SO: el descriptivo ("Sin selección", etc.) vive
+        # únicamente en la etiqueta en negrita del cuerpo.
+        dialog.title("Sonometa")
         dialog.resizable(False, False)
 
-        # Cierre mediante ESC
-        dialog.bind("<Escape>", lambda e: cancel() if is_confirm else accept())
-
-        DialogManager.center_popup_on_parent(dialog, host, width=460, height=210)
-        DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=host)
-
-        frame = ctk.CTkFrame(dialog, fg_color=theme.BG_CARD)
-        frame.pack(fill="both", expand=True, padx=12, pady=12)
-
-        icon_text = "!" if level == "warning" else ("x" if level == "error" else "i")
-
-        lbl_icon = ctk.CTkLabel(
-            frame,
-            text=icon_text,
-            width=26,
-            height=26,
-            corner_radius=13,
-            fg_color=app.CORP_COLOR,
-            text_color=theme.TEXT_MAIN,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=13, weight="bold")
-        )
-        lbl_icon.pack(anchor="w", pady=(2, 8))
-
-        lbl_msg = ctk.CTkLabel(
-            frame,
-            text=message,
-            justify="left",
-            anchor="w",
-            wraplength=420,
-            text_color=theme.TEXT_MAIN
-        )
-        lbl_msg.pack(fill="x", pady=(0, 12))
-
         result = {"value": False}
-        btns = ctk.CTkFrame(frame, fg_color="transparent")
-        btns.pack(fill="x", side="bottom")
 
         def accept():
             result["value"] = True
@@ -1020,17 +991,109 @@ class DialogManager:
             result["value"] = False
             dialog.destroy()
 
+        dialog.bind("<Escape>", lambda e: cancel() if is_confirm else accept())
+
+        frame = ctk.CTkFrame(dialog, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD)
+        frame.pack(fill="both", expand=True)
+
+        # Ancho útil real del texto: 380px de ventana menos el padx de las propias etiquetas
+        # (SPACE_MD a cada lado).
+        text_wraplength = 380 - 2 * theme.SPACE_MD
+
+        # Símbolo/color de respaldo por si el PNG del icono no está disponible.
+        icon_symbol, icon_bg = {
+            "warning": ("!", theme.STATUS_WARNING),
+            "error": ("✕", theme.STATUS_DANGER),
+            "success": ("✓", theme.MODAL_ICON_SUCCESS),
+            "info": ("i", theme.STATUS_INFO),
+        }.get(level, ("i", theme.STATUS_INFO))
+
+        # Iconos vectoriales (pre-renderizados a PNG) para un círculo/triángulo nítido a 48px,
+        # en vez del badge de texto achatado. "error" no tiene asset propio todavía y usa el
+        # badge de respaldo.
+        icon_asset = {
+            "warning": "assets/warning_icon.png",
+            "success": "assets/success_icon.png",
+            "info": "assets/info_icon.png",
+        }.get(level)
+
+        icon_widget = None
+        if icon_asset:
+            icon_path = UiUtils.get_resource_path(icon_asset)
+            if os.path.exists(icon_path):
+                try:
+                    with Image.open(icon_path) as icon_file:
+                        pil_icon = icon_file.copy()
+                    target_w = 48
+                    target_h = int(target_w * pil_icon.height / pil_icon.width)
+                    icon_image = ctk.CTkImage(
+                        light_image=pil_icon, dark_image=pil_icon, size=(target_w, target_h)
+                    )
+                    icon_widget = ctk.CTkLabel(frame, image=icon_image, text="")
+                except Exception:
+                    icon_widget = None
+
+        if icon_widget is None:
+            icon_widget = ctk.CTkLabel(
+                frame,
+                text=icon_symbol,
+                width=48,
+                height=48,
+                corner_radius=24,
+                fg_color=icon_bg,
+                text_color=theme.TEXT_MAIN,
+                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=18, weight="bold")
+            )
+
+        icon_widget.pack(pady=(theme.SPACE_LG, theme.SPACE_SM))
+
+        ctk.CTkLabel(
+            frame,
+            text=title,
+            justify="center",
+            text_color=theme.TEXT_MAIN,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H2, weight="bold"),
+            wraplength=text_wraplength
+        ).pack(padx=theme.SPACE_MD, pady=(0, theme.SPACE_XS))
+
+        ctk.CTkLabel(
+            frame,
+            text=message,
+            justify="center",
+            text_color=theme.TEXT_MUTED,
+            wraplength=text_wraplength
+        ).pack(padx=theme.SPACE_MD, pady=(0, theme.SPACE_LG))
+
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(pady=(0, 20))
+
         if is_confirm:
             ctk.CTkButton(
-                btns, text="Cancelar", command=cancel,
-                fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS
-            ).pack(side="right", padx=(6, 0))
+                btns, text="Cancelar", command=cancel, width=110,
+                corner_radius=theme.RADIUS_CONTROL,
+                fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS,
+                text_color=theme.TEXT_MAIN
+            ).pack(side="left", padx=(0, theme.SPACE_SM))
 
-        btn_ok = ctk.CTkButton(
-            btns, text="Aceptar", command=accept,
-            fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER
-        )
-        btn_ok.pack(side="right")
+            btn_ok = ctk.CTkButton(
+                btns, text="Confirmar", command=accept, width=110,
+                corner_radius=theme.RADIUS_CONTROL,
+                fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER
+            )
+            btn_ok.pack(side="left")
+        else:
+            btn_ok = ctk.CTkButton(
+                btns, text="Aceptar", command=accept, width=140,
+                corner_radius=theme.RADIUS_CONTROL,
+                fg_color=app.CORP_COLOR, hover_color=app.CORP_HOVER
+            )
+            btn_ok.pack()
+
+        dialog.update_idletasks()
+        width = 380
+        height = max(220, min(420, frame.winfo_reqheight()))
+        DialogManager.center_popup_on_parent(dialog, host, width=width, height=height)
+        DialogManager.apply_popup_style(app, dialog, is_modal=True, owner=host)
         btn_ok.focus_force()
 
         dialog.wait_window()
@@ -1133,12 +1196,12 @@ class DialogManager:
         shortcuts_win = DialogManager._new_modal(app, "Atajos de Teclado", 500, 380, resizable=True)
 
         frame_content = ctk.CTkFrame(shortcuts_win)
-        frame_content.pack(fill="both", expand=True, padx=15, pady=15)
+        frame_content.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
 
         lbl_title = ctk.CTkLabel(
             frame_content,
             text="Atajos de Teclado Disponibles",
-            font=ctk.CTkFont(size=14, weight="bold")
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold")
         )
         lbl_title.pack(fill="x", pady=(0, 12))
 
@@ -1452,7 +1515,7 @@ class DialogManager:
 
         app.clipboard_clear()
         app.clipboard_append("\n".join(filtered_lines))
-        DialogManager.show_themed_dialog(app, "Copiado", "Logs copiados al portapapeles con éxito.", level="info")
+        DialogManager.show_themed_dialog(app, "Copiado", "Logs copiados al portapapeles con éxito.", level="success")
 
     @staticmethod
     def _export_logs_to_file(app):
@@ -1473,7 +1536,7 @@ class DialogManager:
                 for item in history:
                     msg = item[1] if isinstance(item, tuple) else item
                     f.write(msg if msg.endswith("\n") else f"{msg}\n")
-            DialogManager.show_themed_dialog(app, "Exportar", f"Logs guardados con éxito en:\n{file_path}", level="info")
+            DialogManager.show_themed_dialog(app, "Exportar", f"Logs guardados con éxito en:\n{file_path}", level="success")
 
     @staticmethod
     def close_logs_dialog(app):
@@ -1491,7 +1554,7 @@ class DialogManager:
         lbl_header = ctk.CTkLabel(
             win,
             text="Gestión de Catálogos y Relaciones",
-            font=ctk.CTkFont(size=20, weight="bold"),
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN
         )
         lbl_header.pack(anchor="w", padx=16, pady=(16, 4))
@@ -1596,7 +1659,7 @@ class DialogManager:
                 app.detail_panel.on_row_select(None)
 
             refresh_listbox(k, lb)
-            DialogManager.show_themed_dialog(app, "Valores eliminados", f"Se eliminaron {len(values_to_delete)} registro(s).", level="info", parent=win)
+            DialogManager.show_themed_dialog(app, "Valores eliminados", f"Se eliminaron {len(values_to_delete)} registro(s).", level="success", parent=win)
 
         # Se incluye únicamente "Comment" en la gestión de catálogos
         ordered_keys = ["Album", "Genre", "Publisher", "Comment"]
@@ -1733,7 +1796,7 @@ class DialogManager:
                         app.detail_panel.refresh_catalog_comboboxes()
 
                     msg = f"Asignaciones actualizadas para {len(selected_parents)} elemento(s)."
-                    DialogManager.show_themed_dialog(app, "Relaciones guardadas", msg, level="info", parent=win)
+                    DialogManager.show_themed_dialog(app, "Relaciones guardadas", msg, level="success", parent=win)
 
                 lb.bind("<<ListboxSelect>>", load_relations)
 
@@ -1773,7 +1836,7 @@ class DialogManager:
         lbl_header = ctk.CTkLabel(
             win,
             text="Personalización de Columnas",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN
         )
         lbl_header.pack(anchor="w", padx=16, pady=(16, 4))
