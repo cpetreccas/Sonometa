@@ -5,3 +5,8 @@ requests>=2.31.0
 pyinstaller>=6.0.0
 pygame
 python-dotenv>=1.0.0
+numpy>=2.0.0
+scipy>=1.14.0
+pydub>=0.25.1
+pyloudnorm>=0.2.0
+audioop-lts; python_version >= "3.13"

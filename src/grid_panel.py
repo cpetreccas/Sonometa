@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 import tkinter as tk
 import unicodedata
 from tkinter import ttk
@@ -720,6 +721,10 @@ class GridPanel:
             command=lambda: self.app.process_manager.process_discogs_data()
         )
         self._tree_context_menu.add_command(
+            label="Evaluar salud",
+            command=self._evaluate_file_health
+        )
+        self._tree_context_menu.add_command(
             label="Campos personalizables",
             command=self._open_custom_tag_picker
         )
@@ -736,6 +741,71 @@ class GridPanel:
             label="Eliminar del disco",
             command=lambda: self.app.process_manager.delete_selected_files()
         )
+
+    def _evaluate_file_health(self):
+        """Analiza la salud (integridad/clipping/LUFS/corte real) del archivo bajo el
+        foco actual del menú contextual. Un archivo a la vez: si hay selección múltiple,
+        se evalúa solo la fila sobre la que se abrió el menú."""
+        row_id = self.tree.focus()
+        if not row_id:
+            selected = self.tree.selection()
+            row_id = selected[0] if selected else None
+        if not row_id:
+            return
+
+        file_path = self.app.file_paths_map.get(row_id)
+        if not file_path or not os.path.exists(file_path):
+            self.app.show_themed_dialog("Archivo no encontrado", "El archivo ya no existe en disco.", level="error")
+            return
+
+        from dialogs import DialogManager
+
+        filename = os.path.basename(file_path)
+        progress = DialogManager.show_progress_dialog(
+            self.app,
+            title_text="Evaluando Salud",
+            message=f"Analizando {filename}...",
+        )
+        progress.lbl_counter.configure(text="Esto puede tardar unos segundos en temas largos.")
+        progress.progress.configure(mode="indeterminate")
+        progress.progress.start()
+
+        threading.Thread(
+            target=self._run_health_check, args=(file_path, progress), daemon=True
+        ).start()
+
+    def _run_health_check(self, file_path, progress):
+        """Ejecuta el análisis pesado (numpy/scipy/pydub) fuera del hilo de Tk."""
+        from audio_health_checker import AudioHealthChecker
+
+        error = None
+        try:
+            report = AudioHealthChecker.analyze(file_path)
+        except Exception as e:
+            self.logger.error(f"Error al evaluar la salud de '{file_path}': {e}")
+            report = None
+            error = str(e)
+
+        self.app.after(0, lambda: self._on_health_check_done(report, error, progress))
+
+    def _on_health_check_done(self, report, error, progress):
+        try:
+            progress.progress.stop()
+        except Exception:
+            pass
+        if progress.winfo_exists():
+            progress.close()
+
+        if report is None:
+            self.app.show_themed_dialog(
+                "Error al analizar",
+                error or "No se pudo completar el análisis del archivo.",
+                level="error"
+            )
+            return
+
+        from dialogs import HealthReportModal
+        HealthReportModal(self.app, report)
 
     def _open_custom_tag_picker(self):
         selected = list(self.tree.selection())

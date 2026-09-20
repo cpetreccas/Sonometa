@@ -879,6 +879,116 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
                 pass
 
 
+class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
+    """Muestra el resultado de 'Evaluar salud' (audio_health_checker.HealthReport):
+    una fila por chequeo (Integridad, Clipping, Volumen LUFS, Corte real de frecuencia)
+    con una insignia de color verde/ámbar/rojo según su status."""
+
+    _CHECK_ROWS = (
+        ("integrity", "Integridad"),
+        ("clipping", "Clipping"),
+        ("loudness", "Volumen (LUFS)"),
+        ("cutoff", "Corte real de frecuencia"),
+    )
+
+    _STATUS_COLORS = {
+        "ok": theme.STATUS_SUCCESS,
+        "warning": theme.STATUS_WARNING,
+        "critical": theme.STATUS_DANGER,
+    }
+
+    def __init__(self, parent, report):
+        super().__init__(parent)
+        DialogManager.hide_until_ready(self)
+        self.app = parent
+        self.report = report
+
+        self.title("Sonometa")
+        self.resizable(False, False)
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD)
+        frame.pack(fill="both", expand=True)
+
+        ctk.CTkLabel(
+            frame,
+            text="Salud del Archivo",
+            anchor="w",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H1, weight="bold"),
+            text_color=theme.TEXT_MAIN
+        ).pack(fill="x", padx=theme.SPACE_MD, pady=(theme.SPACE_MD, 0))
+
+        ctk.CTkLabel(
+            frame,
+            text=os.path.basename(report.file_path),
+            anchor="w",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE),
+            text_color=theme.TEXT_SUBTLE
+        ).pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_MD))
+
+        body = ctk.CTkFrame(frame, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=theme.SPACE_MD)
+
+        if report.error:
+            ctk.CTkLabel(
+                body,
+                text=report.error,
+                anchor="w",
+                justify="left",
+                text_color=theme.STATUS_DANGER,
+                wraplength=380
+            ).pack(fill="x", pady=theme.SPACE_SM)
+        else:
+            for attr, title in self._CHECK_ROWS:
+                self._build_check_row(body, title, getattr(report, attr))
+
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(pady=(theme.SPACE_SM, 20))
+
+        ctk.CTkButton(
+            btns, text="Cerrar", command=self.destroy, width=140,
+            corner_radius=theme.RADIUS_CONTROL,
+            fg_color=getattr(self.app, "CORP_COLOR", theme.PRIMARY),
+            hover_color=getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
+        ).pack()
+
+        self.update_idletasks()
+        width = 440
+        height = max(260, min(560, frame.winfo_reqheight()))
+        DialogManager.center_popup_on_parent(self, self.app, width=width, height=height)
+        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
+
+    def _build_check_row(self, parent, title, result):
+        row = ctk.CTkFrame(parent, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
+        row.pack(fill="x", pady=(0, theme.SPACE_SM))
+        row.grid_columnconfigure(1, weight=1)
+
+        color = self._STATUS_COLORS.get(result.status, theme.TEXT_MUTED)
+        ctk.CTkLabel(row, text="", width=12, height=12, corner_radius=6, fg_color=color).grid(
+            row=0, column=0, rowspan=2, padx=(theme.SPACE_MD, theme.SPACE_SM), pady=theme.SPACE_SM, sticky="n"
+        )
+
+        ctk.CTkLabel(
+            row,
+            text=f"{title}: {result.label}",
+            anchor="w",
+            justify="left",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BODY, weight="bold"),
+            text_color=theme.TEXT_MAIN,
+            wraplength=360
+        ).grid(row=0, column=1, sticky="ew", pady=(theme.SPACE_SM, 0))
+
+        ctk.CTkLabel(
+            row,
+            text=result.detail,
+            anchor="w",
+            justify="left",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE),
+            text_color=theme.TEXT_MUTED,
+            wraplength=360
+        ).grid(row=1, column=1, sticky="ew", padx=(0, theme.SPACE_MD), pady=(0, theme.SPACE_SM))
+
+
 class DialogManager:
     """Clase especializada en la gestión de ventanas emergentes, diálogos y popups de la aplicación."""
 
