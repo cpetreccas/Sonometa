@@ -1,6 +1,7 @@
 import sys
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 import numpy as np
@@ -61,6 +62,15 @@ CUTOFF_BITRATE_TABLE = (
 
 LOSSLESS_MODULES = ("flac", "wave", "aiff")
 
+# Penalización sobre 100 según el status de cada chequeo, para el "health_score" resumen
+# que se persiste en caché/exportación. Ajustable sin tocar la lógica de cada chequeo.
+SCORE_PENALTIES = {
+    "integrity": {"warning": 15, "critical": 40},
+    "clipping": {"warning": 10, "critical": 30},
+    "loudness": {"warning": 8, "critical": 20},
+    "cutoff": {"warning": 10, "critical": 25},
+}
+
 
 @dataclass(frozen=True)
 class HealthCheckResult:
@@ -70,23 +80,98 @@ class HealthCheckResult:
     label: str    # texto corto para el título de la fila
     detail: str   # explicación larga para el cuerpo de la fila
 
+    def to_dict(self) -> dict:
+        return {"status": self.status, "label": self.label, "detail": self.detail}
+
+    @staticmethod
+    def from_dict(data: dict) -> "HealthCheckResult":
+        return HealthCheckResult(
+            status=data.get("status", "warning"),
+            label=data.get("label", ""),
+            detail=data.get("detail", ""),
+        )
+
 
 @dataclass(frozen=True)
 class HealthReport:
     """Resultado completo de analizar un archivo. Sin ninguna dependencia de tkinter:
-    se construye en un hilo secundario y se entrega a la UI ya terminado."""
+    se construye en un hilo secundario y se entrega a la UI ya terminado. Serializable
+    (to_dict/from_dict) para persistirse en CacheManager y, desde ahí, exportarse."""
 
     file_path: str
     integrity: HealthCheckResult
     clipping: HealthCheckResult
     loudness: HealthCheckResult
     cutoff: HealthCheckResult
+    lufs_integrated: Optional[float] = None    # valor crudo (None si no se pudo medir)
+    cutoff_khz: Optional[float] = None         # valor crudo (None si no se pudo medir)
+    analyzed_at: Optional[str] = None          # ISO 8601 UTC
     error: Optional[str] = None
+
+    @property
+    def health_score(self) -> int:
+        """Puntuación 0-100 derivada del status de los 4 chequeos (ver SCORE_PENALTIES)."""
+        score = 100
+        for check_name, penalties in SCORE_PENALTIES.items():
+            status = getattr(self, check_name).status
+            score -= penalties.get(status, 0)
+        return max(0, min(100, score))
+
+    @property
+    def has_clipping(self) -> bool:
+        return self.clipping.status != "ok"
+
+    @property
+    def bitrate_fake(self) -> bool:
+        """True si el corte real de frecuencias sugiere una fuente transcodificada
+        desde un bitrate menor al declarado (o, en lossless, indicios de pérdida previa)."""
+        return self.cutoff.status in ("warning", "critical")
+
+    @property
+    def overall_status(self) -> str:
+        """Peor status entre los 4 chequeos: resume la pista en un único badge."""
+        statuses = {self.integrity.status, self.clipping.status, self.loudness.status, self.cutoff.status}
+        if "critical" in statuses:
+            return "critical"
+        if "warning" in statuses:
+            return "warning"
+        return "ok"
 
     @staticmethod
     def failed(file_path: str, message: str) -> "HealthReport":
         placeholder = HealthCheckResult("critical", "No disponible", message)
-        return HealthReport(file_path, placeholder, placeholder, placeholder, placeholder, error=message)
+        return HealthReport(
+            file_path, placeholder, placeholder, placeholder, placeholder,
+            analyzed_at=datetime.now(timezone.utc).isoformat(),
+            error=message,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "file_path": self.file_path,
+            "integrity": self.integrity.to_dict(),
+            "clipping": self.clipping.to_dict(),
+            "loudness": self.loudness.to_dict(),
+            "cutoff": self.cutoff.to_dict(),
+            "lufs_integrated": self.lufs_integrated,
+            "cutoff_khz": self.cutoff_khz,
+            "analyzed_at": self.analyzed_at,
+            "error": self.error,
+        }
+
+    @staticmethod
+    def from_dict(data: dict) -> "HealthReport":
+        return HealthReport(
+            file_path=data["file_path"],
+            integrity=HealthCheckResult.from_dict(data["integrity"]),
+            clipping=HealthCheckResult.from_dict(data["clipping"]),
+            loudness=HealthCheckResult.from_dict(data["loudness"]),
+            cutoff=HealthCheckResult.from_dict(data["cutoff"]),
+            lufs_integrated=data.get("lufs_integrated"),
+            cutoff_khz=data.get("cutoff_khz"),
+            analyzed_at=data.get("analyzed_at"),
+            error=data.get("error"),
+        )
 
 
 class AudioHealthChecker:
@@ -95,7 +180,26 @@ class AudioHealthChecker:
     secundario): no importa tkinter/customtkinter ni toca ningún widget."""
 
     @staticmethod
-    def analyze(file_path: str) -> HealthReport:
+    def analyze(file_path: str, cache_manager=None) -> HealthReport:
+        """Analiza el archivo y devuelve un HealthReport.
+
+        Si se pasa `cache_manager` (inyección de dependencia opcional, igual que
+        AudioManager(cache_manager=...)), el resultado se persiste automáticamente
+        en caché al terminar (CacheManager.save_health_report). Sin él, el módulo
+        sigue siendo puro/testeable de forma aislada.
+        """
+        report = AudioHealthChecker._run_analysis(file_path)
+
+        if cache_manager is not None:
+            try:
+                cache_manager.save_health_report(file_path, report)
+            except Exception as e:
+                logger.warning(f"HealthCheck: no se pudo guardar en caché '{file_path}': {e}")
+
+        return report
+
+    @staticmethod
+    def _run_analysis(file_path: str) -> HealthReport:
         try:
             declared_duration, declared_bitrate, is_lossless = AudioHealthChecker._read_mutagen_info(file_path)
         except Exception as e:
@@ -115,10 +219,15 @@ class AudioHealthChecker:
         samples, sample_rate = AudioHealthChecker._segment_to_float_array(sample_segment)
 
         clipping = AudioHealthChecker._check_clipping(samples)
-        loudness = AudioHealthChecker._check_loudness(samples, sample_rate)
-        cutoff = AudioHealthChecker._check_cutoff(samples, sample_rate, declared_bitrate, is_lossless)
+        loudness, lufs_value = AudioHealthChecker._check_loudness(samples, sample_rate)
+        cutoff, cutoff_khz_value = AudioHealthChecker._check_cutoff(samples, sample_rate, declared_bitrate, is_lossless)
 
-        return HealthReport(file_path, integrity, clipping, loudness, cutoff)
+        return HealthReport(
+            file_path, integrity, clipping, loudness, cutoff,
+            lufs_integrated=lufs_value,
+            cutoff_khz=cutoff_khz_value,
+            analyzed_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     # ------------------------------------------------------------------
     # Metadatos (mutagen) - solo cabecera, sin decodificar audio
@@ -281,18 +390,18 @@ class AudioHealthChecker:
     # Chequeo 3: Volumen integrado (LUFS, ITU-R BS.1770 / EBU R128)
     # ------------------------------------------------------------------
     @staticmethod
-    def _check_loudness(samples: np.ndarray, sample_rate: int) -> HealthCheckResult:
+    def _check_loudness(samples: np.ndarray, sample_rate: int) -> Tuple[HealthCheckResult, Optional[float]]:
         try:
             meter = pyln.Meter(sample_rate)
             loudness = meter.integrated_loudness(samples)
         except Exception as e:
-            return HealthCheckResult("warning", "LUFS no disponible", f"No se pudo calcular el volumen integrado: {e}")
+            return HealthCheckResult("warning", "LUFS no disponible", f"No se pudo calcular el volumen integrado: {e}"), None
 
         if loudness == float("-inf") or np.isnan(loudness):
             return HealthCheckResult(
                 "warning", "Silencio o señal insuficiente",
                 "El tramo analizado es demasiado silencioso para medir LUFS de forma fiable."
-            )
+            ), None
 
         label = f"{loudness:.1f} LUFS"
 
@@ -312,7 +421,7 @@ class AudioHealthChecker:
             else:
                 detail = f"Volumen integrado de {loudness:.1f} LUFS: extremadamente alto/hipercomprimido."
 
-        return HealthCheckResult(status, label, detail)
+        return HealthCheckResult(status, label, detail), float(loudness)
 
     # ------------------------------------------------------------------
     # Chequeo 4: Corte real de frecuencias (bitrate aparente vs. declarado)
@@ -320,12 +429,12 @@ class AudioHealthChecker:
     @staticmethod
     def _check_cutoff(
         samples: np.ndarray, sample_rate: int, declared_bitrate: Optional[int], is_lossless: bool
-    ) -> HealthCheckResult:
+    ) -> Tuple[HealthCheckResult, Optional[float]]:
         if len(samples) < 1024:
             return HealthCheckResult(
                 "warning", "Muestra insuficiente",
                 "El tramo analizado es demasiado corto para estimar el espectro de frecuencias."
-            )
+            ), None
 
         nperseg = min(8192, len(samples))
         freqs, psd = welch(samples, fs=sample_rate, nperseg=nperseg)
@@ -363,4 +472,4 @@ class AudioHealthChecker:
         else:
             status = "ok" if apparent_kbps >= 256 else "warning"
 
-        return HealthCheckResult(status, label, label)
+        return HealthCheckResult(status, label, label), float(cutoff_khz)

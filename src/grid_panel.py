@@ -1,6 +1,5 @@
 import os
 import sys
-import threading
 import tkinter as tk
 import unicodedata
 from tkinter import ttk
@@ -724,6 +723,7 @@ class GridPanel:
             label="Evaluar salud",
             command=self._evaluate_file_health
         )
+        self._health_menu_index = self._tree_context_menu.index("end")
         self._tree_context_menu.add_command(
             label="Campos personalizables",
             command=self._open_custom_tag_picker
@@ -743,69 +743,47 @@ class GridPanel:
         )
 
     def _evaluate_file_health(self):
-        """Analiza la salud (integridad/clipping/LUFS/corte real) del archivo bajo el
-        foco actual del menú contextual. Un archivo a la vez: si hay selección múltiple,
-        se evalúa solo la fila sobre la que se abrió el menú."""
-        row_id = self.tree.focus()
-        if not row_id:
-            selected = self.tree.selection()
-            row_id = selected[0] if selected else None
-        if not row_id:
+        """'Evaluar salud' del menú contextual. Con 0-1 fila seleccionada, evalúa el
+        archivo bajo foco (individual, instantáneo si ya hay caché vigente). Con 2+
+        filas, lanza el análisis por lotes (DialogManager.run_batch_health_check),
+        que ya se encarga de saltar los archivos con caché válida uno a uno."""
+        selected_rows = list(self.tree.selection())
+
+        if len(selected_rows) <= 1:
+            row_id = selected_rows[0] if selected_rows else self.tree.focus()
+            if not row_id:
+                return
+
+            file_path = self.app.file_paths_map.get(row_id)
+            if not file_path or not os.path.exists(file_path):
+                self.app.show_themed_dialog("Archivo no encontrado", "El archivo ya no existe en disco.", level="error")
+                return
+
+            self._evaluate_single_file_health(file_path)
             return
 
-        file_path = self.app.file_paths_map.get(row_id)
-        if not file_path or not os.path.exists(file_path):
-            self.app.show_themed_dialog("Archivo no encontrado", "El archivo ya no existe en disco.", level="error")
-            return
+        file_paths = [self.app.file_paths_map.get(rid) for rid in selected_rows]
+        file_paths = [p for p in file_paths if p]
 
         from dialogs import DialogManager
+        DialogManager.run_batch_health_check(self.app, file_paths)
 
-        filename = os.path.basename(file_path)
-        progress = DialogManager.show_progress_dialog(
-            self.app,
-            title_text="Evaluando Salud",
-            message=f"Analizando {filename}...",
-        )
-        progress.lbl_counter.configure(text="Esto puede tardar unos segundos en temas largos.")
-        progress.progress.configure(mode="indeterminate")
-        progress.progress.start()
+    def _evaluate_single_file_health(self, file_path):
+        """Si ya hay un resultado cacheado y vigente (el archivo no cambió en disco),
+        lo muestra al instante sin volver a analizar; si no, delega el análisis
+        (hilo + ProgressDialog + modal) en DialogManager.run_single_health_check."""
+        from dialogs import DialogManager, HealthReportModal
 
-        threading.Thread(
-            target=self._run_health_check, args=(file_path, progress), daemon=True
-        ).start()
-
-    def _run_health_check(self, file_path, progress):
-        """Ejecuta el análisis pesado (numpy/scipy/pydub) fuera del hilo de Tk."""
-        from audio_health_checker import AudioHealthChecker
-
-        error = None
-        try:
-            report = AudioHealthChecker.analyze(file_path)
-        except Exception as e:
-            self.logger.error(f"Error al evaluar la salud de '{file_path}': {e}")
-            report = None
-            error = str(e)
-
-        self.app.after(0, lambda: self._on_health_check_done(report, error, progress))
-
-    def _on_health_check_done(self, report, error, progress):
-        try:
-            progress.progress.stop()
-        except Exception:
-            pass
-        if progress.winfo_exists():
-            progress.close()
-
-        if report is None:
-            self.app.show_themed_dialog(
-                "Error al analizar",
-                error or "No se pudo completar el análisis del archivo.",
-                level="error"
+        cache_manager = getattr(self.app, "cache_manager", None)
+        cached_report = cache_manager.get_cached_health(file_path) if cache_manager else None
+        if cached_report is not None:
+            HealthReportModal(
+                self.app, cached_report,
+                on_reanalyze=lambda: DialogManager.run_single_health_check(self.app, file_path)
             )
             return
 
-        from dialogs import HealthReportModal
-        HealthReportModal(self.app, report)
+        DialogManager.run_single_health_check(self.app, file_path)
 
     def _open_custom_tag_picker(self):
         selected = list(self.tree.selection())
@@ -908,15 +886,22 @@ class GridPanel:
         selected_rows = self.tree.selection()
         if row_id not in selected_rows:
             self.tree.selection_set(row_id)
+            selected_rows = (row_id,)
 
         self.tree.focus(row_id)
         if hasattr(self.app, "detail_panel"):
             self.app.detail_panel.on_row_select(None)
 
+        self._update_health_menu_label(len(selected_rows))
+
         try:
             self._tree_context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self._tree_context_menu.grab_release()
+
+    def _update_health_menu_label(self, selection_count):
+        label = "Evaluar salud" if selection_count <= 1 else f"Evaluar salud ({selection_count} archivos)"
+        self._tree_context_menu.entryconfigure(self._health_menu_index, label=label)
 
     @staticmethod
     def _remove_combobox_arrow_from_layout(layout):
@@ -1570,6 +1555,16 @@ class GridPanel:
             self.tree.move(item[1], '', index)
             tag = "even" if index % 2 == 0 else "odd"
             self.tree.item(item[1], tags=(tag,))
+
+    def get_visible_file_paths(self) -> list:
+        """Rutas de archivo de las filas actualmente visibles en la grilla: respeta
+        los filtros de búsqueda/avanzados aplicados, ya que las filas ocultas por un
+        filtro están 'detached' del árbol y self.tree.get_children("") no las incluye."""
+        return [
+            self.app.file_paths_map.get(row_id)
+            for row_id in self.tree.get_children("")
+            if self.app.file_paths_map.get(row_id)
+        ]
 
     def select_all_rows(self):
         all_items = self.tree.get_children()

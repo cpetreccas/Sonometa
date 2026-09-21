@@ -95,3 +95,24 @@ class SupabaseClientManager:
         except Exception as e:
             logger.error(f"Error en upsert masivo de tracks: {e}")
             return False
+
+    def upsert_health_batch(self, health_data: List[Dict[str, Any]]) -> bool:
+        """Envía un lote de resultados de 'Evaluar salud' a PostgreSQL mediante un
+        UPSERT. Mismo patrón que upsert_tracks_batch, tabla "audio_health"."""
+        self.last_upsert_status_code = None
+        if not self.client or not health_data:
+            return False
+        try:
+            # Upsert usando la restricción única (user_id, filepath_local)
+            response = self.client.table("audio_health").upsert(
+                health_data,
+                on_conflict="user_id, filepath_local"
+            ).execute()
+            status_code = getattr(response, "status_code", None)
+            if isinstance(status_code, int):
+                self.last_upsert_status_code = status_code
+                return status_code in (200, 201)
+            return True
+        except Exception as e:
+            logger.error(f"Error en upsert masivo de audio_health: {e}")
+            return False

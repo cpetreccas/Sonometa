@@ -101,6 +101,35 @@ class CacheManager:
                     """
                 )
 
+                # Tabla: audio_health_cache (resultados de "Evaluar salud")
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS audio_health_cache (
+                        file_path TEXT PRIMARY KEY,
+                        mtime REAL NOT NULL,
+                        file_size INTEGER NOT NULL,
+                        health_json TEXT NOT NULL,
+                        health_score INTEGER,
+                        integrity_status TEXT,
+                        overall_status TEXT,
+                        has_clipping BOOLEAN,
+                        lufs_integrated REAL,
+                        cutoff_khz REAL,
+                        bitrate_fake BOOLEAN,
+                        analyzed_at TIMESTAMP,
+                        synced BOOLEAN DEFAULT 0,
+                        remote_id TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+
+                # Migración para audio_health_cache creada antes de añadir overall_status
+                try:
+                    cursor.execute("ALTER TABLE audio_health_cache ADD COLUMN overall_status TEXT;")
+                except sqlite3.OperationalError:
+                    pass  # Columna ya existe
+
                 conn.commit()
                 conn.close()
             except Exception as e:
@@ -519,4 +548,278 @@ class CacheManager:
         except Exception as e:
             logger.error(f"[CACHE] Error guardando carátula en caché: {str(e)}")
             return None
+
+    # ========================================================================
+    # 4. Caché de Salud de Audio (Tabla: audio_health_cache)
+    # ========================================================================
+
+    def get_cached_health(self, file_path: str):
+        """Devuelve el HealthReport cacheado (audio_health_checker.HealthReport) si el
+        archivo no cambió en disco desde el último análisis (misma validación
+        mtime/size que get_cached_tags). None si no existe, está desactualizado o el
+        archivo ya no existe."""
+        if not os.path.exists(file_path):
+            return None
+
+        from audio_health_checker import HealthReport
+
+        try:
+            stat = os.stat(file_path)
+            current_mtime = stat.st_mtime
+            current_size = stat.st_size
+
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT mtime, file_size, health_json FROM audio_health_cache WHERE file_path = ?",
+                    (file_path,),
+                )
+                row = cursor.fetchone()
+                conn.close()
+
+            if row is None:
+                return None
+
+            cached_mtime, cached_size, health_json = row
+            if abs(cached_mtime - current_mtime) >= 0.01 or cached_size != current_size:
+                return None
+
+            try:
+                return HealthReport.from_dict(json.loads(health_json))
+            except (json.JSONDecodeError, KeyError):
+                logger.warning(f"[CACHE] health_json inválido para {os.path.basename(file_path)}")
+                return None
+
+        except Exception as e:
+            logger.debug(f"[CACHE] Error leyendo salud cacheada de {os.path.basename(file_path)}: {str(e)}")
+            return None
+
+    def save_health_report(self, file_path: str, report) -> bool:
+        """Inserta o actualiza el resultado de 'Evaluar salud' de un archivo.
+        `report` es un audio_health_checker.HealthReport."""
+        if not os.path.exists(file_path):
+            logger.warning(f"[CACHE] Archivo no existe: {file_path}")
+            return False
+
+        try:
+            stat = os.stat(file_path)
+            mtime = stat.st_mtime
+            size = stat.st_size
+
+            health_json = json.dumps(report.to_dict(), ensure_ascii=False)
+
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO audio_health_cache (
+                        file_path, mtime, file_size, health_json, health_score,
+                        integrity_status, overall_status, has_clipping, lufs_integrated,
+                        cutoff_khz, bitrate_fake, analyzed_at, synced, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+                    ON CONFLICT(file_path) DO UPDATE SET
+                        mtime = excluded.mtime,
+                        file_size = excluded.file_size,
+                        health_json = excluded.health_json,
+                        health_score = excluded.health_score,
+                        integrity_status = excluded.integrity_status,
+                        overall_status = excluded.overall_status,
+                        has_clipping = excluded.has_clipping,
+                        lufs_integrated = excluded.lufs_integrated,
+                        cutoff_khz = excluded.cutoff_khz,
+                        bitrate_fake = excluded.bitrate_fake,
+                        analyzed_at = excluded.analyzed_at,
+                        synced = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        file_path, mtime, size, health_json, report.health_score,
+                        report.integrity.status, report.overall_status, report.has_clipping,
+                        report.lufs_integrated, report.cutoff_khz, report.bitrate_fake, report.analyzed_at,
+                    ),
+                )
+                conn.commit()
+                conn.close()
+
+            logger.debug(f"[CACHE] Salud guardada: {os.path.basename(file_path)}")
+            return True
+
+        except Exception as e:
+            logger.error(f"[CACHE] Error guardando salud de {file_path}: {str(e)}")
+            return False
+
+    def get_unsynced_health(self, limit: int = 50) -> list:
+        """Registros de salud pendientes de subir (synced = 0), listos para el
+        pipeline de exportación a Postgres (mismo patrón que get_unsynced_tracks)."""
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT file_path, health_score, integrity_status, has_clipping,
+                           lufs_integrated, cutoff_khz, bitrate_fake, analyzed_at
+                    FROM audio_health_cache WHERE COALESCE(synced, 0) = 0 LIMIT ?
+                    """,
+                    (limit,)
+                )
+                rows = cursor.fetchall()
+                conn.close()
+
+            return [
+                {
+                    "filepath_local": file_path,
+                    "health_score": health_score,
+                    "integrity_status": integrity_status,
+                    "has_clipping": bool(has_clipping),
+                    "lufs_integrated": lufs_integrated,
+                    "cutoff_khz": cutoff_khz,
+                    "bitrate_fake": bool(bitrate_fake),
+                    "analyzed_at": analyzed_at,
+                }
+                for (file_path, health_score, integrity_status, has_clipping,
+                     lufs_integrated, cutoff_khz, bitrate_fake, analyzed_at) in rows
+            ]
+        except Exception as e:
+            logger.error(f"[CACHE] Error obteniendo salud no sincronizada: {str(e)}")
+            return []
+
+    def mark_health_synced(self, file_paths: Optional[list] = None) -> int:
+        """Marca registros de audio_health_cache como sincronizados."""
+        file_paths = [p for p in (file_paths or []) if p]
+        if not file_paths:
+            return 0
+
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.executemany(
+                    "UPDATE audio_health_cache SET synced = 1, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?",
+                    [(path,) for path in file_paths],
+                )
+                affected = cursor.rowcount
+                conn.commit()
+                conn.close()
+            return affected
+        except Exception as e:
+            logger.error(f"[CACHE] Error marcando salud como sincronizada: {str(e)}")
+            return 0
+
+    def invalidate_health_cache(self, file_path: str) -> None:
+        """Elimina el registro de salud cacheado para un archivo específico."""
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM audio_health_cache WHERE file_path = ?", (file_path,))
+                conn.commit()
+                conn.close()
+        except Exception as e:
+            logger.debug(f"[CACHE] Error invalidando salud de {file_path}: {str(e)}")
+
+    def get_health_summary_for_files(self, file_paths: list) -> Dict:
+        """Métricas agregadas de audio_health_cache acotadas a `file_paths` (la vista
+        actual del grid, respetando filtros/búsqueda), para el Dashboard de Salud de
+        la Colección. `total_library` es len(file_paths) -no un COUNT global-, para
+        que la cobertura reportada coincida exactamente con lo que se ve en pantalla.
+        Usa json_each(?) en vez de un IN (...) con un placeholder por ruta, para no
+        toparse con el límite de parámetros de SQLite en colecciones grandes."""
+        from audio_health_checker import LUFS_OK_MIN, LUFS_OK_MAX
+
+        file_paths = [p for p in (file_paths or []) if p]
+        summary = {
+            "total_library": len(file_paths),
+            "total_analyzed": 0,
+            "avg_health_score": None,
+            "critical_count": 0,
+            "bitrate_fake_count": 0,
+            "clipping_count": 0,
+            "integrity_issue_count": 0,
+            "lufs_out_of_range_count": 0,
+        }
+        if not file_paths:
+            return summary
+
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT
+                        COUNT(*),
+                        AVG(health_score),
+                        SUM(CASE WHEN overall_status = 'critical' THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN bitrate_fake = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN has_clipping = 1 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN integrity_status IN ('warning', 'critical') THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN lufs_integrated IS NOT NULL AND
+                                 (lufs_integrated < ? OR lufs_integrated > ?) THEN 1 ELSE 0 END)
+                    FROM audio_health_cache
+                    WHERE file_path IN (SELECT value FROM json_each(?))
+                    """,
+                    (LUFS_OK_MIN, LUFS_OK_MAX, json.dumps(file_paths)),
+                )
+                row = cursor.fetchone()
+                conn.close()
+
+            if row:
+                (total_analyzed, avg_score, critical_count, bitrate_fake_count,
+                 clipping_count, integrity_issue_count, lufs_out_of_range_count) = row
+                summary["total_analyzed"] = total_analyzed or 0
+                summary["avg_health_score"] = round(avg_score) if avg_score is not None else None
+                summary["critical_count"] = critical_count or 0
+                summary["bitrate_fake_count"] = bitrate_fake_count or 0
+                summary["clipping_count"] = clipping_count or 0
+                summary["integrity_issue_count"] = integrity_issue_count or 0
+                summary["lufs_out_of_range_count"] = lufs_out_of_range_count or 0
+
+        except Exception as e:
+            logger.error(f"[CACHE] Error calculando resumen de salud para la vista actual: {str(e)}")
+
+        return summary
+
+    def get_paths_pending_health_analysis(self, file_paths: Optional[list] = None, limit: Optional[int] = None) -> list:
+        """Rutas sin registro en audio_health_cache. Si se pasa `file_paths`, se
+        acota a esa lista (vista actual del grid); si no, considera toda la
+        biblioteca (track_cache). Usado por el botón 'Analizar pendientes'."""
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+
+                if file_paths is not None:
+                    scoped_paths = [p for p in file_paths if p]
+                    if not scoped_paths:
+                        conn.close()
+                        return []
+                    query = """
+                        SELECT je.value FROM json_each(?) je
+                        LEFT JOIN audio_health_cache ahc ON ahc.file_path = je.value
+                        WHERE ahc.file_path IS NULL
+                    """
+                    params = [json.dumps(scoped_paths)]
+                else:
+                    query = """
+                        SELECT tc.file_path FROM track_cache tc
+                        LEFT JOIN audio_health_cache ahc ON ahc.file_path = tc.file_path
+                        WHERE ahc.file_path IS NULL
+                    """
+                    params = []
+
+                if limit:
+                    query += " LIMIT ?"
+                    params.append(int(limit))
+
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                conn.close()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.error(f"[CACHE] Error obteniendo pendientes de análisis de salud: {str(e)}")
+            return []
 

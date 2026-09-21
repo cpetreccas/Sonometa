@@ -55,6 +55,7 @@ class CloudSyncWorker(threading.Thread):
             try:
                 if self.supabase.is_authenticated():
                     self._process_pending_syncs_until_idle()
+                    self._process_pending_health_until_idle()
                 else:
                     self._diag_log("loop_skip_not_authenticated")
             except Exception as e:
@@ -218,6 +219,60 @@ class CloudSyncWorker(threading.Thread):
                 return False, True
 
         return True, False
+
+    def _process_pending_health_until_idle(self):
+        """Drena audio_health_cache igual que _process_pending_syncs_until_idle drena
+        track_cache, en lotes, hasta que no queden pendientes o falle un lote."""
+        while self._running and self.supabase.is_authenticated():
+            success, had_pending = self._process_pending_health()
+            if not had_pending or not success:
+                return
+            self._stop_event.wait(0.2)
+
+    def _process_pending_health(self):
+        """Sube a la tabla `audio_health` de Postgres los resultados de 'Evaluar salud'
+        pendientes (audio_health_cache.synced = 0). Payload ya plano: no requiere
+        extraer portadas/previews como sí hace _process_pending_syncs."""
+        user_id = self.supabase.get_user_id()
+        if not user_id:
+            return False, False
+
+        pending_health = self.cache_manager.get_unsynced_health(limit=self.batch_size)
+        if not pending_health:
+            return True, False
+
+        logger.info(f"Sincronizando salud de audio de {len(pending_health)} pista(s) con la nube...")
+
+        payload_batch = []
+        synced_filepaths = []
+        for health in pending_health:
+            filepath = health.get("filepath_local")
+            if not filepath:
+                continue
+            payload_batch.append({
+                "user_id": user_id,
+                "filepath_local": filepath,
+                "health_score": health.get("health_score"),
+                "integrity_status": health.get("integrity_status"),
+                "has_clipping": health.get("has_clipping"),
+                "lufs_integrated": health.get("lufs_integrated"),
+                "cutoff_khz": health.get("cutoff_khz"),
+                "bitrate_fake": health.get("bitrate_fake"),
+                "analyzed_at": health.get("analyzed_at"),
+            })
+            synced_filepaths.append(filepath)
+
+        if not payload_batch:
+            return True, False
+
+        upsert_result = self.supabase.upsert_health_batch(payload_batch)
+        if self._is_upsert_ok(upsert_result):
+            self.cache_manager.mark_health_synced(file_paths=synced_filepaths)
+            logger.info(f"¡Éxito! Salud de {len(synced_filepaths)} pista(s) sincronizada.")
+            return True, True
+        else:
+            logger.error("[SYNC] Supabase no confirmó estado OK para upsert masivo de audio_health.")
+            return False, True
 
     @staticmethod
     def _extract_preview_bytes(filepath: str):
