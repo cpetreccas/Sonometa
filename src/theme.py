@@ -15,6 +15,7 @@ originalmente para la PWA web). Notas de traducción:
 # ------------------------------------------------------------------
 BG_MAIN = "#121212"         # Fondo general de la aplicación (ventana raíz)
 BG_CARD = "#18181B"         # Tarjetas, modales, barra lateral y paneles elevados
+BG_CARD_ZEBRA = "#212125"   # Filas impares de la grilla (zebra striping, tono intermedio hacia el hover)
 BG_CARD_HOVER = "#27272A"   # Hover para tarjetas y filas de lista
 BG_INPUT = "#18181B"        # Fondo de campos de entrada (inputs, entries, combos)
 
@@ -37,6 +38,7 @@ PRIMARY_LIGHT = "#A78BFA"   # Morado claro para texto activo, iconos y remixes
 TEXT_MAIN = "#F4F4F5"       # Texto principal de alto contraste
 TEXT_MUTED = "#A1A1AA"      # Texto secundario (artistas, cabeceras de tabla)
 TEXT_SUBTLE = "#71717A"     # Textos secundarios menores, placeholders, pie de página
+TEXT_ON_PRIMARY = "#FFFFFF"  # Blanco puro para texto sobre fondo PRIMARY (ej. fila seleccionada)
 
 # ------------------------------------------------------------------
 # Estados e indicadores

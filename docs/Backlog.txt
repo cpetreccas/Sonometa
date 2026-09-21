@@ -1,4 +1,9 @@
 FUNCIONALIDADES GENERALES:
+- Meter el dashboard de la WebApp en la app de escritorio.
+- Aproximar el diseño de la interfaz de la app de escritorio al diseño de la WebApp (colores, tipografía, iconos, etc.)
+- El dashboard de salud de la aplicación debe indicar qué elementos son los que generan los warnings
+- Mejorar aspecto visual del dashboard de salud de la aplicación
+- Cuadro de diálogo 'Evaluando calidad' en masa, no muestra el logo de Sonometa. Y la barra de progreso es distinta a la de analizar. (Una es un trozo morado de un lado a otro y la otra es una barra de progreso real, evaluar cuál queremos)
 - Integrar búsquedas en Google para el nombre y carátulas
 - Exportar una lista de texto con la colección
 - Exportar una copia de los archivos seleccionados con Ctrl+C / Ctrl+V para pegar una lista filtrada directamente a un pen.

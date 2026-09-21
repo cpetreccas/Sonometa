@@ -426,13 +426,18 @@ class GridPanel:
             background=theme.BG_MAIN,
             foreground=theme.TEXT_MUTED,
             font=(theme.FONT_FAMILY, current_heading_size, 'bold'),
-            borderwidth=0,
+            borderwidth=1,
+            bordercolor=theme.BORDER_QUIET,
             relief="flat",
             padding=(5, 5)
         )
 
         selection_bg = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
-        style.map("Treeview", background=[('selected', selection_bg)])
+        style.map(
+            "Treeview",
+            background=[('selected', selection_bg)],
+            foreground=[('selected', theme.TEXT_ON_PRIMARY)]
+        )
         style.map("Treeview.Heading", background=[('active', theme.BG_CARD_HOVER)])
 
         # Barras de desplazamiento integradas al tema oscuro (en vez del estilo nativo de Windows)
@@ -520,7 +525,7 @@ class GridPanel:
             )
 
         self.tree.tag_configure("even", background=theme.BG_CARD)
-        self.tree.tag_configure("odd", background=theme.BG_CARD)
+        self.tree.tag_configure("odd", background=theme.BG_CARD_ZEBRA)
         self.tree.tag_configure("hover", background=theme.BG_CARD_HOVER)
 
         self.tree.bind("<Motion>", self._on_tree_row_hover, add="+")

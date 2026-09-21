@@ -3,9 +3,11 @@ import os
 import re
 import sys
 import ctypes
+import logging
 import queue
 import threading
 import urllib.request
+from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog
 from PIL import Image
@@ -13,6 +15,8 @@ from catalog_manager import CatalogManager
 from ui_utils import UiUtils
 import customtkinter as ctk
 import theme
+
+logger = logging.getLogger("Sonometa")
 
 
 class SilentTitlebarMixin:
@@ -706,7 +710,7 @@ ctk_toplevel.CTkToplevel._revert_withdraw_after_windows_set_titlebar_color = _sa
 class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     """Modal de progreso para operaciones pesadas con actualización segura desde hilos."""
 
-    def __init__(self, parent, title_text="Procesando", message="Iniciando...", total=0):
+    def __init__(self, parent, title_text="Procesando", message="Iniciando...", total=0, on_cancel=None):
         super().__init__(parent)
         DialogManager.hide_until_ready(self)
         self.app = parent
@@ -715,11 +719,13 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
         self._ui_queue = queue.Queue()
         self._ui_pump_after_id = None
         self._is_closed = False
+        self.on_cancel = on_cancel
+        self.btn_cancel = None
 
         self.title("Progreso - Sonometa")
         self.geometry("520x190")
         self.resizable(False, False)
-        self.protocol("WM_DELETE_WINDOW", lambda: None)
+        self.protocol("WM_DELETE_WINDOW", self._trigger_cancel if on_cancel is not None else (lambda: None))
 
         self.bind("<Destroy>", self._on_destroy_cleanup)
 
@@ -729,6 +735,18 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
         DialogManager.center_popup_on_parent(self, self.app, width=520, height=190)
         DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
         self._start_ui_pump()
+
+    def _trigger_cancel(self):
+        """Deshabilita el botón (evita doble disparo) y avisa al hilo de trabajo vía
+        el callback (normalmente threading.Event.set). El propio hilo es quien decide
+        cuándo detenerse y cerrar el diálogo; esto solo señaliza la intención."""
+        if self.btn_cancel is not None:
+            try:
+                self.btn_cancel.configure(state="disabled", text="Cancelando...")
+            except Exception:
+                pass
+        if callable(self.on_cancel):
+            self.on_cancel()
 
     def _on_destroy_cleanup(self, event=None):
         """Detiene cualquier temporizador activo cuando Tkinter destruye el widget."""
@@ -766,14 +784,27 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
         self.progress.pack(fill="x", pady=(0, 8))
         self.progress.set(0)
 
+        footer = ctk.CTkFrame(frame, fg_color="transparent")
+        footer.pack(fill="x")
+        footer.grid_columnconfigure(0, weight=1)
+
         self.lbl_counter = ctk.CTkLabel(
-            frame,
+            footer,
             text="Procesando 0 / 0 canciones...",
             anchor="w",
             text_color=theme.TEXT_MUTED,
             font=ctk.CTkFont(size=11)
         )
-        self.lbl_counter.pack(fill="x")
+        self.lbl_counter.grid(row=0, column=0, sticky="ew")
+
+        if self.on_cancel is not None:
+            self.btn_cancel = ctk.CTkButton(
+                footer, text="Cancelar", command=self._trigger_cancel, width=90, height=24,
+                corner_radius=theme.RADIUS_CONTROL,
+                fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS,
+                text_color=theme.TEXT_MAIN, font=ctk.CTkFont(size=11)
+            )
+            self.btn_cancel.grid(row=0, column=1, sticky="e", padx=(theme.SPACE_SM, 0))
 
     def close(self):
         if self._is_closed:
@@ -897,11 +928,17 @@ class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
         "critical": theme.STATUS_DANGER,
     }
 
-    def __init__(self, parent, report):
-        super().__init__(parent)
+    def __init__(self, app, report, on_reanalyze=None, parent=None):
+        """`app` se usa para CORP_COLOR/CORP_HOVER; `parent` (Tk owner para centrar) es
+        `app` por defecto, pero puede ser otro modal (ej. BatchHealthReportModal) para
+        que este se centre sobre él en vez de sobre la ventana principal."""
+        host = parent if parent is not None else app
+        super().__init__(host)
         DialogManager.hide_until_ready(self)
-        self.app = parent
+        self.app = app
+        self._host = host
         self.report = report
+        self.on_reanalyze = on_reanalyze
 
         self.title("Sonometa")
         self.resizable(False, False)
@@ -924,6 +961,14 @@ class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
             anchor="w",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE),
             text_color=theme.TEXT_SUBTLE
+        ).pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_XXS))
+
+        ctk.CTkLabel(
+            frame,
+            text=self._format_analyzed_at(report.analyzed_at),
+            anchor="w",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_MICRO),
+            text_color=theme.TEXT_SUBTLE
         ).pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_MD))
 
         body = ctk.CTkFrame(frame, fg_color="transparent")
@@ -945,18 +990,42 @@ class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
         btns = ctk.CTkFrame(frame, fg_color="transparent")
         btns.pack(pady=(theme.SPACE_SM, 20))
 
+        if on_reanalyze is not None:
+            ctk.CTkButton(
+                btns, text="Re-analizar", command=self._trigger_reanalyze, width=140,
+                corner_radius=theme.RADIUS_CONTROL,
+                fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS,
+                text_color=theme.TEXT_MAIN
+            ).pack(side="left", padx=(0, theme.SPACE_SM))
+
         ctk.CTkButton(
             btns, text="Cerrar", command=self.destroy, width=140,
             corner_radius=theme.RADIUS_CONTROL,
             fg_color=getattr(self.app, "CORP_COLOR", theme.PRIMARY),
             hover_color=getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
-        ).pack()
+        ).pack(side="left")
 
         self.update_idletasks()
         width = 440
         height = max(260, min(560, frame.winfo_reqheight()))
-        DialogManager.center_popup_on_parent(self, self.app, width=width, height=height)
-        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
+        DialogManager.center_popup_on_parent(self, self._host, width=width, height=height)
+        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self._host)
+
+    @staticmethod
+    def _format_analyzed_at(analyzed_at):
+        if not analyzed_at:
+            return ""
+        try:
+            parsed = datetime.fromisoformat(analyzed_at)
+            return f"Analizado el {parsed.astimezone().strftime('%d/%m/%Y %H:%M')}"
+        except (ValueError, TypeError):
+            return ""
+
+    def _trigger_reanalyze(self):
+        callback = self.on_reanalyze
+        self.destroy()
+        if callable(callback):
+            callback()
 
     def _build_check_row(self, parent, title, result):
         row = ctk.CTkFrame(parent, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
@@ -987,6 +1056,277 @@ class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
             text_color=theme.TEXT_MUTED,
             wraplength=360
         ).grid(row=1, column=1, sticky="ew", padx=(0, theme.SPACE_MD), pady=(0, theme.SPACE_SM))
+
+
+def _build_metric_chip(parent, label, count, color):
+    """Tarjeta 'número grande + etiqueta' reutilizada por BatchHealthReportModal y
+    CollectionHealthDashboardModal para sus métricas rápidas."""
+    chip = ctk.CTkFrame(parent, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
+    ctk.CTkLabel(
+        chip, text=str(count), text_color=color,
+        font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H2, weight="bold")
+    ).pack(padx=theme.SPACE_MD, pady=(theme.SPACE_XS, 0))
+    ctk.CTkLabel(
+        chip, text=label, text_color=theme.TEXT_MUTED,
+        font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_MICRO)
+    ).pack(padx=theme.SPACE_MD, pady=(0, theme.SPACE_XS))
+    return chip
+
+
+class BatchHealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
+    """Resumen de 'Evaluar salud' para una selección múltiple o un lote de pendientes:
+    métricas rápidas + lista de pistas. Doble clic en una fila abre su
+    HealthReportModal individual (vía on_open_detail)."""
+
+    _STATUS_COLORS = HealthReportModal._STATUS_COLORS
+
+    def __init__(self, app, results, was_cancelled=False, on_open_detail=None, parent=None):
+        host = parent if parent is not None else app
+        super().__init__(host)
+        DialogManager.hide_until_ready(self)
+        self.app = app
+        self._host = host
+        self.results = results  # list[(file_path, HealthReport)]
+        self.on_open_detail = on_open_detail
+
+        self.title("Sonometa")
+        self.resizable(False, False)
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD)
+        frame.pack(fill="both", expand=True)
+
+        total = len(results)
+        avg_score = round(sum(r.health_score for _, r in results) / total) if total else 0
+        ok_count = sum(1 for _, r in results if r.overall_status == "ok")
+        warn_count = sum(1 for _, r in results if r.overall_status == "warning")
+        crit_count = sum(1 for _, r in results if r.overall_status == "critical")
+        fake_count = sum(1 for _, r in results if r.bitrate_fake)
+        clip_count = sum(1 for _, r in results if r.has_clipping)
+
+        ctk.CTkLabel(
+            frame, text="Evaluación por Lote", anchor="w",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H1, weight="bold"),
+            text_color=theme.TEXT_MAIN
+        ).pack(fill="x", padx=theme.SPACE_MD, pady=(theme.SPACE_MD, 0))
+
+        subtitle = f"{total} archivo(s) analizados — puntuación media {avg_score}/100"
+        if was_cancelled:
+            subtitle += " (cancelado antes de terminar)"
+        ctk.CTkLabel(
+            frame, text=subtitle, anchor="w",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE),
+            text_color=theme.TEXT_SUBTLE
+        ).pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
+
+        metrics = ctk.CTkFrame(frame, fg_color="transparent")
+        metrics.pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
+        for label, count, color in (
+            ("OK", ok_count, theme.STATUS_SUCCESS),
+            ("Avisos", warn_count, theme.STATUS_WARNING),
+            ("Críticos", crit_count, theme.STATUS_DANGER),
+            ("Falsos 320k", fake_count, theme.STATUS_WARNING),
+            ("Clipping", clip_count, theme.STATUS_DANGER),
+        ):
+            _build_metric_chip(metrics, label, count, color).pack(side="left", padx=(0, theme.SPACE_SM))
+
+        list_container = ctk.CTkScrollableFrame(frame, fg_color=theme.BG_CARD, corner_radius=0, height=260)
+        list_container.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
+
+        for file_path, report in results:
+            self._build_track_row(list_container, file_path, report)
+
+        btns = ctk.CTkFrame(frame, fg_color="transparent")
+        btns.pack(pady=(0, 20))
+        ctk.CTkButton(
+            btns, text="Cerrar", command=self.destroy, width=140,
+            corner_radius=theme.RADIUS_CONTROL,
+            fg_color=getattr(self.app, "CORP_COLOR", theme.PRIMARY),
+            hover_color=getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
+        ).pack()
+
+        self.update_idletasks()
+        width = 520
+        height = max(420, min(680, frame.winfo_reqheight()))
+        DialogManager.center_popup_on_parent(self, self._host, width=width, height=height)
+        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self._host)
+
+    def _build_track_row(self, parent, file_path, report):
+        row = ctk.CTkFrame(parent, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL, cursor="hand2")
+        row.pack(fill="x", pady=(0, theme.SPACE_XS))
+        row.grid_columnconfigure(1, weight=1)
+
+        color = self._STATUS_COLORS.get(report.overall_status, theme.TEXT_MUTED)
+        badge = ctk.CTkLabel(row, text="", width=10, height=10, corner_radius=5, fg_color=color)
+        badge.grid(row=0, column=0, padx=(theme.SPACE_SM, theme.SPACE_SM), pady=theme.SPACE_SM)
+
+        lbl_name = ctk.CTkLabel(
+            row, text=os.path.basename(file_path), anchor="w", text_color=theme.TEXT_MAIN,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE)
+        )
+        lbl_name.grid(row=0, column=1, sticky="ew", pady=theme.SPACE_SM)
+
+        lbl_score = ctk.CTkLabel(
+            row, text=f"{report.health_score}/100", anchor="e", text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE, weight="bold")
+        )
+        lbl_score.grid(row=0, column=2, padx=(theme.SPACE_SM, theme.SPACE_MD), pady=theme.SPACE_SM)
+
+        def _open_detail(event=None):
+            if callable(self.on_open_detail):
+                self.on_open_detail(report, file_path, self)
+
+        for widget in (row, badge, lbl_name, lbl_score):
+            widget.bind("<Double-Button-1>", _open_detail)
+
+
+class CollectionHealthDashboardModal(SilentTitlebarMixin, ctk.CTkToplevel):
+    """Dashboard de salud acotado a la vista actual del grid (respeta filtros y
+    búsqueda activos, no la biblioteca completa): puntuación media, cobertura de
+    análisis y conteos de alerta (falsos 320kbps, clipping, corruptos/truncados), con
+    un botón para lanzar el análisis de las pistas visibles pendientes."""
+
+    def __init__(self, app, file_paths):
+        super().__init__(app)
+        DialogManager.hide_until_ready(self)
+        self.app = app
+        self.file_paths = list(file_paths or [])
+
+        self.title("Sonometa")
+        self.resizable(False, False)
+        self.bind("<Escape>", lambda e: self.destroy())
+
+        self.frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD)
+        self.frame.pack(fill="both", expand=True)
+
+        ctk.CTkLabel(
+            self.frame, text="Salud de la Colección", anchor="w",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H1, weight="bold"),
+            text_color=theme.TEXT_MAIN
+        ).pack(fill="x", padx=theme.SPACE_MD, pady=(theme.SPACE_MD, theme.SPACE_SM))
+
+        self._kpi_container = ctk.CTkFrame(self.frame, fg_color="transparent")
+        self._kpi_container.pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
+
+        self._alerts_container = ctk.CTkFrame(self.frame, fg_color="transparent")
+        self._alerts_container.pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_MD))
+
+        self.lbl_status = ctk.CTkLabel(
+            self.frame, text="", anchor="w", text_color=theme.TEXT_SUBTLE,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_MICRO)
+        )
+        self.lbl_status.pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
+
+        btns = ctk.CTkFrame(self.frame, fg_color="transparent")
+        btns.pack(pady=(0, 20))
+        self.btn_analyze_pending = ctk.CTkButton(
+            btns, text="Analizar pendientes", command=self._analyze_pending, width=180,
+            corner_radius=theme.RADIUS_CONTROL,
+            fg_color=getattr(self.app, "CORP_COLOR", theme.PRIMARY),
+            hover_color=getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
+        )
+        self.btn_analyze_pending.pack(side="left", padx=(0, theme.SPACE_SM))
+        ctk.CTkButton(
+            btns, text="Cerrar", command=self.destroy, width=140,
+            corner_radius=theme.RADIUS_CONTROL,
+            fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS, text_color=theme.TEXT_MAIN
+        ).pack(side="left")
+
+        self.refresh()
+
+        self.update_idletasks()
+        width = 480
+        height = max(360, min(560, self.frame.winfo_reqheight()))
+        DialogManager.center_popup_on_parent(self, self.app, width=width, height=height)
+        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
+
+    def refresh(self):
+        """Recalcula y repinta los KPIs desde cache_manager. Se llama al abrir el
+        modal y automáticamente cuando termina un lote de 'Analizar pendientes'."""
+        if not self.winfo_exists():
+            return
+
+        cache_manager = getattr(self.app, "cache_manager", None)
+        summary = cache_manager.get_health_summary_for_files(self.file_paths) if cache_manager else {}
+
+        for widget in self._kpi_container.winfo_children():
+            widget.destroy()
+        for widget in self._alerts_container.winfo_children():
+            widget.destroy()
+
+        total_library = summary.get("total_library", 0)
+        total_analyzed = summary.get("total_analyzed", 0)
+        avg_score = summary.get("avg_health_score")
+        coverage_pct = round((total_analyzed / total_library) * 100) if total_library else 0
+
+        score_color = theme.STATUS_SUCCESS
+        if avg_score is not None:
+            if avg_score < 50:
+                score_color = theme.STATUS_DANGER
+            elif avg_score < 80:
+                score_color = theme.STATUS_WARNING
+
+        score_box = ctk.CTkFrame(self._kpi_container, fg_color="transparent")
+        score_box.pack(side="left", padx=(0, theme.SPACE_LG))
+        ctk.CTkLabel(
+            score_box, text=(f"{avg_score}/100" if avg_score is not None else "—"),
+            text_color=score_color,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_KPI, weight="bold")
+        ).pack()
+        ctk.CTkLabel(
+            score_box, text="Salud media", text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE)
+        ).pack()
+
+        coverage_box = ctk.CTkFrame(self._kpi_container, fg_color="transparent")
+        coverage_box.pack(side="left")
+        ctk.CTkLabel(
+            coverage_box, text=f"{total_analyzed} de {total_library} pistas ({coverage_pct}%)",
+            text_color=theme.TEXT_MAIN,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H2, weight="bold")
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            coverage_box, text="Cobertura de análisis", text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE)
+        ).pack(anchor="w")
+
+        for label, count, color in (
+            ("Falsos 320kbps", summary.get("bitrate_fake_count", 0), theme.STATUS_WARNING),
+            ("Clipping", summary.get("clipping_count", 0), theme.STATUS_DANGER),
+            ("Corruptos/truncados", summary.get("integrity_issue_count", 0), theme.STATUS_DANGER),
+        ):
+            _build_metric_chip(self._alerts_container, label, count, color).pack(side="left", padx=(0, theme.SPACE_SM))
+
+        pending_count = max(0, total_library - total_analyzed)
+        if pending_count > 0:
+            self.lbl_status.configure(text=f"{pending_count} pista(s) sin analizar todavía.")
+            self.btn_analyze_pending.configure(state="normal", text=f"Analizar pendientes ({pending_count})")
+        else:
+            has_visible = total_library > 0
+            self.lbl_status.configure(
+                text="Todas las pistas visibles tienen análisis de salud." if has_visible
+                else "No hay pistas visibles en la tabla (revisa los filtros aplicados)."
+            )
+            self.btn_analyze_pending.configure(state="disabled", text="Analizar pendientes")
+
+    def _analyze_pending(self):
+        cache_manager = getattr(self.app, "cache_manager", None)
+        if cache_manager is None:
+            return
+
+        pending_paths = [
+            p for p in cache_manager.get_paths_pending_health_analysis(self.file_paths) if os.path.exists(p)
+        ]
+        if not pending_paths:
+            DialogManager.show_themed_dialog(
+                self.app, "Sin pendientes", "Todas las pistas visibles ya tienen un análisis de salud.",
+                level="info", parent=self
+            )
+            return
+
+        DialogManager.run_batch_health_check(
+            self.app, pending_paths, parent=self, on_complete=lambda results, cancelled: self.refresh()
+        )
 
 
 class DialogManager:
@@ -1043,8 +1383,148 @@ class DialogManager:
         app.wait_window(dialog)
 
     @staticmethod
-    def show_progress_dialog(app, title_text="Procesando", message="Iniciando...", total=0):
-        return ProgressDialog(app, title_text=title_text, message=message, total=total)
+    def show_progress_dialog(app, title_text="Procesando", message="Iniciando...", total=0, on_cancel=None):
+        return ProgressDialog(app, title_text=title_text, message=message, total=total, on_cancel=on_cancel)
+
+    @staticmethod
+    def run_single_health_check(app, file_path, parent=None):
+        """Analiza un único archivo SIN comprobar caché (para forzar 're-analizar')
+        con un ProgressDialog indeterminado, y al terminar abre HealthReportModal con
+        su propio 'Re-analizar' ya enlazado a esta misma función. Único punto de
+        entrada para análisis forzado: lo usa tanto el primer análisis desde
+        grid_panel como el botón 'Re-analizar' de cualquier HealthReportModal
+        (incluido el abierto desde una fila de BatchHealthReportModal)."""
+        host = parent if parent is not None else app
+        filename = os.path.basename(file_path)
+
+        progress = DialogManager.show_progress_dialog(
+            host, title_text="Evaluando Salud", message=f"Analizando {filename}...",
+        )
+        progress.lbl_counter.configure(text="Esto puede tardar unos segundos en temas largos.")
+        progress.progress.configure(mode="indeterminate")
+        progress.progress.start()
+
+        def _worker():
+            from audio_health_checker import AudioHealthChecker
+
+            cache_manager = getattr(app, "cache_manager", None)
+            error = None
+            try:
+                report = AudioHealthChecker.analyze(file_path, cache_manager=cache_manager)
+            except Exception as e:
+                logger.error(f"HealthCheck: fallo analizando '{file_path}': {e}")
+                report = None
+                error = str(e)
+
+            app.after(0, lambda: _on_done(report, error))
+
+        def _on_done(report, error):
+            try:
+                progress.progress.stop()
+            except Exception:
+                pass
+            if progress.winfo_exists():
+                progress.close()
+
+            if report is None:
+                DialogManager.show_themed_dialog(
+                    app, "Error al analizar",
+                    error or "No se pudo completar el análisis del archivo.",
+                    level="error", parent=host
+                )
+                return
+
+            HealthReportModal(
+                app, report,
+                on_reanalyze=lambda: DialogManager.run_single_health_check(app, file_path, parent=parent),
+                parent=parent,
+            )
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @staticmethod
+    def run_batch_health_check(app, file_paths, parent=None, on_complete=None):
+        """Orquesta 'Evaluar salud' para varios archivos: ProgressDialog determinado y
+        cancelable, un hilo secundario que salta los que ya tienen caché válida, y al
+        terminar un BatchHealthReportModal con el resumen. Punto de entrada único
+        compartido por la selección múltiple de grid_panel y el botón 'Analizar
+        pendientes' del CollectionHealthDashboardModal."""
+        existing_paths = [p for p in file_paths if p and os.path.exists(p)]
+        if not existing_paths:
+            DialogManager.show_themed_dialog(
+                app, "Sin archivos", "Ninguno de los archivos indicados existe ya en disco.",
+                level="error", parent=parent
+            )
+            return
+
+        cancel_event = threading.Event()
+        total = len(existing_paths)
+        host = parent if parent is not None else app
+
+        progress = DialogManager.show_progress_dialog(
+            host,
+            title_text="Evaluando Salud",
+            message="Preparando análisis por lotes...",
+            total=total,
+            on_cancel=cancel_event.set,
+        )
+        progress.set_counter(0, total)
+
+        def _worker():
+            from audio_health_checker import AudioHealthChecker, HealthReport
+
+            cache_manager = getattr(app, "cache_manager", None)
+            results = []
+
+            for idx, file_path in enumerate(existing_paths, start=1):
+                if cancel_event.is_set():
+                    break
+
+                progress.set_counter_threadsafe(idx - 1, total, current_file=file_path)
+
+                cached = cache_manager.get_cached_health(file_path) if cache_manager else None
+                if cached is not None:
+                    report = cached
+                else:
+                    try:
+                        report = AudioHealthChecker.analyze(file_path, cache_manager=cache_manager)
+                    except Exception as e:
+                        logger.error(f"HealthCheck lote: fallo analizando '{file_path}': {e}")
+                        report = HealthReport.failed(file_path, str(e))
+
+                results.append((file_path, report))
+                progress.set_counter_threadsafe(idx, total, current_file=file_path)
+
+            was_cancelled = cancel_event.is_set()
+            app.after(0, lambda: _on_done(results, was_cancelled))
+
+        def _on_done(results, was_cancelled):
+            try:
+                progress.progress.stop()
+            except Exception:
+                pass
+            if progress.winfo_exists():
+                progress.close()
+
+            if results:
+                BatchHealthReportModal(
+                    app, results, was_cancelled=was_cancelled,
+                    on_open_detail=lambda report, file_path, parent_win: HealthReportModal(
+                        app, report,
+                        on_reanalyze=lambda: DialogManager.run_single_health_check(app, file_path, parent=parent_win),
+                        parent=parent_win,
+                    ),
+                    parent=host,
+                )
+
+            if callable(on_complete):
+                on_complete(results, was_cancelled)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @staticmethod
+    def open_collection_health_dashboard(app, file_paths):
+        CollectionHealthDashboardModal(app, file_paths)
 
     @staticmethod
     def hide_until_ready(win):
