@@ -783,6 +783,89 @@ class CacheManager:
 
         return summary
 
+    def get_health_fields_for_files(self, file_paths: list) -> Dict[str, Dict]:
+        """Campos crudos de audio_health_cache para `file_paths` en una sola query
+        (evita el patrón N+1 de get_cached_health, que además hace os.stat() por
+        archivo). Usado para pintar las columnas de salud de la grilla en lote:
+        {file_path: {health_score, integrity_status, overall_status, has_clipping,
+        lufs_integrated, cutoff_khz, bitrate_fake}}. Rutas sin análisis no aparecen
+        en el dict devuelto."""
+        scoped_paths = [p for p in (file_paths or []) if p]
+        if not scoped_paths:
+            return {}
+
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT file_path, health_score, integrity_status, overall_status,
+                           has_clipping, lufs_integrated, cutoff_khz, bitrate_fake
+                    FROM audio_health_cache
+                    WHERE file_path IN (SELECT value FROM json_each(?))
+                    """,
+                    (json.dumps(scoped_paths),),
+                )
+                rows = cursor.fetchall()
+                conn.close()
+
+            return {
+                file_path: {
+                    "health_score": health_score,
+                    "integrity_status": integrity_status,
+                    "overall_status": overall_status,
+                    "has_clipping": bool(has_clipping),
+                    "lufs_integrated": lufs_integrated,
+                    "cutoff_khz": cutoff_khz,
+                    "bitrate_fake": bool(bitrate_fake),
+                }
+                for (file_path, health_score, integrity_status, overall_status,
+                     has_clipping, lufs_integrated, cutoff_khz, bitrate_fake) in rows
+            }
+        except Exception as e:
+            logger.error(f"[CACHE] Error obteniendo campos de salud en lote: {str(e)}")
+            return {}
+
+    _HEALTH_FLAG_CONDITIONS = {
+        "bitrate_fake": "bitrate_fake = 1",
+        "clipping": "has_clipping = 1",
+        "integrity_issue": "integrity_status IN ('warning', 'critical')",
+    }
+
+    def get_paths_by_health_flag(self, file_paths: list, flag: str) -> list:
+        """Rutas (acotadas a `file_paths`, la vista actual del grid) cuyo registro en
+        audio_health_cache cumple `flag` ('bitrate_fake' | 'clipping' |
+        'integrity_issue' — mismas condiciones que get_health_summary_for_files).
+        Usado por el cross-filtering del Dashboard de Salud."""
+        condition = self._HEALTH_FLAG_CONDITIONS.get(flag)
+        if condition is None:
+            raise ValueError(f"Flag de salud desconocido: {flag}")
+
+        scoped_paths = [p for p in (file_paths or []) if p]
+        if not scoped_paths:
+            return []
+
+        try:
+            with self._lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    SELECT file_path
+                    FROM audio_health_cache
+                    WHERE {condition}
+                      AND file_path IN (SELECT value FROM json_each(?))
+                    """,
+                    (json.dumps(scoped_paths),),
+                )
+                rows = cursor.fetchall()
+                conn.close()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.error(f"[CACHE] Error obteniendo rutas por indicador de salud '{flag}': {str(e)}")
+            return []
+
     def get_paths_pending_health_analysis(self, file_paths: Optional[list] = None, limit: Optional[int] = None) -> list:
         """Rutas sin registro en audio_health_cache. Si se pasa `file_paths`, se
         acota a esa lista (vista actual del grid); si no, considera toda la

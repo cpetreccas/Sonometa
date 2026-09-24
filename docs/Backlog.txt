@@ -1,6 +1,5 @@
 FUNCIONALIDADES GENERALES:
-- Meter el dashboard de la WebApp en la app de escritorio.
-- Aproximar el diseño de la interfaz de la app de escritorio al diseño de la WebApp (colores, tipografía, iconos, etc.)
+- Meter todos los datos en la misma tabla? redefinir baremos de salud y calidad de audio, para que sea más fácil de leer y entender.
 - El dashboard de salud de la aplicación debe indicar qué elementos son los que generan los warnings
 - Mejorar aspecto visual del dashboard de salud de la aplicación
 - Cuadro de diálogo 'Evaluando calidad' en masa, no muestra el logo de Sonometa. Y la barra de progreso es distinta a la de analizar. (Una es un trozo morado de un lado a otro y la otra es una barra de progreso real, evaluar cuál queremos)
@@ -10,15 +9,36 @@ FUNCIONALIDADES GENERALES:
 - Quizás el nivel 3 de jerarquía deba depender de la suma del nivel 1+2, no solo del 2. Ejemplo: Si nivel 1 es comercial y nivel 2 es base, nivel 3 será poky.
 - Instalador para MAC
 
-Salud en app de escritorio:
-- Detección de Falsos 320 kbps (Fake Bitrate / Spek check)
-- Detección de Temas Descompensados (Volumen y LUFS)
-- Detección de Clipping / Distorsión Digital
-- Archivos Corruptos o Incompletos
-
 WebApp:
 - Añadir wantlist y colección a la WebApp
 - En archivos flac no se guarda la caratula.
 - Configura Python en el escritorio para consultar las playlists creadas en la nube y generar los archivos locales compatibles (.m3u8, XML Traktor/Rekordbox).
 - Módulo de Compartición (Social & Web Share API): Añade el botón "Compartir" en la WebApp usando navigator.share (Web Share API) o copiado de enlace.
 - Configura una vista pública ligera / tarjeta visual (Social Card) con etiquetas Open Graph para previsualizar portadas, CUEs y BPM al enviar por WhatsApp o Instagram.
+
+
+
+Cambios en la versión 2.0
+Grid:
+Ordenación por columnas
+Borrado físico de archivos
+Atajo de teclado: Espacio reproduce/pausa/reanuda reproducción
+Selección de campos visibles
+Panel de filtros avanzados
+Buscar y reemplazar...
+
+Gestión de metadatos:
+Inclusión de tag personalizados utilizando el campo Comentarios.
+Lectura de hotcues de Traktor.
+
+General:
+Mejoras visuales.
+Mejoras de rendimiento.
+Corrección de bugs menores.
+Creación de Sonometa Cloud.
+Análisis de calidad de audio.
+Cálculo de la salud de la colección.
+Dashboard con gráficos de distribución por metadato.
+
+Webapp:
+'Compartir' ficha de una canción.

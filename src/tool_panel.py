@@ -227,8 +227,9 @@ class ToolPanel(ctk.CTkFrame):
                 {"type": "command", "label": "Reducir Zoom", "accelerator": "Ctrl+-", "command": lambda: app.grid_panel._on_key_zoom_out(None)},
                 {"type": "command", "label": "Restablecer Zoom", "accelerator": "Ctrl+0", "command": lambda: app.grid_panel._on_key_zoom_reset(None)},
                 {"type": "separator"},
-                {"type": "command", "label": "Personalizar columnas…", "command": lambda: DialogManager.open_column_customization_dialog(app)},
-                {"type": "command", "label": "Dashboard de Salud", "command": lambda: DialogManager.open_collection_health_dashboard(app, app.grid_panel.get_visible_file_paths())}
+                {"type": "command", "label": "Vista Colección", "command": lambda: app.switch_view("collection")},
+                {"type": "command", "label": "Vista Dashboard", "command": lambda: app.switch_view("dashboard")},
+                {"type": "command", "label": "Vista Salud", "command": lambda: app.switch_view("health")}
             ]),
             ("Preferencias", [
                 {"type": "checkbutton", "label": "Revisar carátulas", "variable": app.review_covers_var, "command": self._on_toggle_review_covers},

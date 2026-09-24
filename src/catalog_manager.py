@@ -13,6 +13,7 @@ class CatalogManager:
         self.app = app_instance
         self.state = AppStateAdapter(app_instance)
         self.manual_cover_selection = True
+        self.visible_columns: Optional[List[str]] = None
         # Solo se gestiona Comment (se elimina Comment2)
         self.catalog_fields = ("Genre", "Album", "Publisher", "Comment")
         self.catalog_labels = {
@@ -103,6 +104,9 @@ class CatalogManager:
                 data = json.load(f)
             self.manual_cover_selection = data.get("manual_cover_selection", True)
 
+            raw_columns = data.get("visible_columns")
+            self.visible_columns = list(raw_columns) if isinstance(raw_columns, list) else None
+
             if hasattr(self.app, "review_covers_var") and self.app.review_covers_var is not None:
                 self.app.review_covers_var.set(self.manual_cover_selection)
         except Exception as e:
@@ -111,7 +115,8 @@ class CatalogManager:
     def save_settings(self) -> None:
         try:
             data = {
-                "manual_cover_selection": getattr(self, "manual_cover_selection", True)
+                "manual_cover_selection": getattr(self, "manual_cover_selection", True),
+                "visible_columns": getattr(self, "visible_columns", None),
             }
             with open(self.settings_file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

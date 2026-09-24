@@ -60,6 +60,10 @@ class GridPanel:
         self.active_filters = {}
         self._advanced_criteria = AdvancedFilterCriteria()
 
+        # Filtro de rutas (cross-filtering desde el Dashboard de Salud): None = inactivo
+        self._health_filter_paths = None
+        self._health_filter_label = ""
+
         # Configuración del nivel de zoom base
         self.zoom_level = 1.0
         self.BASE_FONT_SIZE = 9
@@ -75,7 +79,11 @@ class GridPanel:
             "Year": "AÑO",
             "Cues": "CUES",
             "Rating": "RATING",
-            "Cover": "CARÁTULA"
+            "Cover": "CARÁTULA",
+            "HealthStatus": "SALUD",
+            "Clipping": "CLIPPING",
+            "Lufs": "LUFS",
+            "Cutoff": "CORTE/BITRATE"
         }
 
         # Configuración base de columnas (sin Comment ni Comment2)
@@ -91,8 +99,15 @@ class GridPanel:
             "Comment":   {"width": 0,   "minwidth": 0,   "stretch": False, "anchor": "w"},
             "Cues":      {"width": 58,  "minwidth": 50,  "stretch": False, "anchor": "center"},
             "Rating":    {"width": 64,  "minwidth": 58,  "stretch": False, "anchor": "center"},
-            "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"}
+            "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"},
+            "HealthStatus": {"width": 80,  "minwidth": 70,  "stretch": False, "anchor": "center"},
+            "Clipping":     {"width": 70,  "minwidth": 60,  "stretch": False, "anchor": "center"},
+            "Lufs":         {"width": 70,  "minwidth": 60,  "stretch": False, "anchor": "center"},
+            "Cutoff":       {"width": 130, "minwidth": 100, "stretch": False, "anchor": "center"}
         }
+
+        # Columnas avanzadas ocultas por defecto (opt-in vía menú contextual de cabecera)
+        self.ADVANCED_HEALTH_COLUMNS = ("HealthStatus", "Clipping", "Lufs", "Cutoff")
 
         self.frame_grid = ctk.CTkFrame(self.parent, fg_color=theme.BG_CARD)
         self.frame_grid.pack(side="top", fill="both", expand=True, padx=0, pady=0)
@@ -113,6 +128,7 @@ class GridPanel:
         self.tree_container.grid_rowconfigure(0, weight=1)
         self.tree_container.grid_columnconfigure(0, weight=1)
 
+        self._build_health_filter_banner()
         self._build_treeview()
         self._setup_context_menu()
         self.cell_entry = None
@@ -135,6 +151,49 @@ class GridPanel:
             self.filter_panel.after(50, self.filter_panel.focus_artist_field)
 
         return "break"
+
+    def _build_health_filter_banner(self):
+        """Banner discreto de cross-filtering desde el Dashboard de Salud: se muestra
+        solo mientras hay un filtro de rutas activo (self._health_filter_paths)."""
+        self._health_banner = ctk.CTkFrame(
+            self.frame_grid, fg_color=theme.PRIMARY, corner_radius=theme.RADIUS_CONTROL
+        )
+
+        self._health_banner_label = ctk.CTkLabel(
+            self._health_banner, text="", anchor="w", text_color=theme.TEXT_ON_PRIMARY,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE, weight="bold")
+        )
+        self._health_banner_label.pack(side="left", padx=(theme.SPACE_SM, theme.SPACE_XS), pady=4)
+
+        btn_clear = ctk.CTkButton(
+            self._health_banner, text="✕ Quitar filtro", width=1, height=20,
+            fg_color="transparent", hover_color=theme.PRIMARY_HOVER,
+            text_color=theme.TEXT_ON_PRIMARY, corner_radius=theme.RADIUS_CONTROL,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_MICRO),
+            command=self.clear_health_path_filter
+        )
+        btn_clear.pack(side="left", padx=(0, theme.SPACE_SM), pady=4)
+
+    def apply_health_path_filter(self, paths, label):
+        """Cross-filtering desde el Dashboard de Salud: acota la grilla a un conjunto
+        explícito de rutas de archivo (no es una columna de la grilla, así que no
+        encaja en AdvancedFilterCriteria). Compone en AND con el resto de filtros."""
+        self._health_filter_paths = set(p for p in (paths or []) if p)
+        self._health_filter_label = label
+
+        self._health_banner_label.configure(text=f"Filtro de salud: {label}")
+        self._health_banner.pack(fill="x", padx=6, pady=(6, 2), before=self.tree_container)
+
+        self.apply_combined_filters()
+        self.logger.info(f"Filtro de salud aplicado desde el dashboard: {label}.")
+
+    def clear_health_path_filter(self):
+        if self._health_filter_paths is None:
+            return
+        self._health_filter_paths = None
+        self._health_filter_label = ""
+        self._health_banner.pack_forget()
+        self.apply_combined_filters()
 
     def apply_advanced_filters(self, criteria):
         """Recibe el criterio del panel, sobrescribe el estado previo por completo y filtra."""
@@ -276,6 +335,11 @@ class GridPanel:
             if not self._matches_advanced_criteria(values, col_index, criteria_obj):
                 continue
 
+            if self._health_filter_paths is not None:
+                row_path = self.app.file_paths_map.get(row_id) if hasattr(self.app, "file_paths_map") else None
+                if row_path not in self._health_filter_paths:
+                    continue
+
             visible_rows.append(row_id)
 
         visible_set = set(visible_rows)
@@ -315,6 +379,47 @@ class GridPanel:
             self._update_tree_scrollbars()
 
         self.logger.info(f"Filtro combinado y ordenación aplicados: {len(visible_rows)} de {len(all_rows)}.")
+
+        # Único punto por el que pasa cualquier cambio de filtro (clic en leyenda,
+        # buscador, panel avanzado, filtro de salud...): la vista activa (Dashboard
+        # o Salud) se refresca sola — ya no depende de un botón "Actualizar" manual —
+        # y el indicador de filtro global de la barra de navegación se actualiza
+        # sea cual sea la vista activa.
+        active_view = getattr(self.app, "_active_view", None)
+        if active_view == "dashboard" and hasattr(self.app, "stats_view"):
+            self.app.stats_view.refresh()
+        elif active_view == "health" and hasattr(self.app, "health_view"):
+            self.app.health_view.refresh()
+
+        if hasattr(self.app, "filter_indicator"):
+            self.app.filter_indicator.set_summary(self.get_active_filter_summary())
+
+    _COMBO_FIELD_LABELS = {"Album": "Álbum", "Genre": "Género", "Publisher": "Etiqueta", "Year": "Año", "Rating": "Rating"}
+    _TOGGLE_LABELS = {"no_year": "Sin Año", "no_cover": "Sin Carátula", "no_comment": "Sin Comentarios", "no_cues": "Sin Cues"}
+
+    def get_active_filter_summary(self) -> list:
+        """Descripción legible del filtro activo (texto/combo/toggles del panel
+        avanzado + filtro de salud), en el mismo orden en que se muestran como badge
+        en el Dashboard. Única fuente de verdad: lee _advanced_criteria /
+        _health_filter_paths, no duplica el estado en otro sitio."""
+        parts = []
+        criteria = self._advanced_criteria
+
+        for field, value in criteria.combo.items():
+            display_value = "Vacío" if value == "[ Vacío ]" else value
+            parts.append(f"{self._COMBO_FIELD_LABELS.get(field, field)}: {display_value}")
+
+        for key, active in criteria.toggles.items():
+            if active:
+                parts.append(self._TOGGLE_LABELS.get(key, key))
+
+        for field, text in criteria.text.items():
+            parts.append(f"{field}: “{text}”")
+
+        if self._health_filter_paths is not None:
+            parts.append(f"Salud: {self._health_filter_label}" if self._health_filter_label else "Salud")
+
+        return parts
 
     def _install_editor_bindtag_guard(self):
         # Captura TAB antes del binding de clase TCombobox/TEntry.
@@ -502,12 +607,23 @@ class GridPanel:
 
     def _build_treeview(self):
         # Declaramos las columnas internas de datos (incluye columnas ocultas por defecto)
-        self.columns = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Comment", "Cues", "Rating", "Cover")
+        self.columns = (
+            "Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year",
+            "Comment", "Cues", "Rating", "Cover",
+            "HealthStatus", "Clipping", "Lufs", "Cutoff"
+        )
 
         self.tree = ttk.Treeview(self.tree_container, columns=self.columns, show="headings", selectmode="extended")
 
-        # Ocultamos Comment de la representación visual pero la mantenemos en la tupla
-        visible_cols = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
+        # Ocultamos Comment y las columnas avanzadas de la representación visual por defecto,
+        # pero las mantenemos en la tupla. Si hay preferencia de columnas persistida
+        # (catalog_manager.visible_columns), se respeta en su lugar.
+        default_visible_cols = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
+        persisted_cols = getattr(self.app.catalog_manager, "visible_columns", None) if hasattr(self.app, "catalog_manager") else None
+        if persisted_cols:
+            visible_cols = tuple(c for c in persisted_cols if c in self.columns) or default_visible_cols
+        else:
+            visible_cols = default_visible_cols
         self.tree.configure(displaycolumns=visible_cols)
 
         for col in self.columns:
@@ -515,7 +631,7 @@ class GridPanel:
             title = self.col_titles.get(col, col)
             cfg = self.base_col_config.get(col, {"width": 100, "minwidth": 50, "stretch": False, "anchor": "w"})
 
-            self.tree.heading(col, text=title, anchor="w", command=lambda _col=col: self.sort_by_column(_col))
+            self.tree.heading(col, text=title, anchor=cfg["anchor"], command=lambda _col=col: self.sort_by_column(_col))
             self.tree.column(
                 col,
                 width=cfg["width"],
@@ -1571,6 +1687,64 @@ class GridPanel:
             if self.app.file_paths_map.get(row_id)
         ]
 
+    def get_visible_tracks_data(self) -> list:
+        """Metadatos (por nombre de columna) de las filas actualmente visibles en la
+        grilla: respeta los filtros de búsqueda/avanzados aplicados, igual que
+        get_visible_file_paths. Usado por el panel de Estadísticas de la Colección."""
+        return [
+            self.map_row_values(self.tree.item(row_id, "values"))
+            for row_id in self.tree.get_children("")
+        ]
+
+    _HEALTH_STATUS_TEXT = {"ok": "✓ OK", "warning": "⚠ Warning", "critical": "✕ Critical"}
+
+    def refresh_health_columns(self, file_paths=None):
+        """Rellena en lote las columnas de salud (HealthStatus/Clipping/Lufs/Cutoff)
+        desde audio_health_cache. No hace nada si ninguna está actualmente visible,
+        para no pagar la query cuando no se usan. Se llama tras cargar una carpeta,
+        al activar una columna de salud por primera vez, y al terminar un análisis
+        por lotes ('Evaluar salud' / 'Analizar pendientes')."""
+        display_cols = list(self.tree.cget("displaycolumns"))
+        if display_cols == ["#all"]:
+            display_cols = list(self.columns)
+        if not any(c in display_cols for c in self.ADVANCED_HEALTH_COLUMNS):
+            return
+
+        cache_manager = getattr(self.app, "cache_manager", None)
+        if cache_manager is None:
+            return
+
+        if file_paths is None:
+            file_paths = list(self.app.file_paths_map.values())
+        if not file_paths:
+            return
+
+        health_by_path = cache_manager.get_health_fields_for_files(file_paths)
+
+        for row_id, path in self.app.file_paths_map.items():
+            if not self.tree.exists(row_id):
+                continue
+
+            data = health_by_path.get(path)
+            if data is None:
+                for col in self.ADVANCED_HEALTH_COLUMNS:
+                    self.tree.set(row_id, col, "—")
+                continue
+
+            status = data.get("overall_status") or "ok"
+            self.tree.set(row_id, "HealthStatus", self._HEALTH_STATUS_TEXT.get(status, status.upper()))
+            self.tree.set(row_id, "Clipping", "Sí" if data.get("has_clipping") else "No")
+
+            lufs = data.get("lufs_integrated")
+            self.tree.set(row_id, "Lufs", f"{lufs:.1f}" if lufs is not None else "—")
+
+            cutoff = data.get("cutoff_khz")
+            if cutoff is not None:
+                bitrate_note = " (falso 320)" if data.get("bitrate_fake") else ""
+                self.tree.set(row_id, "Cutoff", f"{cutoff:.1f} kHz{bitrate_note}")
+            else:
+                self.tree.set(row_id, "Cutoff", "—")
+
     def select_all_rows(self):
         all_items = self.tree.get_children()
         self.tree.selection_set(all_items)
@@ -1876,7 +2050,8 @@ class GridPanel:
 
         display_cols = list(self.tree.cget("displaycolumns"))
         if display_cols == ["#all"] or not display_cols:
-            display_cols = [c for c in self.columns if c not in ("Comment", "Cues", "Rating")]
+            hidden_by_default = ("Comment", "Cues", "Rating") + self.ADVANCED_HEALTH_COLUMNS
+            display_cols = [c for c in self.columns if c not in hidden_by_default]
 
         header_menu.vars = []
 
@@ -1905,7 +2080,8 @@ class GridPanel:
     def _toggle_column_visibility(self, col_name, current_visible):
         display_cols = list(self.tree.cget("displaycolumns"))
         if display_cols == ["#all"] or not display_cols:
-            display_cols = [c for c in self.columns if c not in ("Comment", "Cues", "Rating")]
+            hidden_by_default = ("Comment", "Cues", "Rating") + self.ADVANCED_HEALTH_COLUMNS
+            display_cols = [c for c in self.columns if c not in hidden_by_default]
 
         if current_visible:
             if len(display_cols) > 1:
@@ -1925,3 +2101,11 @@ class GridPanel:
                 display_cols.append(col_name)
 
         self.tree.configure(displaycolumns=tuple(display_cols))
+
+        if hasattr(self.app, "catalog_manager"):
+            self.app.catalog_manager.visible_columns = display_cols
+            self.app.catalog_manager.save_settings()
+
+        # Recién hecha visible una columna de salud: rellenarla si aún no se ha pedido.
+        if not current_visible and col_name in self.ADVANCED_HEALTH_COLUMNS:
+            self.refresh_health_columns()

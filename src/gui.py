@@ -29,6 +29,10 @@ from search_manager import SearchManager
 from process_manager import ProcessManager
 from header_panel import HeaderPanel
 from undo_manager import UndoManager
+from stats_dashboard_view import StatsDashboardView
+from health_dashboard_view import HealthDashboardView
+from view_tab_bar import ViewTabBar
+from filter_indicator import FilterIndicator
 import theme
 
 
@@ -142,6 +146,29 @@ class App(ctk.CTk):
 
         self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.header_logo_pil)
 
+        # Selector de vista: Colección / Dashboard / Salud comparten el mismo estado
+        # de filtro (GridPanel._advanced_criteria / _health_filter_paths); conmutar
+        # solo cambia qué página se muestra en frame_right, ver switch_view(). Estilo
+        # "pestañas con línea inferior", sin cápsulas ni fondos (ver view_tab_bar.py).
+        self._active_view = "collection"
+        nav_row = ctk.CTkFrame(self, fg_color="transparent")
+        nav_row.pack(side="top", fill="x", padx=theme.SPACE_MD, pady=(4, 0))
+
+        self.view_tab_bar = ViewTabBar(
+            nav_row,
+            tabs=[("collection", "Colección"), ("dashboard", "Dashboard"), ("health", "Salud")],
+            command=self.switch_view
+        )
+        self.view_tab_bar.pack(side="left")
+        self.view_tab_bar.set_active("collection")
+
+        # Indicador de filtro global: única fuente visible del filtro activo, a la
+        # derecha de las pestañas, visible sea cual sea la vista activa. GridPanel
+        # lo mantiene sincronizado solo (apply_combined_filters); no hay badges
+        # locales duplicados dentro de Dashboard/Salud.
+        self.filter_indicator = FilterIndicator(nav_row, on_clear=self._clear_global_filter)
+        self.filter_indicator.pack(side="right")
+
         self.frame_main = ctk.CTkFrame(self, fg_color="transparent")
         self.frame_main.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=5)
 
@@ -154,7 +181,7 @@ class App(ctk.CTk):
         )
         self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
 
-        # 2. Contenedor Derecho (Estructura Vertical)
+        # 2. Contenedor Derecho (Estructura Vertical) — aloja las 3 páginas conmutables
         self.frame_right = ctk.CTkFrame(self.frame_main, fg_color="transparent")
         self.frame_right.pack(side="left", fill="both", expand=True)
 
@@ -163,6 +190,11 @@ class App(ctk.CTk):
 
         # Reusar la instancia de filtro que vive dentro de GridPanel.
         self.advanced_filter_panel = self.grid_panel.filter_panel
+
+        # Páginas de Dashboard/Salud: se construyen ocultas y se muestran vía
+        # switch_view(); ambas refrescan sus datos desde grid_panel al activarse.
+        self.stats_view = StatsDashboardView(app=self, parent=self.frame_right)
+        self.health_view = HealthDashboardView(app=self, parent=self.frame_right)
 
         self._setup_footer()
 
@@ -243,17 +275,64 @@ class App(ctk.CTk):
         self.label_status.pack(fill="x", padx=12, pady=(2, 6))
 
     def toggle_detail_panel(self):
-        """Alterna la visibilidad del panel de detalles lateral según la variable del check."""
-        should_show = self.show_detail_panel_var.get()
+        """Alterna la visibilidad del panel de detalles lateral según la variable del
+        check — pero nunca lo muestra fuera de la vista Colección (no tiene sentido
+        editar metadatos viendo un dashboard agregado; ver switch_view())."""
+        should_show = self.show_detail_panel_var.get() and getattr(self, "_active_view", "collection") == "collection"
 
         if should_show:
-            self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
+            # before=frame_right: si no se fija la posición, un pack_forget()+pack()
+            # reinserta este slave AL FINAL del orden de empaquetado de frame_main,
+            # y frame_right (expand=True) reclama entonces todo el ancho disponible
+            # antes de que el sidebar tenga ocasión de pedir el suyo (queda con
+            # tamaño 0, invisible aunque winfo_manager() siga devolviendo "pack").
+            self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10), before=self.frame_right)
             self.detail_panel_visible = True
             self.logger.info("Panel lateral expandido.")
         else:
             self.detail_panel.frame_sidebar.pack_forget()
             self.detail_panel_visible = False
             self.logger.info("Panel lateral colapsado.")
+
+    def switch_view(self, view_key):
+        """Conmuta entre las 3 vistas de la app (Colección/Dashboard/Salud). Las 3
+        comparten el mismo estado de filtro (GridPanel._advanced_criteria /
+        _health_filter_paths aplicados sobre el Treeview) — conmutar de vista solo
+        cambia qué página se muestra en frame_right, nunca recalcula un filtro
+        aparte. Cada página se refresca al activarse para reflejar siempre el
+        filtro vigente en ese momento."""
+        pages = {
+            "collection": self.grid_panel.frame_grid,
+            "dashboard": self.stats_view,
+            "health": self.health_view,
+        }
+        if view_key not in pages:
+            return
+
+        for key, page in pages.items():
+            if key != view_key:
+                page.pack_forget()
+        pages[view_key].pack(fill="both", expand=True)
+        self._active_view = view_key
+        self.view_tab_bar.set_active(view_key)
+
+        if view_key == "collection":
+            # Restaura el panel lateral según el checkbox "Ver detalles" del usuario.
+            self.toggle_detail_panel()
+        else:
+            # Editar metadatos de una pista no tiene sentido viendo un dashboard
+            # agregado; se oculta sin tocar la preferencia del checkbox.
+            self.detail_panel.frame_sidebar.pack_forget()
+            if view_key == "dashboard":
+                self.stats_view.refresh()
+            else:
+                self.health_view.refresh()
+
+    def _clear_global_filter(self):
+        """Botón '✕' del indicador de filtro global: reset_filters() ya dispara
+        apply_combined_filters, que refresca la vista activa y el propio indicador
+        (ver GridPanel.apply_combined_filters) — no hay nada más que hacer aquí."""
+        self.advanced_filter_panel.reset_filters()
 
     @property
     def tree(self):
@@ -595,6 +674,7 @@ class App(ctk.CTk):
                 self.progress_bar.set(1 if loaded_count > 0 else 0)
                 self.label_status.configure(text=f"Carga completada: {loaded_count:,} canciones.")
                 self.logger.info(f"Se encontraron {loaded_count} archivo(s) de audio compatibles.")
+                self.grid_panel.refresh_health_columns()
         finally:
             self.grid_panel.update_empty_state()
             if self._progress_dialog and self._progress_dialog.winfo_exists():

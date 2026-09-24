@@ -2,6 +2,8 @@ import customtkinter as ctk
 from models import AdvancedFilterCriteria
 import theme
 
+RATING_OPTIONS = ["[ Todos ]", "0★", "1★", "2★", "3★", "4★", "5★"]
+
 
 class AdvancedFilterPanel(ctk.CTkFrame):
     def __init__(self, parent, app, on_filter_change_callback, **kwargs):
@@ -23,6 +25,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
             "Album": ctk.StringVar(value="[ Todos ]"),
             "Genre": ctk.StringVar(value="[ Todos ]"),
             "Publisher": ctk.StringVar(value="[ Todos ]"),
+            "Year": ctk.StringVar(value="[ Todos ]"),
+            "Rating": ctk.StringVar(value="[ Todos ]"),
         }
 
         self.toggle_vars = {
@@ -68,17 +72,18 @@ class AdvancedFilterPanel(ctk.CTkFrame):
         frame_combos = ctk.CTkFrame(self, fg_color="transparent")
         frame_combos.pack(fill="x", padx=10, pady=4)
 
-        for col_name in ("Album", "Genre", "Publisher"):
+        for col_name in ("Album", "Genre", "Publisher", "Year", "Rating"):
             sub_frame = ctk.CTkFrame(frame_combos, fg_color="transparent")
             sub_frame.pack(side="left", expand=True, fill="x", padx=4)
 
             lbl = ctk.CTkLabel(sub_frame, text=col_name.upper(), font=(theme.FONT_FAMILY, 10, "bold"), text_color=theme.TEXT_MUTED)
             lbl.pack(anchor="w", pady=(0, 2))
 
+            initial_values = RATING_OPTIONS if col_name == "Rating" else ["[ Todos ]"]
             combo = ctk.CTkComboBox(
                 sub_frame,
                 variable=self.combo_vars[col_name],
-                values=["[ Todos ]"],
+                values=initial_values,
                 height=28,
                 fg_color=theme.BG_INPUT,
                 button_color=theme.BORDER_FOCUS,
@@ -225,7 +230,8 @@ class AdvancedFilterPanel(ctk.CTkFrame):
         column_options = {
             "Album": set(),
             "Genre": set(),
-            "Publisher": set()
+            "Publisher": set(),
+            "Year": set()
         }
 
         # Inspeccionar el estado global de filas cargadas (mapeo maestro)
@@ -248,8 +254,13 @@ class AdvancedFilterPanel(ctk.CTkFrame):
 
         # Actualizar cada widget CTkComboBox
         for col_name, val_set in column_options.items():
-            sorted_values = sorted(list(val_set), key=lambda x: x.lower())
-            options = ["[ Todos ]", "[ Vacío ]"] + sorted_values
+            if col_name == "Year":
+                # Sin '[ Vacío ]': para "sin año" ya existe el toggle dedicado.
+                sorted_values = sorted(val_set, key=lambda x: (not x.isdigit(), x))
+                options = ["[ Todos ]"] + sorted_values
+            else:
+                sorted_values = sorted(val_set, key=lambda x: x.lower())
+                options = ["[ Todos ]", "[ Vacío ]"] + sorted_values
 
             combo_widget = getattr(self, f"combo_{col_name.lower()}", None)
             if combo_widget:
@@ -288,3 +299,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
         for var in self.toggle_vars.values():
             var.set(False)
         self._trigger_filter()
+
+        grid = getattr(self.app, "grid_panel", None)
+        if grid and hasattr(grid, "clear_health_path_filter"):
+            grid.clear_health_path_filter()

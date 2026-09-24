@@ -1060,7 +1060,7 @@ class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
 
 def _build_metric_chip(parent, label, count, color):
     """Tarjeta 'número grande + etiqueta' reutilizada por BatchHealthReportModal y
-    CollectionHealthDashboardModal para sus métricas rápidas."""
+    HealthDashboardView (health_dashboard_view.py) para sus métricas rápidas."""
     chip = ctk.CTkFrame(parent, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
     ctk.CTkLabel(
         chip, text=str(count), text_color=color,
@@ -1180,155 +1180,6 @@ class BatchHealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
             widget.bind("<Double-Button-1>", _open_detail)
 
 
-class CollectionHealthDashboardModal(SilentTitlebarMixin, ctk.CTkToplevel):
-    """Dashboard de salud acotado a la vista actual del grid (respeta filtros y
-    búsqueda activos, no la biblioteca completa): puntuación media, cobertura de
-    análisis y conteos de alerta (falsos 320kbps, clipping, corruptos/truncados), con
-    un botón para lanzar el análisis de las pistas visibles pendientes."""
-
-    def __init__(self, app, file_paths):
-        super().__init__(app)
-        DialogManager.hide_until_ready(self)
-        self.app = app
-        self.file_paths = list(file_paths or [])
-
-        self.title("Sonometa")
-        self.resizable(False, False)
-        self.bind("<Escape>", lambda e: self.destroy())
-
-        self.frame = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD)
-        self.frame.pack(fill="both", expand=True)
-
-        ctk.CTkLabel(
-            self.frame, text="Salud de la Colección", anchor="w",
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H1, weight="bold"),
-            text_color=theme.TEXT_MAIN
-        ).pack(fill="x", padx=theme.SPACE_MD, pady=(theme.SPACE_MD, theme.SPACE_SM))
-
-        self._kpi_container = ctk.CTkFrame(self.frame, fg_color="transparent")
-        self._kpi_container.pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
-
-        self._alerts_container = ctk.CTkFrame(self.frame, fg_color="transparent")
-        self._alerts_container.pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_MD))
-
-        self.lbl_status = ctk.CTkLabel(
-            self.frame, text="", anchor="w", text_color=theme.TEXT_SUBTLE,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_MICRO)
-        )
-        self.lbl_status.pack(fill="x", padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
-
-        btns = ctk.CTkFrame(self.frame, fg_color="transparent")
-        btns.pack(pady=(0, 20))
-        self.btn_analyze_pending = ctk.CTkButton(
-            btns, text="Analizar pendientes", command=self._analyze_pending, width=180,
-            corner_radius=theme.RADIUS_CONTROL,
-            fg_color=getattr(self.app, "CORP_COLOR", theme.PRIMARY),
-            hover_color=getattr(self.app, "CORP_HOVER", theme.PRIMARY_HOVER)
-        )
-        self.btn_analyze_pending.pack(side="left", padx=(0, theme.SPACE_SM))
-        ctk.CTkButton(
-            btns, text="Cerrar", command=self.destroy, width=140,
-            corner_radius=theme.RADIUS_CONTROL,
-            fg_color=theme.BG_CARD_HOVER, hover_color=theme.BORDER_FOCUS, text_color=theme.TEXT_MAIN
-        ).pack(side="left")
-
-        self.refresh()
-
-        self.update_idletasks()
-        width = 480
-        height = max(360, min(560, self.frame.winfo_reqheight()))
-        DialogManager.center_popup_on_parent(self, self.app, width=width, height=height)
-        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
-
-    def refresh(self):
-        """Recalcula y repinta los KPIs desde cache_manager. Se llama al abrir el
-        modal y automáticamente cuando termina un lote de 'Analizar pendientes'."""
-        if not self.winfo_exists():
-            return
-
-        cache_manager = getattr(self.app, "cache_manager", None)
-        summary = cache_manager.get_health_summary_for_files(self.file_paths) if cache_manager else {}
-
-        for widget in self._kpi_container.winfo_children():
-            widget.destroy()
-        for widget in self._alerts_container.winfo_children():
-            widget.destroy()
-
-        total_library = summary.get("total_library", 0)
-        total_analyzed = summary.get("total_analyzed", 0)
-        avg_score = summary.get("avg_health_score")
-        coverage_pct = round((total_analyzed / total_library) * 100) if total_library else 0
-
-        score_color = theme.STATUS_SUCCESS
-        if avg_score is not None:
-            if avg_score < 50:
-                score_color = theme.STATUS_DANGER
-            elif avg_score < 80:
-                score_color = theme.STATUS_WARNING
-
-        score_box = ctk.CTkFrame(self._kpi_container, fg_color="transparent")
-        score_box.pack(side="left", padx=(0, theme.SPACE_LG))
-        ctk.CTkLabel(
-            score_box, text=(f"{avg_score}/100" if avg_score is not None else "—"),
-            text_color=score_color,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_KPI, weight="bold")
-        ).pack()
-        ctk.CTkLabel(
-            score_box, text="Salud media", text_color=theme.TEXT_MUTED,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE)
-        ).pack()
-
-        coverage_box = ctk.CTkFrame(self._kpi_container, fg_color="transparent")
-        coverage_box.pack(side="left")
-        ctk.CTkLabel(
-            coverage_box, text=f"{total_analyzed} de {total_library} pistas ({coverage_pct}%)",
-            text_color=theme.TEXT_MAIN,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H2, weight="bold")
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            coverage_box, text="Cobertura de análisis", text_color=theme.TEXT_MUTED,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE)
-        ).pack(anchor="w")
-
-        for label, count, color in (
-            ("Falsos 320kbps", summary.get("bitrate_fake_count", 0), theme.STATUS_WARNING),
-            ("Clipping", summary.get("clipping_count", 0), theme.STATUS_DANGER),
-            ("Corruptos/truncados", summary.get("integrity_issue_count", 0), theme.STATUS_DANGER),
-        ):
-            _build_metric_chip(self._alerts_container, label, count, color).pack(side="left", padx=(0, theme.SPACE_SM))
-
-        pending_count = max(0, total_library - total_analyzed)
-        if pending_count > 0:
-            self.lbl_status.configure(text=f"{pending_count} pista(s) sin analizar todavía.")
-            self.btn_analyze_pending.configure(state="normal", text=f"Analizar pendientes ({pending_count})")
-        else:
-            has_visible = total_library > 0
-            self.lbl_status.configure(
-                text="Todas las pistas visibles tienen análisis de salud." if has_visible
-                else "No hay pistas visibles en la tabla (revisa los filtros aplicados)."
-            )
-            self.btn_analyze_pending.configure(state="disabled", text="Analizar pendientes")
-
-    def _analyze_pending(self):
-        cache_manager = getattr(self.app, "cache_manager", None)
-        if cache_manager is None:
-            return
-
-        pending_paths = [
-            p for p in cache_manager.get_paths_pending_health_analysis(self.file_paths) if os.path.exists(p)
-        ]
-        if not pending_paths:
-            DialogManager.show_themed_dialog(
-                self.app, "Sin pendientes", "Todas las pistas visibles ya tienen un análisis de salud.",
-                level="info", parent=self
-            )
-            return
-
-        DialogManager.run_batch_health_check(
-            self.app, pending_paths, parent=self, on_complete=lambda results, cancelled: self.refresh()
-        )
-
-
 class DialogManager:
     """Clase especializada en la gestión de ventanas emergentes, diálogos y popups de la aplicación."""
 
@@ -1434,6 +1285,9 @@ class DialogManager:
                 )
                 return
 
+            if hasattr(app, "grid_panel"):
+                app.grid_panel.refresh_health_columns([file_path])
+
             HealthReportModal(
                 app, report,
                 on_reanalyze=lambda: DialogManager.run_single_health_check(app, file_path, parent=parent),
@@ -1448,7 +1302,7 @@ class DialogManager:
         cancelable, un hilo secundario que salta los que ya tienen caché válida, y al
         terminar un BatchHealthReportModal con el resumen. Punto de entrada único
         compartido por la selección múltiple de grid_panel y el botón 'Analizar
-        pendientes' del CollectionHealthDashboardModal."""
+        pendientes' de HealthDashboardView (health_dashboard_view.py)."""
         existing_paths = [p for p in file_paths if p and os.path.exists(p)]
         if not existing_paths:
             DialogManager.show_themed_dialog(
@@ -1506,6 +1360,9 @@ class DialogManager:
             if progress.winfo_exists():
                 progress.close()
 
+            if results and hasattr(app, "grid_panel"):
+                app.grid_panel.refresh_health_columns([fp for fp, _ in results])
+
             if results:
                 BatchHealthReportModal(
                     app, results, was_cancelled=was_cancelled,
@@ -1521,10 +1378,6 @@ class DialogManager:
                 on_complete(results, was_cancelled)
 
         threading.Thread(target=_worker, daemon=True).start()
-
-    @staticmethod
-    def open_collection_health_dashboard(app, file_paths):
-        CollectionHealthDashboardModal(app, file_paths)
 
     @staticmethod
     def hide_until_ready(win):
@@ -2462,107 +2315,6 @@ class DialogManager:
             width=120
         )
         btn_close_panel.pack(side="right")
-        btn_close_panel.focus_force()
-
-    @staticmethod
-    def open_column_customization_dialog(app):
-        """Abre un modal para seleccionar las columnas visibles en la grilla principal."""
-        win = DialogManager._new_modal(app, "Personalizar Columnas Visibles - Sonometa", 450, 520)
-
-        font_btn = ctk.CTkFont(size=12, weight="bold")
-        corp_color = getattr(app, "CORP_COLOR", theme.PRIMARY)
-        corp_hover = getattr(app, "CORP_HOVER", theme.PRIMARY_HOVER)
-
-        lbl_header = ctk.CTkLabel(
-            win,
-            text="Personalización de Columnas",
-            font=ctk.CTkFont(size=theme.FONT_SIZE_H1, weight="bold"),
-            text_color=theme.TEXT_MAIN
-        )
-        lbl_header.pack(anchor="w", padx=16, pady=(16, 4))
-
-        lbl_sub = ctk.CTkLabel(
-            win,
-            text="Selecciona los campos que deseas mostrar u ocultar en la grilla.",
-            text_color=theme.TEXT_MUTED
-        )
-        lbl_sub.pack(anchor="w", padx=16, pady=(0, 10))
-
-        # Panel desplazable para la lista de checkboxes
-        scroll_frame = ctk.CTkScrollableFrame(win, fg_color=theme.BG_INPUT, corner_radius=theme.RADIUS_CONTROL)
-        scroll_frame.pack(fill="both", expand=True, padx=16, pady=(0, 12))
-
-        col_titles = {
-            "Filename": "NOMBRE DE ARCHIVO",
-            "Artist": "INTÉRPRETE",
-            "Title": "TÍTULO",
-            "MixArtist": "REMIX",
-            "Album": "ÁLBUM",
-            "Genre": "GÉNERO",
-            "Publisher": "ETIQUETA",
-            "Comment": "COMENTARIO",
-            "Year": "AÑO",
-            "Cover": "CARÁTULA"
-        }
-
-        grid_panel = getattr(app, "grid_panel", None)
-        if not grid_panel or not hasattr(grid_panel, "tree"):
-            ctk.CTkLabel(scroll_frame, text="No hay grilla disponible.", text_color=theme.TEXT_SUBTLE).pack(pady=20)
-        else:
-            tree = grid_panel.tree
-            all_cols = getattr(grid_panel, "columns", [])
-            display_cols = list(tree.cget("displaycolumns"))
-            if display_cols == ["#all"] or not display_cols:
-                display_cols = list(all_cols)
-
-            def _toggle_column(col_key, var):
-                should_show = var.get()
-                curr_display = list(tree.cget("displaycolumns"))
-                if curr_display == ["#all"] or not curr_display:
-                    curr_display = list(all_cols)
-
-                if should_show and col_key not in curr_display:
-                    new_display = [c for c in all_cols if c in curr_display or c == col_key]
-                    tree.configure(displaycolumns=new_display)
-                elif not should_show and col_key in curr_display:
-                    if len(curr_display) > 1:
-                        new_display = [c for c in curr_display if c != col_key]
-                        tree.configure(displaycolumns=new_display)
-                    else:
-                        # Revertir selección si se intenta ocultar la última columna restante
-                        var.set(True)
-
-            for col in all_cols:
-                is_visible = col in display_cols
-                title = col_titles.get(col, col)
-
-                var = tk.BooleanVar(value=is_visible)
-
-                chk_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
-                chk_frame.pack(fill="x", padx=8, pady=4)
-
-                chk = ctk.CTkCheckBox(
-                    chk_frame,
-                    text=title,
-                    variable=var,
-                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12),
-                    fg_color=corp_color,
-                    hover_color=corp_hover,
-                    command=lambda c=col, v=var: _toggle_column(c, v)
-                )
-                chk.pack(side="left", anchor="w")
-
-        # Botón "Cerrar Panel" al pie de la ventana modal
-        btn_close_panel = ctk.CTkButton(
-            win,
-            text="Cerrar Panel",
-            font=font_btn,
-            command=win.destroy,
-            fg_color=corp_color,
-            hover_color=corp_hover,
-            height=36
-        )
-        btn_close_panel.pack(fill="x", padx=16, pady=(0, 16))
         btn_close_panel.focus_force()
 
     @staticmethod
