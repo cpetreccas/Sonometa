@@ -1125,7 +1125,7 @@ class BatchHealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
             ("OK", ok_count, theme.STATUS_SUCCESS),
             ("Avisos", warn_count, theme.STATUS_WARNING),
             ("Críticos", crit_count, theme.STATUS_DANGER),
-            ("Falsos 320k", fake_count, theme.STATUS_WARNING),
+            ("Bitrate falso", fake_count, theme.STATUS_WARNING),
             ("Clipping", clip_count, theme.STATUS_DANGER),
         ):
             _build_metric_chip(metrics, label, count, color).pack(side="left", padx=(0, theme.SPACE_SM))

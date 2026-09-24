@@ -1,5 +1,7 @@
+import os
 import sys
 import logging
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -28,6 +30,18 @@ logger = logging.getLogger("Sonometa")
 # Umbrales de análisis (ajustables)
 # ------------------------------------------------------------------
 
+# Versión de los criterios de análisis. Se guarda en cada informe (health_json) y
+# CacheManager trata como pendientes los informes de versiones anteriores, para que
+# un cambio de umbrales/lógica obligue a re-analizar en vez de mezclar resultados.
+#   1: versión inicial.
+#   2: clipping a 0 dBFS por canal con rachas >= 8 muestras; LUFS estéreo real;
+#      ALAC/WMA Lossless como sin pérdida; corte de frecuencias exige caída brusca;
+#      integridad detecta errores de decodificación; fallos de lectura ya no cuentan
+#      como clipping ni bitrate falso.
+#   3: tabla corte -> bitrate recalibrada con LAME (antes leía un escalón de más:
+#      un 128 real salía como 160); se guarda el bitrate aparente en el informe.
+ANALYSIS_VERSION = 3
+
 # Por encima de esta duración, el análisis de señal se hace sobre un muestreo
 # (inicio/medio/final) en vez de decodificar el archivo completo, para no disparar
 # el uso de memoria ni la duración del análisis en mixes/DJ sets largos.
@@ -39,8 +53,16 @@ SAMPLE_SEGMENT_SEC = 60.0
 INTEGRITY_RELATIVE_TOLERANCE = 0.05
 INTEGRITY_MIN_TOLERANCE_SEC = 3.0
 
-CLIP_DBFS_THRESHOLD = -0.1          # picos a partir de aquí cuentan como saturación
-CLIP_MIN_RUN = 3                    # nº de muestras consecutivas para no ser ruido/inter-sample peak
+# Saturación = muestras a fondo de escala (0 dBFS). Con -0.1 dBFS se marcaban como
+# saturadas las pistas bien masterizadas con el limitador a ese techo.
+CLIP_DBFS_THRESHOLD = 0.0
+# Margen para que el máximo positivo de un entero (32767/32768 en 16 bits, -0.0003 dBFS)
+# cuente como fondo de escala.
+CLIP_FULL_SCALE_TOLERANCE = 1e-4
+# Rachas cortas a fondo de escala aparecen al decodificar MP3/AAC de masters altos
+# (overshoot del decoder recortado a 16 bits); una racha de 8+ muestras (~0.18 ms a
+# 44.1 kHz) es ya una onda aplanada de verdad.
+CLIP_MIN_RUN = 8
 CLIP_CRITICAL_RATIO = 0.0001        # 0.01% de muestras saturadas -> crítico
 
 LUFS_OK_MIN = -16.0
@@ -49,18 +71,34 @@ LUFS_WARNING_MIN = -23.0
 LUFS_WARNING_MAX = -6.0
 
 CUTOFF_NOISE_FLOOR_DB = -50.0       # relativo al pico del espectro (Welch)
+# El lowpass de un encoder es un corte brusco; una caída natural de agudos (grabación
+# antigua, producción oscura) es gradual. Se compara el nivel medio 0.5-1.5 kHz por
+# debajo y por encima del corte: si baja menos que esto, no es un corte de encoder.
+CUTOFF_MIN_CLIFF_DB = 20.0          # medido: material oscuro legítimo ~12 dB, transcodificado ~25 dB
 
-# Corte típico del filtro lowpass de encoders MP3 habituales (aprox., LAME/Xing).
+# Frecuencia de corte -> bitrate aparente. Calibrado midiendo el lowpass de LAME
+# (el encoder de MP3 más habitual) con este mismo análisis:
+#   96/112 kbps ~15.4 kHz · 128 ~16.9 · 160 ~17.6 · 192 ~18.9 · 224/256 ~19.6 · 320 ~20.3
+# (224 y 256 no se distinguen: ambos se leen como 256). Cada umbral queda algo por
+# debajo del punto medio entre dos escalones: ante la duda se estima el bitrate más
+# alto, para no marcar como falso un archivo legítimo. Encoders antiguos (FhG/Xing)
+# cortan más bajo y pueden leerse un escalón por debajo.
 # Se recorre en orden descendente: el primer umbral que cumple `cutoff_khz >= khz` gana.
 CUTOFF_BITRATE_TABLE = (
-    (19.5, 320),
-    (18.5, 256),
-    (17.5, 192),
-    (16.0, 160),
-    (0.0, 128),
+    (19.75, 320),   # 256 ~19.6 | 320 ~20.3
+    (19.2, 256),    # 192 ~18.9 | 256 ~19.6
+    (18.0, 192),    # 160 ~17.6 | 192 ~18.9
+    (17.1, 160),    # 128 ~16.9 | 160 ~17.6
+    (16.0, 128),    # 112 ~15.5 | 128 ~16.9
+    (0.0, 96),
 )
 
 LOSSLESS_MODULES = ("flac", "wave", "aiff")
+
+# Integridad: errores que reporta ffmpeg al decodificar el archivo completo
+# (tramas dañadas que se saltan sin alterar la duración).
+DECODE_ERROR_CRITICAL = 10          # nº de errores a partir del cual es crítico
+DECODE_TIMEOUT_SEC = 180
 
 # Penalización sobre 100 según el status de cada chequeo, para el "health_score" resumen
 # que se persiste en caché/exportación. Ajustable sin tocar la lógica de cada chequeo.
@@ -107,10 +145,19 @@ class HealthReport:
     cutoff_khz: Optional[float] = None         # valor crudo (None si no se pudo medir)
     analyzed_at: Optional[str] = None          # ISO 8601 UTC
     error: Optional[str] = None
+    # Bitrate real estimado por el corte de frecuencias (tramos de CUTOFF_BITRATE_TABLE).
+    # None si no hay corte de encoder (sin pérdida íntegro o caída natural de agudos).
+    apparent_kbps: Optional[int] = None
+    declared_kbps: Optional[int] = None
+    lossless: Optional[bool] = None
+    analysis_version: int = ANALYSIS_VERSION
 
     @property
     def health_score(self) -> int:
-        """Puntuación 0-100 derivada del status de los 4 chequeos (ver SCORE_PENALTIES)."""
+        """Puntuación 0-100 derivada del status de los 4 chequeos (ver SCORE_PENALTIES).
+        Un archivo que no se pudo analizar puntúa 0."""
+        if self.error:
+            return 0
         score = 100
         for check_name, penalties in SCORE_PENALTIES.items():
             status = getattr(self, check_name).status
@@ -119,7 +166,7 @@ class HealthReport:
 
     @property
     def has_clipping(self) -> bool:
-        return self.clipping.status != "ok"
+        return self.clipping.status in ("warning", "critical")
 
     @property
     def bitrate_fake(self) -> bool:
@@ -139,9 +186,13 @@ class HealthReport:
 
     @staticmethod
     def failed(file_path: str, message: str) -> "HealthReport":
-        placeholder = HealthCheckResult("critical", "No disponible", message)
+        """Informe de un archivo que no se pudo leer/decodificar: es un problema de
+        integridad (crítico); el resto de chequeos quedan "unknown" (no ejecutados)
+        para que no cuenten también como clipping o bitrate falso."""
+        integrity = HealthCheckResult("critical", "No se pudo analizar", message)
+        not_run = HealthCheckResult("unknown", "No analizado", "El archivo no se pudo leer o decodificar.")
         return HealthReport(
-            file_path, placeholder, placeholder, placeholder, placeholder,
+            file_path, integrity, not_run, not_run, not_run,
             analyzed_at=datetime.now(timezone.utc).isoformat(),
             error=message,
         )
@@ -157,6 +208,10 @@ class HealthReport:
             "cutoff_khz": self.cutoff_khz,
             "analyzed_at": self.analyzed_at,
             "error": self.error,
+            "apparent_kbps": self.apparent_kbps,
+            "declared_kbps": self.declared_kbps,
+            "lossless": self.lossless,
+            "analysis_version": self.analysis_version,
         }
 
     @staticmethod
@@ -171,6 +226,10 @@ class HealthReport:
             cutoff_khz=data.get("cutoff_khz"),
             analyzed_at=data.get("analyzed_at"),
             error=data.get("error"),
+            apparent_kbps=data.get("apparent_kbps"),
+            declared_kbps=data.get("declared_kbps"),
+            lossless=data.get("lossless"),
+            analysis_version=data.get("analysis_version", 1),
         )
 
 
@@ -214,19 +273,27 @@ class AudioHealthChecker:
             logger.warning(f"HealthCheck: no se pudo decodificar '{file_path}': {e}")
             return HealthReport.failed(file_path, f"No se pudo decodificar el audio: {e}")
 
-        integrity = AudioHealthChecker._check_integrity(declared_duration, decoded_full_duration, end_decoded_duration)
+        decode_errors = AudioHealthChecker._count_decode_errors(file_path)
+        integrity = AudioHealthChecker._check_integrity(
+            declared_duration, decoded_full_duration, end_decoded_duration, decode_errors
+        )
 
-        samples, sample_rate = AudioHealthChecker._segment_to_float_array(sample_segment)
+        frames, sample_rate = AudioHealthChecker._segment_to_float_array(sample_segment)
 
-        clipping = AudioHealthChecker._check_clipping(samples)
-        loudness, lufs_value = AudioHealthChecker._check_loudness(samples, sample_rate)
-        cutoff, cutoff_khz_value = AudioHealthChecker._check_cutoff(samples, sample_rate, declared_bitrate, is_lossless)
+        clipping = AudioHealthChecker._check_clipping(frames)
+        loudness, lufs_value = AudioHealthChecker._check_loudness(frames, sample_rate)
+        cutoff, cutoff_khz_value, apparent_kbps = AudioHealthChecker._check_cutoff(
+            frames.mean(axis=1), sample_rate, declared_bitrate, is_lossless
+        )
 
         return HealthReport(
             file_path, integrity, clipping, loudness, cutoff,
             lufs_integrated=lufs_value,
             cutoff_khz=cutoff_khz_value,
             analyzed_at=datetime.now(timezone.utc).isoformat(),
+            apparent_kbps=apparent_kbps,
+            declared_kbps=declared_bitrate // 1000 if declared_bitrate else None,
+            lossless=is_lossless,
         )
 
     # ------------------------------------------------------------------
@@ -245,10 +312,20 @@ class AudioHealthChecker:
         bitrate = getattr(info, "bitrate", None)
         bitrate = int(bitrate) if bitrate else None
 
-        module_name = type(info).__module__.split(".")[-1]
-        is_lossless = module_name in LOSSLESS_MODULES
+        return duration, bitrate, AudioHealthChecker._is_lossless(info)
 
-        return duration, bitrate, is_lossless
+    @staticmethod
+    def _is_lossless(info) -> bool:
+        """FLAC/WAV/AIFF por contenedor; en contenedores que admiten ambos tipos se
+        mira el códec: ALAC dentro de .m4a (MP4Info.codec == "alac") y WMA Lossless
+        (ASFInfo.codec_name). Sin esto, un ALAC (~900 kbps declarados) salía siempre
+        como bitrate falso al compararse con la tabla de MP3."""
+        module_name = type(info).__module__.split(".")[-1]
+        if module_name in LOSSLESS_MODULES:
+            return True
+        codec = str(getattr(info, "codec", "") or "").lower()
+        codec_name = str(getattr(info, "codec_name", "") or "").lower()
+        return codec.startswith("alac") or "lossless" in codec_name
 
     # ------------------------------------------------------------------
     # Decodificación (pydub/ffmpeg), con muestreo para archivos largos
@@ -291,24 +368,74 @@ class AudioHealthChecker:
 
     @staticmethod
     def _segment_to_float_array(segment: AudioSegment) -> Tuple[np.ndarray, int]:
-        """Convierte un AudioSegment a un array numpy float64 normalizado a [-1, 1].
-        Devuelve (muestras, sample_rate); si hay más de un canal, se promedian a mono
-        (suficiente para clipping/LUFS/espectro, y evita duplicar el análisis por canal)."""
+        """Convierte un AudioSegment a un array numpy float64 normalizado a [-1, 1]
+        con forma (frames, canales). Devuelve (frames, sample_rate). Los canales se
+        conservan por separado: promediarlos a mono ocultaba la saturación de un solo
+        canal (el pico quedaba a la mitad) y falseaba la medida LUFS estéreo."""
         raw = np.array(segment.get_array_of_samples())
-        channels = segment.channels
+        channels = max(1, segment.channels)
         max_value = float(2 ** (8 * segment.sample_width - 1))
 
-        if channels > 1:
-            raw = raw.reshape((-1, channels)).mean(axis=1)
+        frames = raw.reshape((-1, channels)).astype(np.float64) / max_value
+        return frames, segment.frame_rate
 
-        samples = raw.astype(np.float64) / max_value
-        return samples, segment.frame_rate
+    @staticmethod
+    def _count_decode_errors(file_path: str) -> Optional[Tuple[int, str]]:
+        """Decodifica el archivo completo con ffmpeg sin guardar nada (-f null) y
+        cuenta los errores que reporta (tramas dañadas que se saltan sin que cambie la
+        duración). Solo la pista de audio (-map 0:a:0): la carátula embebida no
+        cuenta. Devuelve (nº de errores, primer mensaje) o None si ffmpeg no está
+        disponible o no terminó a tiempo (el chequeo se omite, no se penaliza)."""
+        converter = getattr(AudioSegment, "converter", None) or "ffmpeg"
+        cmd = [converter, "-nostdin", "-v", "error", "-i", file_path, "-map", "0:a:0", "-f", "null", "-"]
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, timeout=DECODE_TIMEOUT_SEC, creationflags=creationflags
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.debug(f"HealthCheck: chequeo de decodificación omitido para '{file_path}': {e}")
+            return None
+
+        lines = [line.strip() for line in proc.stderr.decode("utf-8", "replace").splitlines() if line.strip()]
+        return len(lines), (lines[0] if lines else "")
 
     # ------------------------------------------------------------------
     # Chequeo 1: Integridad
     # ------------------------------------------------------------------
     @staticmethod
     def _check_integrity(
+        declared_duration: Optional[float],
+        decoded_full_duration: Optional[float],
+        end_decoded_duration: float,
+        decode_errors: Optional[Tuple[int, str]] = None,
+    ) -> HealthCheckResult:
+        """Combina dos señales: duración (¿está truncado?) y errores de decodificación
+        (¿tiene tramas dañadas a mitad?). El resultado es el peor de los dos."""
+        problems = []  # (status, label, detail)
+
+        duration = AudioHealthChecker._check_duration(declared_duration, decoded_full_duration, end_decoded_duration)
+        if duration.status != "ok":
+            problems.append((duration.status, duration.label, duration.detail))
+
+        if decode_errors is not None and decode_errors[0] > 0:
+            count, first_message = decode_errors
+            status = "critical" if count >= DECODE_ERROR_CRITICAL else "warning"
+            detail = f"ffmpeg reportó {count} error(es) al decodificar el archivo completo"
+            if first_message:
+                detail += f' (p. ej. "{first_message[:120]}")'
+            problems.append((status, f"Errores de decodificación ({count})", detail + "."))
+
+        if not problems:
+            return duration
+
+        worst = "critical" if any(p[0] == "critical" for p in problems) else "warning"
+        return HealthCheckResult(
+            worst, " · ".join(p[1] for p in problems), " ".join(p[2] for p in problems)
+        )
+
+    @staticmethod
+    def _check_duration(
         declared_duration: Optional[float],
         decoded_full_duration: Optional[float],
         end_decoded_duration: float,
@@ -351,49 +478,58 @@ class AudioHealthChecker:
     # Chequeo 2: Clipping
     # ------------------------------------------------------------------
     @staticmethod
-    def _check_clipping(samples: np.ndarray) -> HealthCheckResult:
-        if len(samples) == 0:
+    def _check_clipping(frames: np.ndarray) -> HealthCheckResult:
+        """Rachas de CLIP_MIN_RUN+ muestras a fondo de escala, canal por canal."""
+        if frames.size == 0:
             return HealthCheckResult("warning", "Sin datos", "No hay muestras que analizar.")
 
-        threshold = 10 ** (CLIP_DBFS_THRESHOLD / 20.0)
-        is_over = np.abs(samples) >= threshold
+        threshold = 10 ** (CLIP_DBFS_THRESHOLD / 20.0) - CLIP_FULL_SCALE_TOLERANCE
+        run_count = 0
+        clipped_samples = 0
+        clipped_channels = 0
+        for channel in frames.T:
+            is_over = np.abs(channel) >= threshold
+            # Longitud de rachas consecutivas, vectorizado (evita un bucle Python sobre
+            # millones de muestras).
+            padded = np.concatenate(([False], is_over, [False])).astype(np.int8)
+            diff = np.diff(padded)
+            run_lengths = np.where(diff == -1)[0] - np.where(diff == 1)[0]
+            valid_runs = run_lengths[run_lengths >= CLIP_MIN_RUN]
+            if len(valid_runs):
+                clipped_channels += 1
+                run_count += int(len(valid_runs))
+                clipped_samples += int(valid_runs.sum())
 
-        # Longitud de rachas consecutivas, vectorizado (evita un bucle Python sobre
-        # millones de muestras).
-        padded = np.concatenate(([False], is_over, [False])).astype(np.int8)
-        diff = np.diff(padded)
-        run_starts = np.where(diff == 1)[0]
-        run_ends = np.where(diff == -1)[0]
-        run_lengths = run_ends - run_starts
-        valid_runs = run_lengths[run_lengths >= CLIP_MIN_RUN]
-
-        run_count = int(len(valid_runs))
-        clipped_samples = int(valid_runs.sum())
-        ratio = clipped_samples / len(samples)
+        ratio = clipped_samples / frames.size
 
         if run_count == 0:
             return HealthCheckResult("ok", "Sin clipping detectado", "No se encontraron picos sostenidos a 0 dBFS.")
 
+        channels_note = "" if frames.shape[1] == 1 else f" en {clipped_channels} de {frames.shape[1]} canal(es)"
+
         if ratio <= CLIP_CRITICAL_RATIO:
             return HealthCheckResult(
                 "warning", f"Clipping aislado ({run_count} racha(s))",
-                f"{clipped_samples} muestra(s) saturada(s) en {run_count} racha(s) breve(s) "
+                f"{clipped_samples} muestra(s) saturada(s) en {run_count} racha(s) breve(s){channels_note} "
                 f"({ratio * 100:.4f}% del tramo analizado)."
             )
 
         return HealthCheckResult(
             "critical", f"Clipping significativo ({ratio * 100:.2f}%)",
-            f"{clipped_samples} muestras saturadas en {run_count} racha(s) ({ratio * 100:.2f}% del tramo analizado)."
+            f"{clipped_samples} muestras saturadas en {run_count} racha(s){channels_note} "
+            f"({ratio * 100:.2f}% del tramo analizado)."
         )
 
     # ------------------------------------------------------------------
     # Chequeo 3: Volumen integrado (LUFS, ITU-R BS.1770 / EBU R128)
     # ------------------------------------------------------------------
     @staticmethod
-    def _check_loudness(samples: np.ndarray, sample_rate: int) -> Tuple[HealthCheckResult, Optional[float]]:
+    def _check_loudness(frames: np.ndarray, sample_rate: int) -> Tuple[HealthCheckResult, Optional[float]]:
+        """LUFS según BS.1770 con los canales por separado (el medidor suma su
+        energía). Antes se medía la mezcla a mono, que en estéreo da ~3 LU menos."""
         try:
             meter = pyln.Meter(sample_rate)
-            loudness = meter.integrated_loudness(samples)
+            loudness = meter.integrated_loudness(frames if frames.shape[1] > 1 else frames[:, 0])
         except Exception as e:
             return HealthCheckResult("warning", "LUFS no disponible", f"No se pudo calcular el volumen integrado: {e}"), None
 
@@ -429,12 +565,14 @@ class AudioHealthChecker:
     @staticmethod
     def _check_cutoff(
         samples: np.ndarray, sample_rate: int, declared_bitrate: Optional[int], is_lossless: bool
-    ) -> Tuple[HealthCheckResult, Optional[float]]:
+    ) -> Tuple[HealthCheckResult, Optional[float], Optional[int]]:
+        """Devuelve (resultado, corte en kHz, bitrate real estimado en kbps o None si
+        no hay corte de encoder)."""
         if len(samples) < 1024:
             return HealthCheckResult(
                 "warning", "Muestra insuficiente",
                 "El tramo analizado es demasiado corto para estimar el espectro de frecuencias."
-            ), None
+            ), None, None
 
         nperseg = min(8192, len(samples))
         freqs, psd = welch(samples, fs=sample_rate, nperseg=nperseg)
@@ -447,7 +585,20 @@ class AudioHealthChecker:
 
         apparent_kbps = next(kbps for khz, kbps in CUTOFF_BITRATE_TABLE if cutoff_khz >= khz)
 
-        if declared_bitrate:
+        # ¿Corte brusco de encoder o caída natural de agudos? Nivel medio justo por
+        # debajo vs. justo por encima del corte. Sin banda por encima (corte en
+        # Nyquist) no hay ningún corte artificial.
+        below = (freqs >= cutoff_hz - 1500) & (freqs < cutoff_hz - 500)
+        above = (freqs > cutoff_hz + 500) & (freqs <= cutoff_hz + 1500)
+        cliff_db = (
+            float(np.mean(psd_db[below]) - np.mean(psd_db[above]))
+            if below.any() and above.any() else None
+        )
+        natural_rolloff = cliff_db is not None and cliff_db < CUTOFF_MIN_CLIFF_DB
+
+        if is_lossless:
+            label = f"Corte a {cutoff_khz:.1f} kHz (formato sin pérdida)"
+        elif declared_bitrate:
             label = f"Corte a {cutoff_khz:.1f} kHz (Parece ~{apparent_kbps} kbps vs {declared_bitrate // 1000} kbps declarados)"
         else:
             label = f"Corte a {cutoff_khz:.1f} kHz (Parece ~{apparent_kbps} kbps; bitrate declarado desconocido)"
@@ -472,4 +623,57 @@ class AudioHealthChecker:
         else:
             status = "ok" if apparent_kbps >= 256 else "warning"
 
-        return HealthCheckResult(status, label, label), float(cutoff_khz)
+        if status != "ok" and natural_rolloff:
+            status = "ok"
+            label = (
+                f"Caída natural de agudos desde {cutoff_khz:.1f} kHz "
+                f"(sin corte brusco de encoder: {cliff_db:.0f} dB en 2 kHz)"
+            )
+
+        # Sin corte de encoder no hay bitrate "real" que estimar: caída natural de
+        # agudos, o formato sin pérdida con el espectro completo.
+        has_encoder_cut = not natural_rolloff and not (is_lossless and cutoff_khz >= 19.5)
+        return HealthCheckResult(status, label, label), float(cutoff_khz), (apparent_kbps if has_encoder_cut else None)
+
+
+def estimate_kbps_from_cutoff(cutoff_khz: float) -> int:
+    """Bitrate aparente a partir de la frecuencia de corte (tabla LAME aproximada)."""
+    return next(kbps for khz, kbps in CUTOFF_BITRATE_TABLE if cutoff_khz >= khz)
+
+
+LOSSLESS_EXTENSIONS = (".flac", ".wav", ".aiff", ".aif")
+
+
+def format_real_bitrate(
+    cutoff_khz: Optional[float],
+    apparent_kbps: Optional[int],
+    declared_kbps: Optional[int],
+    lossless: Optional[bool],
+    bitrate_fake: bool,
+    file_path: str = "",
+) -> str:
+    """Texto de la columna "Bitrate real" de la grilla:
+    "~320 kbps", "~128 kbps (declara 320)", "Sin pérdida", "~192 kbps (en FLAC)",
+    "Sin corte" (caída natural de agudos) o "—" (sin análisis).
+
+    Informes sin los campos apparent_kbps/lossless (hechos antes de añadirlos) se
+    aproximan a partir de cutoff_khz y de la extensión del archivo."""
+    if cutoff_khz is None:
+        return "—"
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if lossless is None:
+        lossless = ext in LOSSLESS_EXTENSIONS
+        apparent_kbps = None if (lossless and cutoff_khz >= 19.5) else estimate_kbps_from_cutoff(cutoff_khz)
+
+    if lossless:
+        if apparent_kbps is None:
+            return "Sin pérdida"
+        container = ext.lstrip(".").upper() or "sin pérdida"
+        return f"~{apparent_kbps} kbps (en {container})"
+
+    if apparent_kbps is None:
+        return "Sin corte"
+    if bitrate_fake and declared_kbps:
+        return f"~{apparent_kbps} kbps (declara {declared_kbps})"
+    return f"~{apparent_kbps} kbps"

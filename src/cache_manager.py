@@ -10,6 +10,18 @@ from typing import Dict, Optional
 logger = logging.getLogger("Sonometa")
 
 
+
+def _current_health_sql(alias: str = "") -> str:
+    """Condición SQL: el informe de audio_health_cache se hizo con los criterios de
+    análisis vigentes (audio_health_checker.ANALYSIS_VERSION). Los informes de
+    versiones anteriores se tratan como pendientes y no cuentan en los resúmenes,
+    para no mezclar resultados de criterios distintos."""
+    from audio_health_checker import ANALYSIS_VERSION
+    return (
+        f"COALESCE(json_extract({alias}health_json, '$.analysis_version'), 1) "
+        f">= {int(ANALYSIS_VERSION)}"
+    )
+
 class CacheManager:
     """Gestor de caché persistente para Sonometa.
 
@@ -586,7 +598,9 @@ class CacheManager:
                 return None
 
             try:
-                return HealthReport.from_dict(json.loads(health_json))
+                from audio_health_checker import ANALYSIS_VERSION
+                report = HealthReport.from_dict(json.loads(health_json))
+                return report if report.analysis_version >= ANALYSIS_VERSION else None
             except (json.JSONDecodeError, KeyError):
                 logger.warning(f"[CACHE] health_json inválido para {os.path.basename(file_path)}")
                 return None
@@ -761,7 +775,8 @@ class CacheManager:
                                  (lufs_integrated < ? OR lufs_integrated > ?) THEN 1 ELSE 0 END)
                     FROM audio_health_cache
                     WHERE file_path IN (SELECT value FROM json_each(?))
-                    """,
+                      AND {current}
+                    """.format(current=_current_health_sql()),
                     (LUFS_OK_MIN, LUFS_OK_MAX, json.dumps(file_paths)),
                 )
                 row = cursor.fetchone()
@@ -788,7 +803,7 @@ class CacheManager:
         (evita el patrón N+1 de get_cached_health, que además hace os.stat() por
         archivo). Usado para pintar las columnas de salud de la grilla en lote:
         {file_path: {health_score, integrity_status, overall_status, has_clipping,
-        lufs_integrated, cutoff_khz, bitrate_fake}}. Rutas sin análisis no aparecen
+        lufs_integrated, cutoff_khz, bitrate_fake, apparent_kbps, declared_kbps, lossless}}. Rutas sin análisis no aparecen
         en el dict devuelto."""
         scoped_paths = [p for p in (file_paths or []) if p]
         if not scoped_paths:
@@ -801,10 +816,14 @@ class CacheManager:
                 cursor.execute(
                     """
                     SELECT file_path, health_score, integrity_status, overall_status,
-                           has_clipping, lufs_integrated, cutoff_khz, bitrate_fake
+                           has_clipping, lufs_integrated, cutoff_khz, bitrate_fake,
+                           json_extract(health_json, '$.apparent_kbps'),
+                           json_extract(health_json, '$.declared_kbps'),
+                           json_extract(health_json, '$.lossless')
                     FROM audio_health_cache
                     WHERE file_path IN (SELECT value FROM json_each(?))
-                    """,
+                      AND {current}
+                    """.format(current=_current_health_sql()),
                     (json.dumps(scoped_paths),),
                 )
                 rows = cursor.fetchall()
@@ -819,9 +838,13 @@ class CacheManager:
                     "lufs_integrated": lufs_integrated,
                     "cutoff_khz": cutoff_khz,
                     "bitrate_fake": bool(bitrate_fake),
+                    "apparent_kbps": apparent_kbps,
+                    "declared_kbps": declared_kbps,
+                    "lossless": None if lossless is None else bool(lossless),
                 }
                 for (file_path, health_score, integrity_status, overall_status,
-                     has_clipping, lufs_integrated, cutoff_khz, bitrate_fake) in rows
+                     has_clipping, lufs_integrated, cutoff_khz, bitrate_fake,
+                     apparent_kbps, declared_kbps, lossless) in rows
             }
         except Exception as e:
             logger.error(f"[CACHE] Error obteniendo campos de salud en lote: {str(e)}")
@@ -836,9 +859,16 @@ class CacheManager:
     def get_paths_by_health_flag(self, file_paths: list, flag: str) -> list:
         """Rutas (acotadas a `file_paths`, la vista actual del grid) cuyo registro en
         audio_health_cache cumple `flag` ('bitrate_fake' | 'clipping' |
-        'integrity_issue' — mismas condiciones que get_health_summary_for_files).
+        'integrity_issue' | 'loudness' — mismas condiciones que get_health_summary_for_files).
         Usado por el cross-filtering del Dashboard de Salud."""
         condition = self._HEALTH_FLAG_CONDITIONS.get(flag)
+        if flag == "loudness":
+            # Mismo rango que lufs_out_of_range_count en get_health_summary_for_files.
+            from audio_health_checker import LUFS_OK_MIN, LUFS_OK_MAX
+            condition = (
+                f"lufs_integrated IS NOT NULL AND "
+                f"(lufs_integrated < {float(LUFS_OK_MIN)} OR lufs_integrated > {float(LUFS_OK_MAX)})"
+            )
         if condition is None:
             raise ValueError(f"Flag de salud desconocido: {flag}")
 
@@ -855,6 +885,7 @@ class CacheManager:
                     SELECT file_path
                     FROM audio_health_cache
                     WHERE {condition}
+                      AND {_current_health_sql()}
                       AND file_path IN (SELECT value FROM json_each(?))
                     """,
                     (json.dumps(scoped_paths),),
@@ -867,7 +898,8 @@ class CacheManager:
             return []
 
     def get_paths_pending_health_analysis(self, file_paths: Optional[list] = None, limit: Optional[int] = None) -> list:
-        """Rutas sin registro en audio_health_cache. Si se pasa `file_paths`, se
+        """Rutas sin registro en audio_health_cache, o con un informe hecho con
+        criterios de análisis anteriores (ver _current_health_sql). Si se pasa `file_paths`, se
         acota a esa lista (vista actual del grid); si no, considera toda la
         biblioteca (track_cache). Usado por el botón 'Analizar pendientes'."""
         try:
@@ -883,15 +915,15 @@ class CacheManager:
                     query = """
                         SELECT je.value FROM json_each(?) je
                         LEFT JOIN audio_health_cache ahc ON ahc.file_path = je.value
-                        WHERE ahc.file_path IS NULL
-                    """
+                        WHERE ahc.file_path IS NULL OR NOT ({current})
+                    """.format(current=_current_health_sql("ahc."))
                     params = [json.dumps(scoped_paths)]
                 else:
                     query = """
                         SELECT tc.file_path FROM track_cache tc
                         LEFT JOIN audio_health_cache ahc ON ahc.file_path = tc.file_path
-                        WHERE ahc.file_path IS NULL
-                    """
+                        WHERE ahc.file_path IS NULL OR NOT ({current})
+                    """.format(current=_current_health_sql("ahc."))
                     params = []
 
                 if limit:

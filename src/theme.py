@@ -3,7 +3,10 @@
 Fuente única de verdad para todos los paneles de la UI de escritorio (CustomTkinter/Tkinter).
 Traduce a Tkinter las variables definidas en docs/Guía de estilos Sonometa.md (pensada
 originalmente para la PWA web). Notas de traducción:
-  - Los valores de color son 1:1 con la guía.
+  - Superficies, bordes y textos secundarios son los de la PWA (web/css/styles.css:
+    --bg-color, --surface-color, --border-color...), algo más claros que los de la
+    guía, para que escritorio y móvil se vean iguales. Acentos, estados y texto
+    principal son 1:1 con la guía (coinciden en ambas).
   - La guía pide la fuente 'Inter'; no está instalada ni empaquetada en este proyecto, así
     que se usa 'Segoe UI' (fuente nativa de Windows, visualmente cercana) como equivalente real.
   - Tkinter solo soporta pesos "normal"/"bold" (no existe SemiBold/Medium nativos); los pesos
@@ -13,17 +16,17 @@ originalmente para la PWA web). Notas de traducción:
 # ------------------------------------------------------------------
 # Superficies base
 # ------------------------------------------------------------------
-BG_MAIN = "#121212"         # Fondo general de la aplicación (ventana raíz)
-BG_CARD = "#18181B"         # Tarjetas, modales, barra lateral y paneles elevados
-BG_CARD_ZEBRA = "#212125"   # Filas impares de la grilla (zebra striping, tono intermedio hacia el hover)
-BG_CARD_HOVER = "#27272A"   # Hover para tarjetas y filas de lista
-BG_INPUT = "#18181B"        # Fondo de campos de entrada (inputs, entries, combos)
+BG_MAIN = "#1A1A1E"         # Fondo general de la aplicación (PWA --bg-color)
+BG_CARD = "#24242A"         # Tarjetas, modales, barra lateral y paneles (PWA --surface-color)
+BG_CARD_ZEBRA = "#1F1F24"   # Filas alternas de la grilla (PWA --row-even)
+BG_CARD_HOVER = "#2E2E36"   # Hover para tarjetas y filas de lista (PWA --surface-hover)
+BG_INPUT = "#2D2D35"        # Fondo de campos de entrada: inputs, entries, combos (PWA --input-bg)
 
 # ------------------------------------------------------------------
 # Bordes y divisores
 # ------------------------------------------------------------------
-BORDER_QUIET = "#27272A"    # Líneas divisorias sutiles, bordes de tabla/tarjetas
-BORDER_FOCUS = "#3F3F46"    # Bordes para elementos enfocados o activos
+BORDER_QUIET = "#363640"    # Líneas divisorias sutiles, bordes de tabla/tarjetas (PWA --border-color)
+BORDER_FOCUS = "#4B4B58"    # Bordes para elementos enfocados o activos (PWA --border-highlight)
 
 # ------------------------------------------------------------------
 # Acentos de marca
@@ -36,8 +39,8 @@ PRIMARY_LIGHT = "#A78BFA"   # Morado claro para texto activo, iconos y remixes
 # Colores de texto
 # ------------------------------------------------------------------
 TEXT_MAIN = "#F4F4F5"       # Texto principal de alto contraste
-TEXT_MUTED = "#A1A1AA"      # Texto secundario (artistas, cabeceras de tabla)
-TEXT_SUBTLE = "#71717A"     # Textos secundarios menores, placeholders, pie de página
+TEXT_MUTED = "#B3B3AD"      # Texto secundario: artistas, cabeceras de tabla (PWA --text-muted)
+TEXT_SUBTLE = "#8E8E96"     # Textos menores, placeholders, pie de página (PWA --text-subtle)
 TEXT_ON_PRIMARY = "#FFFFFF"  # Blanco puro para texto sobre fondo PRIMARY (ej. fila seleccionada)
 
 # ------------------------------------------------------------------

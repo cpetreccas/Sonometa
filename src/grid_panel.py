@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tkinter as tk
 import unicodedata
@@ -83,7 +84,7 @@ class GridPanel:
             "HealthStatus": "SALUD",
             "Clipping": "CLIPPING",
             "Lufs": "LUFS",
-            "Cutoff": "CORTE/BITRATE"
+            "Cutoff": "BITRATE REAL"
         }
 
         # Configuración base de columnas (sin Comment ni Comment2)
@@ -103,7 +104,7 @@ class GridPanel:
             "HealthStatus": {"width": 80,  "minwidth": 70,  "stretch": False, "anchor": "center"},
             "Clipping":     {"width": 70,  "minwidth": 60,  "stretch": False, "anchor": "center"},
             "Lufs":         {"width": 70,  "minwidth": 60,  "stretch": False, "anchor": "center"},
-            "Cutoff":       {"width": 130, "minwidth": 100, "stretch": False, "anchor": "center"}
+            "Cutoff":       {"width": 170, "minwidth": 110, "stretch": False, "anchor": "center"}
         }
 
         # Columnas avanzadas ocultas por defecto (opt-in vía menú contextual de cabecera)
@@ -128,7 +129,6 @@ class GridPanel:
         self.tree_container.grid_rowconfigure(0, weight=1)
         self.tree_container.grid_columnconfigure(0, weight=1)
 
-        self._build_health_filter_banner()
         self._build_treeview()
         self._setup_context_menu()
         self.cell_entry = None
@@ -152,37 +152,14 @@ class GridPanel:
 
         return "break"
 
-    def _build_health_filter_banner(self):
-        """Banner discreto de cross-filtering desde el Dashboard de Salud: se muestra
-        solo mientras hay un filtro de rutas activo (self._health_filter_paths)."""
-        self._health_banner = ctk.CTkFrame(
-            self.frame_grid, fg_color=theme.PRIMARY, corner_radius=theme.RADIUS_CONTROL
-        )
-
-        self._health_banner_label = ctk.CTkLabel(
-            self._health_banner, text="", anchor="w", text_color=theme.TEXT_ON_PRIMARY,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE, weight="bold")
-        )
-        self._health_banner_label.pack(side="left", padx=(theme.SPACE_SM, theme.SPACE_XS), pady=4)
-
-        btn_clear = ctk.CTkButton(
-            self._health_banner, text="✕ Quitar filtro", width=1, height=20,
-            fg_color="transparent", hover_color=theme.PRIMARY_HOVER,
-            text_color=theme.TEXT_ON_PRIMARY, corner_radius=theme.RADIUS_CONTROL,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_MICRO),
-            command=self.clear_health_path_filter
-        )
-        btn_clear.pack(side="left", padx=(0, theme.SPACE_SM), pady=4)
-
     def apply_health_path_filter(self, paths, label):
         """Cross-filtering desde el Dashboard de Salud: acota la grilla a un conjunto
         explícito de rutas de archivo (no es una columna de la grilla, así que no
-        encaja en AdvancedFilterCriteria). Compone en AND con el resto de filtros."""
+        encaja en AdvancedFilterCriteria). Compone en AND con el resto de filtros.
+        Se muestra (y se quita con su ✕) en el indicador de filtro global de la barra
+        de pestañas, común a las 3 vistas: ver get_active_filter_summary()."""
         self._health_filter_paths = set(p for p in (paths or []) if p)
         self._health_filter_label = label
-
-        self._health_banner_label.configure(text=f"Filtro de salud: {label}")
-        self._health_banner.pack(fill="x", padx=6, pady=(6, 2), before=self.tree_container)
 
         self.apply_combined_filters()
         self.logger.info(f"Filtro de salud aplicado desde el dashboard: {label}.")
@@ -192,7 +169,6 @@ class GridPanel:
             return
         self._health_filter_paths = None
         self._health_filter_label = ""
-        self._health_banner.pack_forget()
         self.apply_combined_filters()
 
     def apply_advanced_filters(self, criteria):
@@ -1629,7 +1605,7 @@ class GridPanel:
         self._active_sort_col = col
         self._last_sort_reverse = reverse
 
-        data.sort(key=lambda x: str(x[0]).lower(), reverse=reverse)
+        data.sort(key=lambda x: self._sort_key(col, x[0]), reverse=reverse)
 
         for index, item in enumerate(data):
             self.tree.move(item[1], '', index)
@@ -1644,6 +1620,23 @@ class GridPanel:
 
         sorted_title = self.col_titles.get(col, col) + arrow
         self.tree.heading(col, text=sorted_title)
+
+    # Columnas de salud cuyo texto lleva un número ("⚠ 82", "-9.4", "~128 kbps (declara
+    # 320)"): se ordenan por ese número, no alfabéticamente. Las celdas sin número
+    # ("—", "Sin corte") van siempre detrás; "Sin pérdida" cuenta como la mejor calidad.
+    _NUMERIC_SORT_COLUMNS = ("HealthStatus", "Lufs", "Cutoff")
+    _NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+    def _sort_key(self, col, value):
+        text = str(value)
+        if col in self._NUMERIC_SORT_COLUMNS:
+            if col == "Cutoff" and text == "Sin pérdida":
+                return (0, float("inf"), "")
+            match = self._NUMBER_RE.search(text)
+            if match:
+                return (0, float(match.group()), "")
+            return (1, 0.0, text.lower())
+        return (0, 0.0, text.lower())
 
     def reapply_current_sort(self):
         """
@@ -1669,7 +1662,7 @@ class GridPanel:
             return
 
         # Ordenar usando la dirección guardada
-        data.sort(key=lambda x: str(x[0]).lower(), reverse=reverse)
+        data.sort(key=lambda x: self._sort_key(col, x[0]), reverse=reverse)
 
         # Reposicionar filas en el nuevo orden
         for index, item in enumerate(data):
@@ -1696,7 +1689,8 @@ class GridPanel:
             for row_id in self.tree.get_children("")
         ]
 
-    _HEALTH_STATUS_TEXT = {"ok": "✓ OK", "warning": "⚠ Warning", "critical": "✕ Critical"}
+    # Icono del peor resultado de los chequeos + nota 0-100 (ordenable por la nota).
+    _HEALTH_STATUS_ICON = {"ok": "✓", "warning": "⚠", "critical": "✕"}
 
     def refresh_health_columns(self, file_paths=None):
         """Rellena en lote las columnas de salud (HealthStatus/Clipping/Lufs/Cutoff)
@@ -1720,6 +1714,9 @@ class GridPanel:
             return
 
         health_by_path = cache_manager.get_health_fields_for_files(file_paths)
+        # Import diferido: audio_health_checker arrastra pydub/scipy/pyloudnorm y no
+        # hace falta cargarlos al arrancar la grilla.
+        from audio_health_checker import format_real_bitrate
 
         for row_id, path in self.app.file_paths_map.items():
             if not self.tree.exists(row_id):
@@ -1732,18 +1729,18 @@ class GridPanel:
                 continue
 
             status = data.get("overall_status") or "ok"
-            self.tree.set(row_id, "HealthStatus", self._HEALTH_STATUS_TEXT.get(status, status.upper()))
+            score = data.get("health_score")
+            icon = self._HEALTH_STATUS_ICON.get(status, "?")
+            self.tree.set(row_id, "HealthStatus", f"{icon} {score}" if score is not None else icon)
             self.tree.set(row_id, "Clipping", "Sí" if data.get("has_clipping") else "No")
 
             lufs = data.get("lufs_integrated")
             self.tree.set(row_id, "Lufs", f"{lufs:.1f}" if lufs is not None else "—")
 
-            cutoff = data.get("cutoff_khz")
-            if cutoff is not None:
-                bitrate_note = " (falso 320)" if data.get("bitrate_fake") else ""
-                self.tree.set(row_id, "Cutoff", f"{cutoff:.1f} kHz{bitrate_note}")
-            else:
-                self.tree.set(row_id, "Cutoff", "—")
+            self.tree.set(row_id, "Cutoff", format_real_bitrate(
+                data.get("cutoff_khz"), data.get("apparent_kbps"), data.get("declared_kbps"),
+                data.get("lossless"), data.get("bitrate_fake"), path,
+            ))
 
     def select_all_rows(self):
         all_items = self.tree.get_children()

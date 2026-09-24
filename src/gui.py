@@ -258,7 +258,7 @@ class App(ctk.CTk):
         self.logger.info(f"Revisión manual de carátulas: {msg}")
 
     def _setup_footer(self):
-        self.frame_bottom = ctk.CTkFrame(self)
+        self.frame_bottom = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD)
         self.frame_bottom.pack(fill="x", padx=theme.SPACE_MD, pady=(5, 10))
 
         self.progress_bar = ctk.CTkProgressBar(self.frame_bottom, progress_color=self.CORP_COLOR)
@@ -324,9 +324,11 @@ class App(ctk.CTk):
             # agregado; se oculta sin tocar la preferencia del checkbox.
             self.detail_panel.frame_sidebar.pack_forget()
             if view_key == "dashboard":
-                self.stats_view.refresh()
+                # reveal=True: si hay que repintar, la vista se tapa con un overlay
+                # de carga hasta que todos los gráficos tienen su tamaño final.
+                self.stats_view.refresh(reveal=True)
             else:
-                self.health_view.refresh()
+                self.health_view.refresh(reveal=True)
 
     def _clear_global_filter(self):
         """Botón '✕' del indicador de filtro global: reset_filters() ya dispara

@@ -15,6 +15,19 @@ const COLORS = [
     '#64748B'  // Neutral Muted
 ];
 
+// Escala monocromática de la Guía de Estilos para la distribución por valoración
+// (--chart-5-star ... --chart-1-star). Sin valorar (0) usa el morado corporativo al
+// 35% en vez del gris --chart-0-star, para que todas las barras sean moradas.
+// Mismos valores que RATING_COLORS en src/stats_dashboard_view.py (escritorio).
+const RATING_COLORS = {
+    '5': '#8B5CF6',
+    '4': '#7C3AED',
+    '3': '#6D28D9',
+    '2': '#4C1D95',
+    '1': '#2E1065',
+    '0': '#483871'
+};
+
 /**
  * Mapea el porcentaje de salud a un texto descriptivo de estado
  * @param {number} score - Porcentaje global de salud (0 - 100)
@@ -77,7 +90,7 @@ export function populateFilterDropdowns(allTracks = []) {
 /**
  * Renderiza la leyenda personalizada y asigna eventos táctiles
  */
-function renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel) {
+function renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel, colors) {
     const legendElem = document.getElementById(legendId);
     if (!legendElem) return;
 
@@ -93,8 +106,11 @@ function renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel) {
 
     labels.forEach((label, i) => {
         const val = dataVals[i];
+        // Categorías sin pistas (p. ej. años intermedios rellenados a 0 para que el
+        // eje del gráfico sea continuo) no aportan nada en la leyenda.
+        if (!val) return;
         const pct = total > 0 ? ((val / total) * 100).toFixed(2) : '0.00';
-        const color = COLORS[i % COLORS.length];
+        const color = colors[i];
 
         // Formateo dinámico de estrellas para la dimensión de valoración
         let displayLabel = label;
@@ -321,8 +337,10 @@ export function updateDashboard(tracksList = []) {
                 dataVals = labels.map(k => counts[k] || 0);
             }
 
-            // Aplicar la paleta de colores corporativa
-            const sliceColors = labels.map((_, i) => COLORS[i % COLORS.length]);
+            // Aplicar la paleta de colores corporativa (escala de morados para la valoración)
+            const sliceColors = keyName === 'rating'
+                ? labels.map(l => RATING_COLORS[l] || COLORS[0])
+                : labels.map((_, i) => COLORS[i % COLORS.length]);
 
             const chartCanvas = document.getElementById(canvasId);
             if (!chartCanvas) return;
@@ -396,7 +414,7 @@ export function updateDashboard(tracksList = []) {
 
             chartInstances[canvasId] = new Chart(chartCanvas, chartConfig);
             if (legendId) {
-                renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel);
+                renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel, sliceColors);
             }
         };
 
@@ -407,7 +425,9 @@ export function updateDashboard(tracksList = []) {
         // 2. Pistas por Etiqueta (Gráfico de barras)
         buildChart('publisherChart', 'publisherLegend', 'publisher', 'Sin Etiqueta', 'bar', false);
 
-        // 3. Agrupación dinámica SOLO de los años existentes (Gráfico de líneas)
+        // 3. Distribución por año (Gráfico de líneas). El eje X cubre TODO el rango de
+        // años, con 0 en los que no tienen pistas, para que la distancia entre años sea
+        // proporcional al tiempo; la leyenda solo lista los años con pistas.
         const yearCounts = {};
         tracksList.forEach(t => {
             const yr = parseInt(t.year, 10);
@@ -419,9 +439,11 @@ export function updateDashboard(tracksList = []) {
         const sortedYears = Object.keys(yearCounts).map(Number).sort((a, b) => a - b);
 
         const yearBuckets = {};
-        sortedYears.forEach(yr => {
-            yearBuckets[String(yr)] = yearCounts[yr];
-        });
+        if (sortedYears.length > 0) {
+            for (let yr = sortedYears[0]; yr <= sortedYears[sortedYears.length - 1]; yr++) {
+                yearBuckets[String(yr)] = yearCounts[yr] || 0;
+            }
+        }
 
         buildChart('yearChart', 'yearLegend', 'year', 'Sin Año', 'line', false, null, yearBuckets);
 
