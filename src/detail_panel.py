@@ -4,7 +4,8 @@ import sys
 import tkinter as tk
 from io import BytesIO
 import customtkinter as ctk
-from PIL import Image, ImageGrab
+import numpy as np
+from PIL import Image, ImageDraw, ImageGrab, ImageTk
 
 from ui_utils import UiUtils
 from undo_manager import HistoryAction
@@ -16,7 +17,7 @@ import theme
 class DetailPanel:
     """Panel lateral de metadatos y carátula desacoplado de la ventana principal."""
 
-    BORDER_DEFAULT = theme.BORDER_FOCUS  # Borde fino sutil para cajas en reposo
+    BORDER_DEFAULT = theme.BORDER_QUIET  # Borde de inputs en reposo (guía 4.3); morado al enfocar
 
     def __init__(self, app, parent, logger, get_resource_path, fallback_process_icon=None):
         self.app = app
@@ -276,7 +277,12 @@ class DetailPanel:
         self.label_cover.bind(btn_right, self.show_cover_context_menu)
 
     def _setup_tag_panel(self):
-        self.frame_sidebar = ctk.CTkFrame(self.parent, width=260)
+        # Tarjeta de la guía (4.1): mismo fondo, borde y radio que la tabla. Sin
+        # fg_color explícito tomaba el gris neutro por defecto de CustomTkinter.
+        self.frame_sidebar = ctk.CTkFrame(
+            self.parent, width=260, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD,
+            border_width=1, border_color=theme.BORDER_QUIET
+        )
         self.frame_sidebar.pack(side="left", fill="y", padx=(0, 5), pady=0)
         self.frame_sidebar.pack_propagate(False)
 
@@ -293,17 +299,19 @@ class DetailPanel:
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
 
         for idx, (label_text, attr_name) in enumerate(fields):
-            top_pad = 8 if idx == 0 else 4
+            top_pad = 12 if idx == 0 else 4
             lbl = ctk.CTkLabel(
                 self.frame_sidebar,
-                text=label_text,
+                text=label_text.upper(),
                 anchor="w",
-                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=11, weight="bold")
+                height=18,
+                text_color=theme.TEXT_MUTED,
+                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=10, weight="bold")
             )
-            lbl.pack(fill="x", padx=10, pady=(top_pad, 1))
+            lbl.pack(fill="x", padx=12, pady=(top_pad, 1))
 
             field_frame = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-            field_frame.pack(fill="x", padx=10, pady=(0, 4))
+            field_frame.pack(fill="x", padx=12, pady=(0, 4))
 
             if attr_name in self.panel_combo_fields:
                 catalog_key = self.panel_combo_fields[attr_name]
@@ -311,9 +319,17 @@ class DetailPanel:
                     field_frame,
                     values=self.app.catalog_manager.get_catalog_combo_values(catalog_key),
                     state="readonly",
-                    height=26,
+                    height=28,
                     border_width=1,
                     border_color=self.BORDER_DEFAULT,
+                    fg_color=theme.BG_INPUT,
+                    text_color=theme.TEXT_MAIN,
+                    corner_radius=theme.RADIUS_CONTROL,
+                    button_color=theme.BORDER_QUIET,
+                    button_hover_color=theme.BORDER_FOCUS,
+                    dropdown_fg_color=theme.BG_CARD,
+                    dropdown_hover_color=theme.BG_CARD_HOVER,
+                    dropdown_text_color=theme.TEXT_MAIN,
                     font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12),
                     command=lambda _value, _attr=attr_name, _cat=catalog_key: self.on_panel_catalog_selected(_attr, _cat)
                 )
@@ -333,9 +349,12 @@ class DetailPanel:
             else:
                 widget = ctk.CTkEntry(
                     field_frame,
-                    height=26,
+                    height=28,
                     border_width=1,
                     border_color=self.BORDER_DEFAULT,
+                    fg_color=theme.BG_INPUT,
+                    text_color=theme.TEXT_MAIN,
+                    corner_radius=theme.RADIUS_CONTROL,
                     font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12)
                 )
                 widget.bind("<FocusIn>", lambda _e, _w=widget: self._on_widget_focus_in(_w))
@@ -358,10 +377,18 @@ class DetailPanel:
                 field_frame,
                 values=[self.app.KEEP_VALUE],
                 state=multi_state,
-                height=26,
+                height=28,
                 border_width=1,
                 border_color=self.BORDER_DEFAULT,
-                font=ctk.CTkFont(size=12),
+                fg_color=theme.BG_INPUT,
+                text_color=theme.TEXT_MAIN,
+                corner_radius=theme.RADIUS_CONTROL,
+                button_color=theme.BORDER_QUIET,
+                button_hover_color=theme.BORDER_FOCUS,
+                dropdown_fg_color=theme.BG_CARD,
+                dropdown_hover_color=theme.BG_CARD_HOVER,
+                dropdown_text_color=theme.TEXT_MAIN,
+                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=12),
                 command=lambda _value, _a=attr_name: self.on_multi_panel_commit(_a)
             )
 
@@ -394,23 +421,27 @@ class DetailPanel:
         # --- SECCIÓN CARÁTULA ---
         lbl_cover_title = ctk.CTkLabel(
             self.frame_sidebar,
-            text="Carátula",
+            text="CARÁTULA",
             anchor="w",
-            font=ctk.CTkFont(size=11, weight="bold")
+            height=18,
+            text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=10, weight="bold")
         )
-        lbl_cover_title.pack(fill="x", padx=10, pady=(4, 1))
+        lbl_cover_title.pack(fill="x", padx=12, pady=(4, 1))
 
         self.frame_cover_container = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-        self.frame_cover_container.pack(fill="both", expand=True, padx=10, pady=(2, 2))
+        self.frame_cover_container.pack(fill="both", expand=True, padx=12, pady=(2, 2))
 
         self.label_cover = ctk.CTkLabel(
             self.frame_cover_container,
             text="Sin carátula",
             width=150,
             height=150,
-            fg_color="transparent",
+            # Recuadro "sin carátula" de la guía (4.5): fondo #1B1B20, borde, radio 6.
+            fg_color=theme.TABLE_HEADER_BG,
+            corner_radius=6,
             text_color=theme.TEXT_SUBTLE,
-            border_color=theme.BORDER_FOCUS,
+            border_color=theme.BORDER_QUIET,
             border_width=1,
             cursor="hand2"
         )
@@ -422,28 +453,25 @@ class DetailPanel:
 
         # --- SECCIÓN MINI REPRODUCTOR DE AUDIO ---
         self.frame_player = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-        self.frame_player.pack(fill="x", padx=10, pady=(2, 6))
+        self.frame_player.pack(fill="x", padx=12, pady=(4, 6))
 
         player_top = ctk.CTkFrame(self.frame_player, fg_color="transparent")
         player_top.pack(fill="x")
 
-        self.btn_play = ctk.CTkButton(
+        scale = ctk.ScalingTracker.get_widget_scaling(self.frame_sidebar)
+        self.btn_play = _PlayButton(
             player_top,
-            text="▶",
-            width=30,
-            height=26,
-            fg_color=self.app.CORP_COLOR,
-            hover_color=self.app.CORP_HOVER,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            size=round(32 * scale),
             command=lambda: self.audio_player.toggle_play_pause() if self.audio_player else None
         )
-        self.btn_play.pack(side="left", padx=(0, 6))
+        self.btn_play.pack(side="left", padx=(0, 10))
 
         self.slider_audio = ctk.CTkSlider(
             player_top,
             from_=0,
             to=1,
             height=12,
+            fg_color=theme.BORDER_QUIET,
             progress_color=self.app.CORP_COLOR,
             button_color=theme.TEXT_MAIN,
             button_hover_color=theme.PRIMARY_LIGHT,
@@ -462,7 +490,7 @@ class DetailPanel:
 
         # --- BOTONES DE ACCIÓN ---
         frame_actions = ctk.CTkFrame(self.frame_sidebar, fg_color="transparent")
-        frame_actions.pack(fill="x", side="bottom", padx=10, pady=(4, 8))
+        frame_actions.pack(fill="x", side="bottom", padx=12, pady=(4, 12))
 
         self.btn_process = ctk.CTkButton(
             frame_actions,
@@ -473,8 +501,9 @@ class DetailPanel:
             hover_color=self.app.CORP_HOVER,
             border_width=2,
             border_color=self.app.CORP_COLOR,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=30,
+            corner_radius=theme.RADIUS_CONTROL,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=13, weight="bold"),
+            height=32,
             command=self.app.process_manager.process_discogs_data
         )
         self.btn_process.pack(fill="x", pady=(0, 5))
@@ -496,8 +525,8 @@ class DetailPanel:
             text_color=theme.TEXT_MAIN,
             hover_color=theme.STATUS_DANGER_HOVER,
             corner_radius=theme.RADIUS_CONTROL,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=30,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=13, weight="bold"),
+            height=32,
             command=lambda: self.app.process_manager.clear_selected_metadata()
         )
         self.btn_clean.pack(fill="x")
@@ -573,11 +602,28 @@ class DetailPanel:
                 resized_img = self._current_raw_cover_pil.resize(
                     (target_size, target_size), Image.Resampling.LANCZOS
                 )
+                resized_img = self._round_cover_corners(resized_img)
                 ctk_img = ctk.CTkImage(light_image=resized_img, dark_image=resized_img, size=(target_size, target_size))
-                self.label_cover.configure(image=ctk_img, text="")
+                # Sin borde con imagen: el borde del recuadro asomaba por las esquinas.
+                self.label_cover.configure(image=ctk_img, text="", border_width=0)
                 self.label_cover.image = ctk_img
             except Exception as e:
                 self.logger.warning(f"Error al redimensionar carátula responsiva: {e}")
+
+    COVER_RADIUS = 6  # guía 4.5: carátulas con radio 6px
+
+    def _round_cover_corners(self, img):
+        """Aplica el radio de la guía a la carátula (máscara alfa suavizada x4)."""
+        w, h = img.size
+        ss = 4
+        scale = ctk.ScalingTracker.get_widget_scaling(self.label_cover)
+        mask = Image.new("L", (w * ss, h * ss), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, w * ss - 1, h * ss - 1), radius=round(self.COVER_RADIUS * scale * ss), fill=255
+        )
+        rounded = img.convert("RGBA")
+        rounded.putalpha(mask.resize((w, h), Image.LANCZOS))
+        return rounded
 
     def _set_btn_hover(self, btn, is_hover):
         """Aplica visualmente el borde blanco al pasar el ratón por encima."""
@@ -767,7 +813,7 @@ class DetailPanel:
         has_any_cover = any(self.app.grid_panel.row_has_cover(row_id) for row_id in selected_rows)
         text = "Mantener carátulas" if has_any_cover else "Sin carátula"
         self._current_raw_cover_pil = None
-        self.label_cover.configure(image="", text=text, text_color=theme.TEXT_SUBTLE)
+        self.label_cover.configure(image="", border_width=1, text=text, text_color=theme.TEXT_SUBTLE)
         self.label_cover.image = None
 
     def refresh_process_button_text(self, selected_count=None):
@@ -803,7 +849,7 @@ class DetailPanel:
                 self.logger.warning(f"No se pudo cargar la vista previa de la carátula (posiblemente corrupta): {str(e)}")
 
         self._current_raw_cover_pil = None
-        self.label_cover.configure(image="", text="Sin carátula")
+        self.label_cover.configure(image="", border_width=1, text="Sin carátula")
         self.label_cover.image = None
 
     def show_cover_context_menu(self, event):
@@ -1011,7 +1057,7 @@ class DetailPanel:
             else:
                 widget.delete(0, "end")
 
-        self.label_cover.configure(image="", text="Sin carátula")
+        self.label_cover.configure(image="", border_width=1, text="Sin carátula")
         self.label_cover.image = None
 
         # Si hay un archivo seleccionado, mantenemos su duración visible y lista para reproducir
@@ -1230,3 +1276,89 @@ class DetailPanel:
         self.btn_clean.bind("<Shift-Tab>", lambda _e: self._focus_target(self.btn_process))
         self.btn_clean.bind("<FocusIn>", lambda _e, w=self.btn_clean: self._on_widget_focus_in(w))
         self.btn_clean.bind("<FocusOut>", lambda _e, w=self.btn_clean: self._on_widget_focus_out(w))
+
+class _PlayButton(tk.Canvas):
+    """Botón circular de reproducir/pausar del reproductor (guía 4.7): círculo con
+    el degradado #6366F1 -> #8B5CF6 e icono blanco dibujado (no un carácter de
+    texto). Se ilumina en hover y pasa a gris cuando está desactivado.
+
+    Acepta la misma interfaz que el CTkButton al que sustituye, para que
+    audio_player.py no cambie: configure(text="▶" | "⏸", state="normal" |
+    "disabled", fg_color=...) — fg_color se ignora, el aspecto lo decide state."""
+
+    GRADIENT = ("#6366F1", "#8B5CF6")
+    SUPERSAMPLE = 4
+
+    def __init__(self, parent, size, command):
+        super().__init__(parent, width=size, height=size, bg=theme.BG_CARD, bd=0, highlightthickness=0, cursor="hand2")
+        self._size = size
+        self._command = command
+        self._playing = False
+        self._disabled = False
+        self._hover = False
+        self._images = {
+            "normal": self._render_circle(self.GRADIENT, 1.0),
+            "hover": self._render_circle(self.GRADIENT, 1.12),
+            "disabled": self._render_circle((theme.BORDER_FOCUS, theme.BORDER_FOCUS), 1.0),
+        }
+        self._circle = self.create_image(0, 0, anchor="nw", image=self._images["normal"])
+        self._redraw()
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
+        self.bind("<Button-1>", self._on_click)
+
+    def _render_circle(self, colors, brightness):
+        ss = self.SUPERSAMPLE
+        size = self._size * ss
+        start = np.array([int(colors[0][i:i + 2], 16) for i in (1, 3, 5)], dtype=float)
+        end = np.array([int(colors[1][i:i + 2], 16) for i in (1, 3, 5)], dtype=float)
+        yy, xx = np.mgrid[0:size, 0:size]
+        t = np.clip((xx + yy) / (2 * size), 0, 1)[..., None]  # 135deg
+        rgb = np.clip((start * (1 - t) + end * t) * brightness, 0, 255).astype(np.uint8)
+        circle = Image.fromarray(rgb, "RGB")
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+        out = Image.new("RGB", (size, size), theme.BG_CARD)
+        out.paste(circle, (0, 0), mask)
+        return ImageTk.PhotoImage(out.resize((self._size, self._size), Image.LANCZOS), master=self)
+
+    def _redraw(self):
+        state = "disabled" if self._disabled else ("hover" if self._hover else "normal")
+        self.itemconfigure(self._circle, image=self._images[state])
+        self.delete("icon")
+        color = theme.TEXT_SUBTLE if self._disabled else "#FFFFFF"
+        c = self._size / 2
+        k = self._size / 32  # medidas pensadas para 32px
+        if self._playing:
+            for dx in (-4.5, 1.5):
+                self.create_rectangle(c + dx * k, c - 6 * k, c + (dx + 3) * k, c + 6 * k,
+                                      fill=color, outline="", tags="icon")
+        else:
+            # Triángulo desplazado a la derecha para centrarlo ópticamente.
+            self.create_polygon(c - 4 * k, c - 6.5 * k, c - 4 * k, c + 6.5 * k, c + 7 * k, c,
+                                fill=color, outline="", tags="icon")
+
+    def _set_hover(self, hover):
+        self._hover = hover
+        self._redraw()
+
+    def _on_click(self, _event=None):
+        if not self._disabled and self._command:
+            self._command()
+
+    def configure(self, cnf=None, **kwargs):
+        text = kwargs.pop("text", None)
+        state = kwargs.pop("state", None)
+        kwargs.pop("fg_color", None)
+        if text is not None:
+            self._playing = text == "⏸"
+        if state is not None:
+            self._disabled = state == "disabled"
+            self.configure(cursor="" if self._disabled else "hand2")
+        if text is not None or state is not None:
+            self._redraw()
+        if cnf or kwargs:
+            return super().configure(cnf, **kwargs)
+        return None
+
+    config = configure

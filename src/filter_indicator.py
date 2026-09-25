@@ -35,7 +35,7 @@ class FilterIndicator(ctk.CTkFrame):
             return
 
         pill = ctk.CTkFrame(
-            self, fg_color=theme.BG_CARD_HOVER, corner_radius=20,
+            self, fg_color=theme.CHIP_ACTIVE_BG, corner_radius=20,
             border_width=1, border_color=theme.PRIMARY
         )
         pill.pack()

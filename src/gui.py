@@ -36,6 +36,39 @@ from filter_indicator import FilterIndicator
 import theme
 
 
+class _StatusProgressBar(ctk.CTkProgressBar):
+    """Barra de progreso fina de la barra de estado que solo se ve mientras hay una
+    tarea en curso: al llegar a 0 o al 100% se funde con el fondo (tras una breve
+    pausa en el 100% para que se vea que terminó). Se oculta cambiando sus colores,
+    no desempaquetándola, para que la barra de estado no cambie de alto."""
+
+    HIDE_DELAY_MS = 800
+
+    def __init__(self, master):
+        super().__init__(
+            master, height=4, corner_radius=2, border_width=0,
+            fg_color=theme.BG_CARD, progress_color=theme.BG_CARD
+        )
+        self._hide_job = None
+
+    def set(self, value, *args, **kwargs):
+        super().set(value, *args, **kwargs)
+        if self._hide_job is not None:
+            self.after_cancel(self._hide_job)
+            self._hide_job = None
+        if 0 < value < 1:
+            self.configure(fg_color=theme.BG_CARD_HOVER, progress_color=theme.PRIMARY)
+        elif value >= 1:
+            self.configure(fg_color=theme.BG_CARD_HOVER, progress_color=theme.PRIMARY)
+            self._hide_job = self.after(self.HIDE_DELAY_MS, self._hide)
+        else:
+            self._hide()
+
+    def _hide(self):
+        self._hide_job = None
+        self.configure(fg_color=theme.BG_CARD, progress_color=theme.BG_CARD)
+
+
 class App(ctk.CTk):
     CORP_COLOR = theme.PRIMARY
     CORP_HOVER = theme.PRIMARY_HOVER
@@ -148,29 +181,26 @@ class App(ctk.CTk):
 
         # Selector de vista: Colección / Dashboard / Salud comparten el mismo estado
         # de filtro (GridPanel._advanced_criteria / _health_filter_paths); conmutar
-        # solo cambia qué página se muestra en frame_right, ver switch_view(). Estilo
-        # "pestañas con línea inferior", sin cápsulas ni fondos (ver view_tab_bar.py).
+        # solo cambia qué página se muestra en frame_right, ver switch_view(). Es un
+        # control segmentado al final de la cabecera (ver view_tab_bar.py), sin fila
+        # propia, para dejar más alto a la tabla y a los dashboards.
         self._active_view = "collection"
-        nav_row = ctk.CTkFrame(self, fg_color="transparent")
-        nav_row.pack(side="top", fill="x", padx=theme.SPACE_MD, pady=(4, 0))
-
         self.view_tab_bar = ViewTabBar(
-            nav_row,
+            self.header_panel.inner_frame,
             tabs=[("collection", "Colección"), ("dashboard", "Dashboard"), ("health", "Salud")],
             command=self.switch_view
         )
-        self.view_tab_bar.pack(side="left")
         self.view_tab_bar.set_active("collection")
 
-        # Indicador de filtro global: única fuente visible del filtro activo, a la
-        # derecha de las pestañas, visible sea cual sea la vista activa. GridPanel
+        # Indicador de filtro global: única fuente visible del filtro activo, en la
+        # cabecera junto al buscador, visible sea cual sea la vista activa. GridPanel
         # lo mantiene sincronizado solo (apply_combined_filters); no hay badges
         # locales duplicados dentro de Dashboard/Salud.
-        self.filter_indicator = FilterIndicator(nav_row, on_clear=self._clear_global_filter)
-        self.filter_indicator.pack(side="right")
+        self.filter_indicator = FilterIndicator(self.header_panel.inner_frame, on_clear=self._clear_global_filter)
+        self.header_panel.place_navigation(self.view_tab_bar, self.filter_indicator)
 
         self.frame_main = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_main.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=5)
+        self.frame_main.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=(theme.SPACE_MD, 5))
 
         # 1. Panel Lateral Izquierdo (DetailPanel)
         self.detail_panel = DetailPanel(
@@ -180,6 +210,9 @@ class App(ctk.CTk):
             get_resource_path=UiUtils.get_resource_path
         )
         self.detail_panel.frame_sidebar.pack(side="left", fill="y", padx=(0, 10))
+        # La ruta de la cabecera se alinea con el inicio de la tabla: se re-sincroniza
+        # cuando el panel lateral cambia de tamaño (p. ej. al terminar de dibujarse).
+        self.detail_panel.frame_sidebar.bind("<Configure>", self.header_panel._sync_alignment, add="+")
 
         # 2. Contenedor Derecho (Estructura Vertical) — aloja las 3 páginas conmutables
         self.frame_right = ctk.CTkFrame(self.frame_main, fg_color="transparent")
@@ -206,6 +239,10 @@ class App(ctk.CTk):
             detail_panel=self.detail_panel,
             grid_panel=self.grid_panel
         )
+        # El texto libre se edita desde el buscador de la cabecera (Ctrl+F) y desde
+        # el panel de filtro avanzado; SearchManager.search_var es la única fuente.
+        self.search_manager.add_text_listener(self.header_panel.on_search_text_changed)
+        self.advanced_filter_panel.connect_search(self.search_manager)
 
     def open_login_modal(self):
         """Abre el diálogo modal de autenticación desde DialogManager."""
@@ -261,8 +298,8 @@ class App(ctk.CTk):
         self.frame_bottom = ctk.CTkFrame(self, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD)
         self.frame_bottom.pack(fill="x", padx=theme.SPACE_MD, pady=(5, 10))
 
-        self.progress_bar = ctk.CTkProgressBar(self.frame_bottom, progress_color=self.CORP_COLOR)
-        self.progress_bar.pack(fill="x", padx=10, pady=2)
+        self.progress_bar = _StatusProgressBar(self.frame_bottom)
+        self.progress_bar.pack(fill="x", padx=12, pady=(6, 0))
         self.progress_bar.set(0)
 
         self.label_status = ctk.CTkLabel(
@@ -397,8 +434,8 @@ class App(ctk.CTk):
         self.bind("<Control-Q>", lambda e: self.on_close())
         self.bind("<Control-a>", lambda e: self.grid_panel.select_all_rows())
         self.bind("<Control-A>", lambda e: self.grid_panel.select_all_rows())
-        self.bind("<Control-f>", lambda e: self.focus_header_search())
-        self.bind("<Control-F>", lambda e: self.focus_header_search())
+        self.bind("<Control-f>", lambda e: self.header_panel.toggle_search())
+        self.bind("<Control-F>", lambda e: self.header_panel.toggle_search())
         self.bind("<Control-Shift-F>", lambda e: self.advanced_filter_panel.toggle_panel())
         self.bind("<Control-Shift-f>", lambda e: self.advanced_filter_panel.toggle_panel())
         self.bind("<Control-r>", lambda e: self.open_replace_dialog())
@@ -447,10 +484,19 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def focus_header_search(self):
-        """Pone el foco en el cuadro de búsqueda del Header al presionar Ctrl+F."""
-        if hasattr(self, "header_panel") and hasattr(self.header_panel, "entry_search"):
-            self.header_panel.entry_search.focus()
-            self.header_panel.entry_search.select_range(0, "end")
+        """Abre el buscador de la cabecera (lo mismo que Ctrl+F con él cerrado)."""
+        if hasattr(self, "header_panel"):
+            self.header_panel.open_search()
+
+    def get_active_page(self):
+        """Widget de la vista activa en frame_right (el panel de filtro avanzado se
+        coloca justo encima)."""
+        pages = {
+            "collection": self.grid_panel.frame_grid,
+            "dashboard": self.stats_view,
+            "health": self.health_view,
+        }
+        return pages.get(getattr(self, "_active_view", "collection"))
 
     def open_replace_dialog(self):
         """Abre el diálogo modal para reemplazar texto en nombres de archivo sobre el grid."""

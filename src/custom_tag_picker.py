@@ -203,17 +203,12 @@ class CustomTagPicker(SilentTitlebarMixin, ctk.CTkToplevel):
         )
         btn_apply.pack(side="right", padx=(8, 0))
 
-        btn_cancel = ctk.CTkButton(
+        btn_cancel = theme.style_secondary_button(ctk.CTkButton(
             btn_bar,
             text="Cancelar",
             font=font_btn,
-            fg_color="transparent",
-            border_width=1,
-            border_color=theme.BORDER_QUIET,
-            text_color=theme.TEXT_MAIN,
-            hover_color=theme.BG_CARD_HOVER,
             command=self.destroy
-        )
+        ))
         btn_cancel.pack(side="right")
 
     def _render_tag_list(self):

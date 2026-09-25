@@ -29,6 +29,10 @@ class SearchManager:
 
         self.search_var = tk.StringVar()
         self._search_trace_id = None
+        # Widgets que muestran el texto libre (buscador de la cabecera, campo del
+        # panel de filtro avanzado): se les avisa cuando search_var cambia desde otro
+        # sitio para que todos enseñen lo mismo.
+        self._text_listeners = []
         self._search_visible = False
         self._all_tree_items = []
         self._debounce_after_id = None
@@ -99,9 +103,26 @@ class SearchManager:
             return "break"
         return None
 
+    def add_text_listener(self, callback):
+        """`callback(text)` se llama cada vez que cambia el texto libre."""
+        self._text_listeners.append(callback)
+
+    def set_search_text(self, text):
+        """Fija el texto libre (lo usan los campos que lo editan)."""
+        if self.search_var.get() != text:
+            self.search_var.set(text)
+
+    @property
+    def search_text(self):
+        return self.search_var.get()
+
     def _on_search_text_changed(self, *_args):
-        if not self._search_visible:
-            return
+        text = self.search_var.get()
+        for callback in self._text_listeners:
+            try:
+                callback(text)
+            except Exception:
+                pass
 
         if self._debounce_after_id:
             try:

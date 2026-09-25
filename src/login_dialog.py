@@ -80,7 +80,7 @@ class LoginDialog(SilentTitlebarMixin, ctk.CTkToplevel):
             placeholder_text="tu@email.com",
             height=36,
             fg_color=theme.BG_INPUT,
-            border_color=theme.BORDER_FOCUS,
+            border_color=theme.BORDER_QUIET,
         )
         self.entry_email.pack(fill="x", padx=theme.SPACE_MD, pady=(0, 10))
 
@@ -99,7 +99,7 @@ class LoginDialog(SilentTitlebarMixin, ctk.CTkToplevel):
             show="•",
             height=36,
             fg_color=theme.BG_INPUT,
-            border_color=theme.BORDER_FOCUS,
+            border_color=theme.BORDER_QUIET,
         )
         self.entry_password.pack(fill="x", padx=theme.SPACE_MD, pady=(0, 5))
 
@@ -128,17 +128,12 @@ class LoginDialog(SilentTitlebarMixin, ctk.CTkToplevel):
         )
         self.btn_login.pack(side="right", padx=(8, 0))
 
-        btn_cancel = ctk.CTkButton(
+        btn_cancel = theme.style_secondary_button(ctk.CTkButton(
             btn_bar,
             text="Cancelar",
-            fg_color="transparent",
-            border_width=1,
-            border_color=theme.BORDER_QUIET,
-            text_color=theme.TEXT_MAIN,
-            hover_color=theme.BG_CARD_HOVER,
             height=36,
             command=self.destroy,
-        )
+        ))
         btn_cancel.pack(side="right")
 
         # Binds de teclado

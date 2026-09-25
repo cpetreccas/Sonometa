@@ -94,17 +94,17 @@ class GridPanel:
             "Title":     {"width": 200, "minwidth": 120, "stretch": True,  "anchor": "w"},
             "MixArtist": {"width": 160, "minwidth": 100, "stretch": True,  "anchor": "w"},
             "Album":     {"width": 100, "minwidth": 70,  "stretch": False, "anchor": "w"},
-            "Genre":     {"width": 70,  "minwidth": 50,  "stretch": False, "anchor": "w"},
-            "Publisher": {"width": 120, "minwidth": 80,  "stretch": False, "anchor": "w"},
-            "Year":      {"width": 40,  "minwidth": 40,  "stretch": False, "anchor": "center"},
+            "Genre":     {"width": 84,  "minwidth": 60,  "stretch": False, "anchor": "w"},
+            "Publisher": {"width": 150, "minwidth": 90,  "stretch": False, "anchor": "w"},
+            "Year":      {"width": 52,  "minwidth": 48,  "stretch": False, "anchor": "center"},
             "Comment":   {"width": 0,   "minwidth": 0,   "stretch": False, "anchor": "w"},
             "Cues":      {"width": 58,  "minwidth": 50,  "stretch": False, "anchor": "center"},
             "Rating":    {"width": 64,  "minwidth": 58,  "stretch": False, "anchor": "center"},
-            "Cover":     {"width": 73,  "minwidth": 73,  "stretch": False, "anchor": "center"},
-            "HealthStatus": {"width": 80,  "minwidth": 70,  "stretch": False, "anchor": "center"},
-            "Clipping":     {"width": 70,  "minwidth": 60,  "stretch": False, "anchor": "center"},
-            "Lufs":         {"width": 70,  "minwidth": 60,  "stretch": False, "anchor": "center"},
-            "Cutoff":       {"width": 170, "minwidth": 110, "stretch": False, "anchor": "center"}
+            "Cover":     {"width": 90,  "minwidth": 84,  "stretch": False, "anchor": "center"},
+            "HealthStatus": {"width": 76,  "minwidth": 70,  "stretch": False, "anchor": "center"},
+            "Clipping":     {"width": 84,  "minwidth": 76,  "stretch": False, "anchor": "center"},
+            "Lufs":         {"width": 64,  "minwidth": 60,  "stretch": False, "anchor": "center"},
+            "Cutoff":       {"width": 160, "minwidth": 110, "stretch": False, "anchor": "center"}
         }
 
         # Columnas avanzadas ocultas por defecto (opt-in vía menú contextual de cabecera)
@@ -116,15 +116,21 @@ class GridPanel:
         # Usar pack para permitir intercalar el panel desplegable arriba de la grilla
         self._setup_styles()
 
-        # Instanciación del Panel de Filtro Avanzado
+        # Instanciación del Panel de Filtro Avanzado: hijo de frame_right (no de la
+        # grilla) para poder mostrarse también sobre Dashboard y Salud.
         self.filter_panel = AdvancedFilterPanel(
-            parent=self.frame_grid,
+            parent=self.parent,
             app=self.app,
             on_filter_change_callback=self.apply_advanced_filters
         )
 
-        # Contenedor para Treeview y Scrollbars
-        self.tree_container = ctk.CTkFrame(self.frame_grid, fg_color="transparent")
+        # Contenedor para Treeview y Scrollbars: tarjeta de la guía (4.5), fondo
+        # BG_CARD, borde BORDER_QUIET y radio 12 (la tabla va con margen interior
+        # para no pisar las esquinas redondeadas).
+        self.tree_container = ctk.CTkFrame(
+            self.frame_grid, fg_color=theme.BG_CARD, corner_radius=theme.RADIUS_CARD,
+            border_width=1, border_color=theme.BORDER_QUIET
+        )
         self.tree_container.pack(fill="both", expand=True)
         self.tree_container.grid_rowconfigure(0, weight=1)
         self.tree_container.grid_columnconfigure(0, weight=1)
@@ -138,19 +144,8 @@ class GridPanel:
         self._install_global_tab_edit_guard()
 
     def toggle_filter_panel(self):
-        """Muestra u oculta el panel de filtro avanzado sin tocar el contenedor del Treeview."""
-        if self.filter_panel_visible:
-            self.filter_panel.pack_forget()
-            self.filter_panel_visible = False
-        else:
-            # Insertar el panel justo antes de la tabla para mantener intacta su jerarquia y eventos.
-            self.filter_panel.pack(side="top", fill="x", padx=6, pady=(6, 2), before=self.tree_container)
-
-            self.filter_panel_visible = True
-            self.filter_panel.update_catalog_options()
-            self.filter_panel.after(50, self.filter_panel.focus_artist_field)
-
-        return "break"
+        """Muestra u oculta el panel de filtro avanzado (ver AdvancedFilterPanel.toggle_panel)."""
+        self.filter_panel.toggle_panel()
 
     def apply_health_path_filter(self, paths, label):
         """Cross-filtering desde el Dashboard de Salud: acota la grilla a un conjunto
@@ -222,7 +217,7 @@ class GridPanel:
         for col_name, selected_val in combo_filters.items():
             idx = col_index.get(col_name)
             cell_val = str(values[idx]).strip() if idx is not None and idx < len(values) else ""
-            if selected_val == "[ Vacío ]":
+            if selected_val == "(Vacío)":
                 if cell_val != "":
                     return False
             elif cell_val != selected_val:
@@ -371,7 +366,7 @@ class GridPanel:
             self.app.filter_indicator.set_summary(self.get_active_filter_summary())
 
     _COMBO_FIELD_LABELS = {"Album": "Álbum", "Genre": "Género", "Publisher": "Etiqueta", "Year": "Año", "Rating": "Rating"}
-    _TOGGLE_LABELS = {"no_year": "Sin Año", "no_cover": "Sin Carátula", "no_comment": "Sin Comentarios", "no_cues": "Sin Cues"}
+    _TOGGLE_LABELS = {"no_year": "Sin año", "no_cover": "Sin carátula", "no_comment": "Sin comentarios", "no_cues": "Sin cues"}
 
     def get_active_filter_summary(self) -> list:
         """Descripción legible del filtro activo (texto/combo/toggles del panel
@@ -381,8 +376,15 @@ class GridPanel:
         parts = []
         criteria = self._advanced_criteria
 
+        # Texto libre (buscador de cabecera / panel avanzado): se muestra aunque el
+        # buscador esté cerrado, para que el filtro nunca quede oculto.
+        search_manager = getattr(self.app, "search_manager", None)
+        search_text = search_manager.search_text.strip() if search_manager else ""
+        if search_text:
+            parts.append(f"Búsqueda: “{search_text}”")
+
         for field, value in criteria.combo.items():
-            display_value = "Vacío" if value == "[ Vacío ]" else value
+            display_value = "Vacío" if value == "(Vacío)" else value
             parts.append(f"{self._COMBO_FIELD_LABELS.get(field, field)}: {display_value}")
 
         for key, active in criteria.toggles.items():
@@ -501,10 +503,13 @@ class GridPanel:
         )
 
         style.configure("Treeview.Item", borderwidth=0, relief="flat", padding=(4, 0))
+        # Sin el marco propio del Treeview (en el tema clam es un borde claro): el
+        # borde lo pone la tarjeta que lo contiene (tree_container).
+        style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
 
         style.configure(
             "Treeview.Heading",
-            background=theme.BG_MAIN,
+            background=theme.TABLE_HEADER_BG,
             foreground=theme.TEXT_MUTED,
             font=(theme.FONT_FAMILY, current_heading_size, 'bold'),
             borderwidth=1,
@@ -513,13 +518,18 @@ class GridPanel:
             padding=(5, 5)
         )
 
-        selection_bg = getattr(self.app, "CORP_COLOR", theme.PRIMARY)
+        # Selección de la guía (4.5): fondo morado apagado, el texto conserva su color
+        # (Treeview no admite el borde izquierdo morado de la PWA).
         style.map(
             "Treeview",
-            background=[('selected', selection_bg)],
-            foreground=[('selected', theme.TEXT_ON_PRIMARY)]
+            background=[('selected', theme.ROW_SELECTED)],
+            foreground=[('selected', theme.TEXT_MAIN)]
         )
-        style.map("Treeview.Heading", background=[('active', theme.BG_CARD_HOVER)])
+        style.map(
+            "Treeview.Heading",
+            background=[('active', theme.TABLE_HEADER_HOVER)],
+            foreground=[('active', theme.TEXT_ON_PRIMARY)]
+        )
 
         # Barras de desplazamiento integradas al tema oscuro (en vez del estilo nativo de Windows)
         for orientation in ("Vertical", "Horizontal"):
@@ -536,7 +546,7 @@ class GridPanel:
             )
             style.map(
                 scrollbar_style,
-                background=[("active", theme.PRIMARY_LIGHT), ("pressed", selection_bg)],
+                background=[("active", theme.PRIMARY_LIGHT), ("pressed", theme.PRIMARY)],
                 arrowcolor=[("active", theme.TEXT_MAIN)],
             )
 
@@ -597,7 +607,11 @@ class GridPanel:
         default_visible_cols = ("Filename", "Artist", "Title", "MixArtist", "Album", "Genre", "Publisher", "Year", "Cover")
         persisted_cols = getattr(self.app.catalog_manager, "visible_columns", None) if hasattr(self.app, "catalog_manager") else None
         if persisted_cols:
-            visible_cols = tuple(c for c in persisted_cols if c in self.columns) or default_visible_cols
+            # Las columnas de salud nunca se muestran al arrancar (se activan a mano
+            # desde el menú de la cabecera y solo duran esa sesión).
+            visible_cols = tuple(
+                c for c in persisted_cols if c in self.columns and c not in self.ADVANCED_HEALTH_COLUMNS
+            ) or default_visible_cols
         else:
             visible_cols = default_visible_cols
         self.tree.configure(displaycolumns=visible_cols)
@@ -632,6 +646,11 @@ class GridPanel:
         btn_right = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
         self.tree.bind(btn_right, self._on_tree_right_click)
 
+        # Ctrl+C con el foco en la tabla: copia los ARCHIVOS seleccionados para
+        # pegarlos en el Explorador. En la edición de celdas el editor es otro widget,
+        # así que ahí Ctrl+C sigue copiando texto.
+        self.tree.bind("<Control-c>", self.copy_selected_files)
+        self.tree.bind("<Control-C>", self.copy_selected_files)
         self.tree.bind("<Control-MouseWheel>", self._on_ctrl_wheel_zoom)
         self.tree.bind("<Control-Button-4>", self._on_ctrl_wheel_zoom)
         self.tree.bind("<Control-Button-5>", self._on_ctrl_wheel_zoom)
@@ -673,9 +692,10 @@ class GridPanel:
 
         self.tree.configure(yscrollcommand=self.vsb.set, xscrollcommand=self.hsb.set)
 
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        self.vsb.grid(row=0, column=1, sticky="ns")
-        self.hsb.grid(row=1, column=0, sticky="ew")
+        inset = 6
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(inset, 0), pady=(inset, 0))
+        self.vsb.grid(row=0, column=1, sticky="ns", padx=(0, inset), pady=(inset, 0))
+        self.hsb.grid(row=1, column=0, sticky="ew", padx=(inset, 0), pady=(0, inset))
 
         self._build_empty_state()
         self.update_empty_state()
@@ -813,6 +833,12 @@ class GridPanel:
             bd=1, relief="flat", font=(theme.FONT_FAMILY, 10)
         )
         self._tree_context_menu.add_command(
+            label="Copiar archivos",
+            accelerator="Ctrl+C",
+            command=self.copy_selected_files
+        )
+        self._tree_context_menu.add_separator()
+        self._tree_context_menu.add_command(
             label="Procesar",
             command=lambda: self.app.process_manager.process_discogs_data()
         )
@@ -838,6 +864,25 @@ class GridPanel:
             label="Eliminar del disco",
             command=lambda: self.app.process_manager.delete_selected_files()
         )
+
+    def copy_selected_files(self, event=None):
+        """Copia al portapapeles de Windows los archivos de las filas seleccionadas
+        (solo los que siguen existiendo), para pegarlos en el Explorador."""
+        paths = [
+            self.app.file_paths_map.get(row_id)
+            for row_id in self.tree.selection()
+        ]
+        paths = [p for p in paths if p and os.path.exists(p)]
+        if not paths:
+            self.logger.info("No hay archivos seleccionados para copiar.")
+            return "break"
+
+        if UiUtils.copy_files_to_clipboard(paths):
+            noun = "archivo copiado" if len(paths) == 1 else "archivos copiados"
+            self.logger.info(f"{len(paths)} {noun} al portapapeles. Pégalos en una carpeta con Ctrl+V.")
+        else:
+            self.logger.warning("No se pudieron copiar los archivos al portapapeles.")
+        return "break"
 
     def _evaluate_file_health(self):
         """'Evaluar salud' del menú contextual. Con 0-1 fila seleccionada, evalúa el

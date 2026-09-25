@@ -18,9 +18,9 @@ import theme
 # Cross-filtering desde los elementos de diagnóstico de completitud: qué control del
 # panel de filtro avanzado activar por cada dimensión incompleta.
 DIAG_FILTER_ACTIONS = {
-    "album": ("combo", "Album", "[ Vacío ]"),
-    "genre": ("combo", "Genre", "[ Vacío ]"),
-    "publisher": ("combo", "Publisher", "[ Vacío ]"),
+    "album": ("combo", "Album", "(Vacío)"),
+    "genre": ("combo", "Genre", "(Vacío)"),
+    "publisher": ("combo", "Publisher", "(Vacío)"),
     "year": ("toggle", "no_year"),
     "cover": ("toggle", "no_cover"),
     "cues": ("toggle", "no_cues"),
@@ -86,8 +86,8 @@ AUDIT_RADAR_AXES = [
 # Alto de las dos tarjetas superiores (Salud de la colección / Indicadores de salud).
 # Alto de las 4 tarjetas (dos filas: completitud y auditoría técnica). Cabe el
 # anillo + hasta 4 filas de diagnóstico (7 dimensiones en 2 columnas).
-HEALTH_CARD_HEIGHT = 376
-RING_SIZE = 150
+HEALTH_CARD_HEIGHT = 318
+RING_SIZE = 120
 RING_THICKNESS = 12
 RING_TRACK_COLOR = theme.BORDER_QUIET
 BRAND_GRADIENT = ("#8B5CF6", "#EC4899")   # --brand-gradient de la guía
@@ -175,16 +175,16 @@ class _ScoreRing:
         self._score = None
 
         number_family = "Segoe UI Black" if "Segoe UI Black" in tkfont.families() else theme.FONT_FAMILY
-        self._font_number = tkfont.Font(family=number_family, size=-round(30 * scale), weight="bold")
+        self._font_number = tkfont.Font(family=number_family, size=-round(25 * scale), weight="bold")
         self._font_status = tkfont.Font(family=theme.FONT_FAMILY, size=-round(10 * scale), weight="bold")
 
         c = self._size / 2
         self._image_item = self.canvas.create_image(0, 0, anchor="nw")
         self._number_item = self.canvas.create_text(
-            c, c - round(6 * scale), text="", fill=theme.TEXT_ON_PRIMARY, font=self._font_number
+            c, c - round(5 * scale), text="", fill=theme.TEXT_ON_PRIMARY, font=self._font_number
         )
         self._status_item = self.canvas.create_text(
-            c, c + round(22 * scale), text="", fill=theme.TEXT_MUTED, font=self._font_status
+            c, c + round(17 * scale), text="", fill=theme.TEXT_MUTED, font=self._font_status
         )
 
     def set_score(self, score, suffix="%"):
@@ -435,7 +435,8 @@ class HealthDashboardView(ctk.CTkFrame):
     embebe como una de las 3 pestañas conmutables (App.switch_view en gui.py) y se
     refresca sola al cambiar el filtro (GridPanel.apply_combined_filters), así que
     no tiene botón "Actualizar". Clic en un elemento de diagnóstico o de auditoría
-    filtra la colección y vuelve a la pestaña Colección.
+    filtra la colección sin salir de la pestaña (la vista se recalcula sobre las
+    pistas filtradas y el filtro se ve en el indicador de la cabecera).
 
     Mismo esquema de pintado que StatsDashboardView: la estructura se construye una
     vez, refresh() actualiza en sitio y no hace nada si datos y ancho no cambiaron;
@@ -486,7 +487,7 @@ class HealthDashboardView(ctk.CTkFrame):
             self._grid, "Salud de la colección", self._scale, height=HEALTH_CARD_HEIGHT
         )
         self._ring = _ScoreRing(content, self._scale)
-        self._ring.canvas.pack(pady=(round(14 * self._scale), round(14 * self._scale)))
+        self._ring.canvas.pack(pady=(round(10 * self._scale), round(10 * self._scale)))
         self._diag_list = _MetricList(content, self._scale, columns=2, on_click=self._apply_diag_filter)
         self._diag_list.frame.pack()  # centrado bajo el anillo
 
@@ -506,7 +507,7 @@ class HealthDashboardView(ctk.CTkFrame):
             self._grid, "Auditoría técnica de audio", s, height=HEALTH_CARD_HEIGHT
         )
         self._audit_ring = _ScoreRing(content, s)
-        self._audit_ring.canvas.pack(pady=(round(14 * s), round(14 * s)))
+        self._audit_ring.canvas.pack(pady=(round(10 * s), round(10 * s)))
         self._audit_list = _MetricList(content, s, columns=2, on_click=self._filter_by_health_flag)
         self._audit_list.frame.pack()  # centrado bajo el anillo
 
@@ -693,7 +694,6 @@ class HealthDashboardView(ctk.CTkFrame):
             return
 
         grid.apply_health_path_filter(paths, f"{AUDIT_FILTER_LABELS[flag_key]} ({len(paths)})")
-        self.app.switch_view("collection")
 
     def _analyze_pending(self):
         cache_manager = getattr(self.app, "cache_manager", None)
@@ -724,6 +724,3 @@ class HealthDashboardView(ctk.CTkFrame):
         else:
             _, toggle_key = action
             _set_toggle_filter(self.app, toggle_key)
-        # A diferencia del Dashboard, la Salud sí vuelve a Colección al filtrar: aquí
-        # no tiene sentido "quedarse" (esta pestaña no muestra listados de pistas).
-        self.app.switch_view("collection")

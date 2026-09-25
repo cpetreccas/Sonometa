@@ -197,16 +197,11 @@ class ReplaceFilenameDialog(SilentTitlebarMixin, ctk.CTkToplevel):
         )
         self.btn_replace_single.pack(side="right", padx=(8, 0))
 
-        btn_close = ctk.CTkButton(
+        btn_close = theme.style_secondary_button(ctk.CTkButton(
             btn_bar,
             text="Cerrar",
-            fg_color="transparent",
-            border_width=1,
-            border_color=theme.BORDER_QUIET,
-            text_color=theme.TEXT_MAIN,
-            hover_color=theme.BG_CARD_HOVER,
             command=self.destroy
-        )
+        ))
         btn_close.pack(side="right")
 
     def _find_matches(self):
@@ -1837,21 +1832,16 @@ class DialogManager:
 
         broom_icon = getattr(app, "broom_icon", None)
 
-        btn_clear = ctk.CTkButton(
+        btn_clear = theme.style_reset_button(ctk.CTkButton(
             btn_bar,
             text="Limpiar consola",
             image=broom_icon,
             compound="left",
-            fg_color="transparent",
-            border_color=theme.STATUS_DANGER,
-            border_width=1,
-            text_color=theme.TEXT_MAIN,
-            hover_color=theme.STATUS_DANGER_HOVER,
             corner_radius=theme.RADIUS_CONTROL,
             font=ctk.CTkFont(size=13, weight="bold"),
             height=30,
             command=lambda: DialogManager._clear_console(app)
-        )
+        ))
         btn_clear.pack(side="left", padx=(5, 0))
 
         btn_close = ctk.CTkButton(

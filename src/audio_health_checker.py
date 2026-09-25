@@ -40,7 +40,9 @@ logger = logging.getLogger("Sonometa")
 #      como clipping ni bitrate falso.
 #   3: tabla corte -> bitrate recalibrada con LAME (antes leía un escalón de más:
 #      un 128 real salía como 160); se guarda el bitrate aparente en el informe.
-ANALYSIS_VERSION = 3
+#   4: volumen correcto hasta -6 LUFS (música de club); clipping con rachas >= 12
+#      muestras, sin aviso por menos de 3 rachas y crítico a partir del 0.05%.
+ANALYSIS_VERSION = 4
 
 # Por encima de esta duración, el análisis de señal se hace sobre un muestreo
 # (inicio/medio/final) en vez de decodificar el archivo completo, para no disparar
@@ -60,15 +62,15 @@ CLIP_DBFS_THRESHOLD = 0.0
 # cuente como fondo de escala.
 CLIP_FULL_SCALE_TOLERANCE = 1e-4
 # Rachas cortas a fondo de escala aparecen al decodificar MP3/AAC de masters altos
-# (overshoot del decoder recortado a 16 bits); una racha de 8+ muestras (~0.18 ms a
-# 44.1 kHz) es ya una onda aplanada de verdad.
-CLIP_MIN_RUN = 8
-CLIP_CRITICAL_RATIO = 0.0001        # 0.01% de muestras saturadas -> crítico
+# (overshoot del decoder recortado a 16 bits); solo cuenta una onda aplanada de verdad.
+CLIP_MIN_RUN = 12                   # ~0.27 ms a 44.1 kHz
+CLIP_MIN_RUNS_WARNING = 3           # menos rachas que esto = picos aislados, no se avisa
+CLIP_CRITICAL_RATIO = 0.0005        # 0.05% de muestras saturadas -> crítico
 
 LUFS_OK_MIN = -16.0
-LUFS_OK_MAX = -8.0
+LUFS_OK_MAX = -6.0      # música de club muy masterizada ronda -8 a -6 LUFS
 LUFS_WARNING_MIN = -23.0
-LUFS_WARNING_MAX = -6.0
+LUFS_WARNING_MAX = -4.0
 
 CUTOFF_NOISE_FLOOR_DB = -50.0       # relativo al pico del espectro (Welch)
 # El lowpass de un encoder es un corte brusco; una caída natural de agudos (grabación
@@ -504,6 +506,11 @@ class AudioHealthChecker:
 
         if run_count == 0:
             return HealthCheckResult("ok", "Sin clipping detectado", "No se encontraron picos sostenidos a 0 dBFS.")
+        if run_count < CLIP_MIN_RUNS_WARNING:
+            return HealthCheckResult(
+                "ok", "Sin clipping relevante",
+                f"{run_count} racha(s) aislada(s) a 0 dBFS ({clipped_samples} muestras): inaudible en la práctica."
+            )
 
         channels_note = "" if frames.shape[1] == 1 else f" en {clipped_channels} de {frames.shape[1]} canal(es)"
 
@@ -543,13 +550,13 @@ class AudioHealthChecker:
 
         if LUFS_OK_MIN <= loudness <= LUFS_OK_MAX:
             status = "ok"
-            detail = f"Volumen integrado de {loudness:.1f} LUFS, dentro del rango habitual de streaming/club (-16 a -8 LUFS)."
+            detail = f"Volumen integrado de {loudness:.1f} LUFS, dentro del rango habitual ({LUFS_OK_MIN:.0f} a {LUFS_OK_MAX:.0f} LUFS)."
         elif LUFS_WARNING_MIN <= loudness <= LUFS_WARNING_MAX:
             status = "warning"
             if loudness < LUFS_OK_MIN:
-                detail = f"Volumen integrado de {loudness:.1f} LUFS: suena bajo respecto al rango habitual (-16 a -8 LUFS)."
+                detail = f"Volumen integrado de {loudness:.1f} LUFS: suena bajo respecto al rango habitual ({LUFS_OK_MIN:.0f} a {LUFS_OK_MAX:.0f} LUFS)."
             else:
-                detail = f"Volumen integrado de {loudness:.1f} LUFS: suena alto/comprimido respecto al rango habitual (-16 a -8 LUFS)."
+                detail = f"Volumen integrado de {loudness:.1f} LUFS: suena alto/comprimido respecto al rango habitual ({LUFS_OK_MIN:.0f} a {LUFS_OK_MAX:.0f} LUFS)."
         else:
             status = "critical"
             if loudness < LUFS_WARNING_MIN:

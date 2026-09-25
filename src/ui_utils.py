@@ -54,6 +54,71 @@ class UiUtils:
         label.pack(ipadx=5, ipady=3)
 
     @staticmethod
+    def copy_files_to_clipboard(paths) -> bool:
+        """Pone `paths` en el portapapeles de Windows como ARCHIVOS (formato CF_HDROP,
+        el mismo que usa el Explorador al copiar), marcados como "copiar": al pegar en
+        una carpeta se crean copias y los originales no se tocan. Solo Windows; en
+        otros sistemas devuelve False sin hacer nada."""
+        if sys.platform != "win32" or not paths:
+            return False
+
+        import ctypes
+        from ctypes import wintypes
+
+        CF_HDROP = 15
+        GMEM_MOVEABLE = 0x0002
+        DROPEFFECT_COPY = 1
+
+        kernel32 = ctypes.windll.kernel32
+        user32 = ctypes.windll.user32
+        kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        user32.SetClipboardData.restype = wintypes.HANDLE
+        user32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+        user32.RegisterClipboardFormatW.restype = wintypes.UINT
+
+        def _global_bytes(data):
+            handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+            if not handle:
+                return None
+            ptr = kernel32.GlobalLock(handle)
+            ctypes.memmove(ptr, data, len(data))
+            kernel32.GlobalUnlock(handle)
+            return handle
+
+        # DROPFILES: pFiles (offset a la lista), pt (x, y), fNC, fWide=1 (UTF-16);
+        # después, las rutas separadas por \0 y terminadas en doble \0.
+        header = ctypes.c_uint32(20).value.to_bytes(4, "little") + bytes(12) + (1).to_bytes(4, "little")
+        file_list = ("\0".join(os.path.abspath(p) for p in paths) + "\0\0").encode("utf-16-le")
+        hdrop = _global_bytes(header + file_list)
+        effect = _global_bytes(DROPEFFECT_COPY.to_bytes(4, "little"))
+        if not hdrop or not effect:
+            return False
+
+        if not user32.OpenClipboard(None):
+            kernel32.GlobalFree(hdrop)
+            kernel32.GlobalFree(effect)
+            return False
+        try:
+            user32.EmptyClipboard()
+            # Tras SetClipboardData el sistema es dueño de la memoria: no liberarla.
+            ok = bool(user32.SetClipboardData(CF_HDROP, hdrop))
+            if not ok:
+                kernel32.GlobalFree(hdrop)
+            preferred = user32.RegisterClipboardFormatW("Preferred DropEffect")
+            if not user32.SetClipboardData(preferred, effect):
+                kernel32.GlobalFree(effect)
+            return ok
+        finally:
+            user32.CloseClipboard()
+
+    @staticmethod
     def get_resource_path(relative_path: str) -> str:
         if hasattr(sys, '_MEIPASS'):
             return os.path.join(sys._MEIPASS, relative_path)

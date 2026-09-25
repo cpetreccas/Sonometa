@@ -61,6 +61,8 @@ CARD_BG = theme.BG_CARD
 # Línea divisoria bajo títulos de tarjeta y cabeceras de tabla: el color de borde de
 # las tarjetas (PWA --border-color), con contraste real sobre BG_CARD.
 DIVIDER_COLOR = theme.BORDER_QUIET
+# Separador entre filas de leyenda: rgba(255, 255, 255, 0.03) sobre BG_CARD (guía 4.6).
+LEGEND_ROW_DIVIDER = "#2B2B31"
 
 # Anatomía de tarjeta calcada de la PWA móvil: título, gráfico a todo el ancho y
 # tabla con scroll propio debajo. Alto fijo, independiente del volumen de datos,
@@ -261,14 +263,12 @@ def _bind_clickable(widget, callback):
 
 def _set_combo_filter(app, field, value):
     """Aplica un filtro sobre el motor de la grilla (panel de filtro avanzado,
-    src/advanced_filter_panel.py) SIN cambiar de pestaña — quien llama decide si
-    navega o no. Compartido por StatsDashboardView (leyendas, se queda en
-    Dashboard) y HealthDashboardView (chips de diagnóstico, vuelve a Colección)."""
+    src/advanced_filter_panel.py) sin cambiar de pestaña ni abrir el panel: el
+    filtro se ve en el indicador de la cabecera. Compartido por las leyendas de
+    StatsDashboardView y el diagnóstico de HealthDashboardView."""
     panel = app.advanced_filter_panel
     panel.combo_vars[field].set(value)
     panel._trigger_filter()
-    if not panel.winfo_ismapped():
-        panel.toggle_panel()
     app.logger.info(f"Filtro aplicado desde el dashboard: {field} = {value}.")
 
 
@@ -276,8 +276,6 @@ def _set_toggle_filter(app, toggle_key):
     panel = app.advanced_filter_panel
     panel.toggle_vars[toggle_key].set(True)
     panel._trigger_filter()
-    if not panel.winfo_ismapped():
-        panel.toggle_panel()
     app.logger.info(f"Filtro aplicado desde el dashboard: {toggle_key}.")
 
 
@@ -491,11 +489,11 @@ class _LegendTable:
             )
             c.create_text(
                 x_name, yc, text=self._truncate(label, name_max), anchor="w",
-                fill=theme.TEXT_MAIN, font=self._font_row
+                fill=theme.LEGEND_TEXT, font=self._font_row
             )
             c.create_text(x_count, yc, text=str(count), anchor="e", fill=theme.TEXT_ON_PRIMARY, font=self._font_count)
             c.create_text(x_pct, yc, text=pct_text, anchor="e", fill=theme.TEXT_MUTED, font=self._font_pct)
-            c.create_line(0, y0 + row_h - 1, width, y0 + row_h - 1, fill=theme.BORDER_QUIET)
+            c.create_line(0, y0 + row_h - 1, width, y0 + row_h - 1, fill=LEGEND_ROW_DIVIDER)
 
         content_h = len(self._rows) * row_h
         c.configure(scrollregion=(0, 0, width, content_h))
@@ -591,7 +589,7 @@ def _build_card_shell(parent, title, scale, height=None):
     ctk.CTkLabel(
         content, text=_tracked_title(title), anchor="w", height=18,
         font=ctk.CTkFont(family=theme.FONT_FAMILY, size=11, weight="bold"),
-        text_color=theme.TEXT_MUTED
+        text_color=theme.TEXT_SUBTLE
     ).pack(fill="x")
     tk.Frame(content, height=1, bg=DIVIDER_COLOR, bd=0).pack(fill="x", pady=(round(10 * scale), 0))
     return card, content
@@ -834,7 +832,7 @@ class StatsDashboardView(ctk.CTkFrame):
         if not field:
             return
         if key_name in DEFAULT_BUCKET_LABELS and label == DEFAULT_BUCKET_LABELS[key_name]:
-            value = "[ Vacío ]"
+            value = "(Vacío)"
         elif key_name == "rating":
             stars = 0 if label.startswith("0") else label.count("★")
             value = f"{stars}★"

@@ -57,6 +57,17 @@ STATUS_INFO = "#3B82F6"     # Azul - mensajes informativos neutros
 MODAL_ICON_SUCCESS = "#10B981"
 
 # ------------------------------------------------------------------
+# Colores complementarios de componentes (guía, sección 3)
+# ------------------------------------------------------------------
+TABLE_HEADER_BG = "#1B1B20"       # Cabecera de tabla
+TABLE_HEADER_HOVER = "#272730"    # Cabecera de tabla en hover
+ROW_SELECTED = "#2F2643"          # Fila / tarjeta seleccionada
+CHIP_ACTIVE_BG = "#2D2342"        # Chip / píldora activa (p. ej. indicador de filtro)
+LEGEND_TEXT = "#E4E4E7"           # Nombres en las leyendas de gráficos
+DANGER_TEXT = "#F87171"           # Texto y borde de acciones de peligro (hover de "Limpiar")
+DANGER_HOVER_BG = "#382729"       # rgba(239, 68, 68, 0.1) sobre BG_CARD
+
+# ------------------------------------------------------------------
 # Tipografía
 # ------------------------------------------------------------------
 FONT_FAMILY = "Segoe UI"
@@ -93,3 +104,38 @@ PADDING_CARD_LG = 20
 def font(size=FONT_SIZE_BODY, weight="normal", family=FONT_FAMILY):
     """Devuelve el dict de kwargs listo para pasar a ctk.CTkFont(**theme.font(...))."""
     return {"family": family, "size": size, "weight": weight}
+
+
+def _bind_hover_style(button, on_enter, on_leave):
+    """CustomTkinter solo cambia el fondo de un botón en hover; los cambios de texto
+    y borde que pide la guía se aplican con <Enter>/<Leave> (add="+" para no pisar
+    el hover propio de CTkButton)."""
+    def _enter(_event=None):
+        if str(button.cget("state")) != "disabled":
+            button.configure(**on_enter)
+
+    def _leave(_event=None):
+        button.configure(**on_leave)
+
+    button.bind("<Enter>", _enter, add="+")
+    button.bind("<Leave>", _leave, add="+")
+
+
+def style_secondary_button(button):
+    """Botón secundario (guía 4.2): transparente, borde BORDER_QUIET y texto
+    TEXT_MUTED; en hover, texto blanco y borde BORDER_FOCUS. Devuelve el botón."""
+    rest = {"text_color": TEXT_MUTED, "border_color": BORDER_QUIET}
+    button.configure(fg_color="transparent", border_width=1, hover=False, **rest)
+    _bind_hover_style(button, {"text_color": TEXT_ON_PRIMARY, "border_color": BORDER_FOCUS}, rest)
+    return button
+
+
+def style_reset_button(button):
+    """Botón de restablecer/limpiar (guía 4.2): igual que el secundario en reposo;
+    en hover, texto y borde rojos sobre un fondo rojizo. El rojo solo aparece al
+    pasar el ratón. Devuelve el botón."""
+    rest = {"text_color": TEXT_MUTED, "border_color": BORDER_QUIET}
+    button.configure(fg_color="transparent", border_width=1, hover=True, hover_color=DANGER_HOVER_BG, **rest)
+    _bind_hover_style(button, {"text_color": DANGER_TEXT, "border_color": DANGER_TEXT}, rest)
+    return button
+
