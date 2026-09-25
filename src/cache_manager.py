@@ -59,6 +59,19 @@ class CacheManager:
         return conn
 
     @staticmethod
+    def _run_once(cursor, key: str, sql: str) -> None:
+        """Ejecuta `sql` solo si la migración `key` no consta en app_meta."""
+        cursor.execute("SELECT 1 FROM app_meta WHERE key = ?", (key,))
+        if cursor.fetchone():
+            return
+        cursor.execute(sql)
+        affected = cursor.rowcount
+        cursor.execute(
+            "INSERT INTO app_meta (key, value) VALUES (?, CURRENT_TIMESTAMP)", (key,)
+        )
+        logger.info(f"[CACHE] Migración '{key}' aplicada ({affected} registro(s)).")
+
+    @staticmethod
     def _ensure_directories() -> None:
         """Crea los directorios necesarios si no existen."""
         os.makedirs(CacheManager.BASE_CACHE_DIR, exist_ok=True)
@@ -134,6 +147,26 @@ class CacheManager:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                     """
+                )
+
+                # Migraciones de datos de una sola vez (clave -> fecha de aplicación).
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_meta (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                    """
+                )
+                self._run_once(
+                    cursor, "resync_flac_ogg_covers_v1",
+                    # La sincronización no extraía las carátulas de FLAC/OGG (van en un
+                    # bloque propio, no en las etiquetas): esas pistas se subieron sin
+                    # carátula. Se marcan como pendientes para que se vuelvan a subir.
+                    """
+                    UPDATE track_cache SET synced = 0
+                    WHERE lower(file_path) LIKE '%.flac' OR lower(file_path) LIKE '%.ogg'
+                    """,
                 )
 
                 # Migración para audio_health_cache creada antes de añadir overall_status

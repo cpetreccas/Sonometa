@@ -705,10 +705,16 @@ ctk_toplevel.CTkToplevel._revert_withdraw_after_windows_set_titlebar_color = _sa
 class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     """Modal de progreso para operaciones pesadas con actualización segura desde hilos."""
 
-    def __init__(self, parent, title_text="Procesando", message="Iniciando...", total=0, on_cancel=None):
+    def __init__(self, parent, title_text="Procesando", message="Iniciando...", total=0, on_cancel=None,
+                 file_prefix="Leyendo", item_noun="canciones"):
         super().__init__(parent)
         DialogManager.hide_until_ready(self)
-        self.app = parent
+        # `parent` puede ser una vista o un modal (p. ej. 'Analizar pendientes' desde
+        # la vista Salud): se centra sobre él, pero icono y colores salen de la App.
+        self._host = parent
+        self.app = parent._root()
+        self._file_prefix = file_prefix
+        self._item_noun = item_noun
         self._total = max(0, int(total or 0))
         self._current = 0
         self._ui_queue = queue.Queue()
@@ -727,8 +733,8 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
         self._setup_ui(title_text, message)
 
         self.withdraw()
-        DialogManager.center_popup_on_parent(self, self.app, width=520, height=190)
-        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self.app)
+        DialogManager.center_popup_on_parent(self, self._host, width=520, height=190)
+        DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self._host)
         self._start_ui_pump()
 
     def _trigger_cancel(self):
@@ -849,10 +855,10 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
         if total is not None:
             self._total = max(0, int(total or 0))
 
-        counter_text = f"Procesando {self._current:,} / {self._total:,} canciones..."
-        message = "Leyendo metadatos de audio..."
+        counter_text = f"Procesando {self._current:,} / {self._total:,} {self._item_noun}..."
+        message = None
         if current_file:
-            message = f"Leyendo: {os.path.basename(current_file)}"
+            message = f"{self._file_prefix}: {os.path.basename(current_file)}"
 
         progress_value = (self._current / self._total) if self._total > 0 else 0.0
         self.set_text(message=message, counter_text=counter_text)
@@ -1229,8 +1235,8 @@ class DialogManager:
         app.wait_window(dialog)
 
     @staticmethod
-    def show_progress_dialog(app, title_text="Procesando", message="Iniciando...", total=0, on_cancel=None):
-        return ProgressDialog(app, title_text=title_text, message=message, total=total, on_cancel=on_cancel)
+    def show_progress_dialog(app, title_text="Procesando", message="Iniciando...", total=0, on_cancel=None, **kwargs):
+        return ProgressDialog(app, title_text=title_text, message=message, total=total, on_cancel=on_cancel, **kwargs)
 
     @staticmethod
     def run_single_health_check(app, file_path, parent=None):
@@ -1316,6 +1322,8 @@ class DialogManager:
             message="Preparando análisis por lotes...",
             total=total,
             on_cancel=cancel_event.set,
+            file_prefix="Analizando",
+            item_noun="archivos",
         )
         progress.set_counter(0, total)
 
@@ -1390,9 +1398,11 @@ class DialogManager:
     def apply_popup_style(app, win, is_modal=True, owner=None):
         DialogManager.apply_dark_title_bar(win)
 
-        if hasattr(app, "app_icon_ico") and app.app_icon_ico and os.path.exists(app.app_icon_ico):
+        # Si llega un frame o un modal en lugar de la App, el icono se toma de la raíz.
+        icon_path = getattr(app, "app_icon_ico", None) or getattr(win._root(), "app_icon_ico", None)
+        if icon_path and os.path.exists(icon_path):
             try:
-                win.iconbitmap(app.app_icon_ico)
+                win.iconbitmap(icon_path)
             except Exception:
                 pass
 

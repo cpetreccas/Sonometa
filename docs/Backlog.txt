@@ -1,17 +1,13 @@
 FUNCIONALIDADES GENERALES:
-- Meter todos los datos en la misma tabla? redefinir baremos de salud y calidad de audio, para que sea más fácil de leer y entender.
-- Cuadro de diálogo 'Evaluando calidad' en masa, no muestra el logo de Sonometa. Y la barra de progreso es distinta a la de analizar. (Una es un trozo morado de un lado a otro y la otra es una barra de progreso real, evaluar cuál queremos)
-- Integrar búsquedas en Google para el nombre y carátulas
 - Exportar una lista de texto con la colección
 - Quizás el nivel 3 de jerarquía deba depender de la suma del nivel 1+2, no solo del 2. Ejemplo: Si nivel 1 es comercial y nivel 2 es base, nivel 3 será poky.
 - Instalador para MAC
 
 WebApp:
 - Añadir wantlist y colección a la WebApp
-- En archivos flac no se guarda la caratula.
 - Configura Python en el escritorio para consultar las playlists creadas en la nube y generar los archivos locales compatibles (.m3u8, XML Traktor/Rekordbox).
 - Módulo de Compartición (Social & Web Share API): Añade el botón "Compartir" en la WebApp usando navigator.share (Web Share API) o copiado de enlace.
-- Configura una vista pública ligera / tarjeta visual (Social Card) con etiquetas Open Graph para previsualizar portadas, CUEs y BPM al enviar por WhatsApp o Instagram.
+- Configura una vista pública ligera / tarjeta visual (Social Card) con etiquetas Open Graph para previsualizar portadas, CUEs,  etc  al enviar por WhatsApp o Instagram.
 
 
 

@@ -38,6 +38,88 @@ setup_ffmpeg_path()
 class MediaProcessor:
     """Extrae portadas e imágenes y genera previews cortas de audio para la nube."""
 
+    # Tipo de imagen "portada frontal" (ID3 APIC / FLAC METADATA_BLOCK_PICTURE).
+    FRONT_COVER_TYPE = 3
+
+    @staticmethod
+    def _find_embedded_cover(audio) -> Optional[bytes]:
+        """Bytes de la carátula incrustada según el formato, o None. Si hay varias
+        imágenes, prefiere la portada frontal.
+
+        Cada formato la guarda en un sitio distinto:
+          - FLAC: bloque de imágenes propio (audio.pictures), NO en las etiquetas.
+          - OGG Vorbis/Opus: etiqueta METADATA_BLOCK_PICTURE (base64 de un bloque FLAC).
+          - MP3/WAV/AIFF: frames ID3 APIC.
+          - M4A/AAC: átomo covr.
+          - WMA: atributo WM/Picture.
+        """
+        from mutagen.flac import Picture
+
+        def _pick(pictures):
+            pictures = [p for p in pictures if getattr(p, "data", None)]
+            if not pictures:
+                return None
+            front = [p for p in pictures if getattr(p, "type", None) == MediaProcessor.FRONT_COVER_TYPE]
+            return (front or pictures)[0].data
+
+        # FLAC
+        data = _pick(getattr(audio, "pictures", None) or [])
+        if data:
+            return data
+
+        tags = getattr(audio, "tags", None)
+        if not tags:
+            return None
+
+        # OGG Vorbis / Opus
+        if hasattr(tags, "get") and not hasattr(tags, "getall"):
+            import base64
+            blocks = []
+            for raw in tags.get("metadata_block_picture", []) or []:
+                try:
+                    blocks.append(Picture(base64.b64decode(raw)))
+                except Exception:
+                    continue
+            data = _pick(blocks)
+            if data:
+                return data
+
+        # MP3 / WAV / AIFF (ID3)
+        if hasattr(tags, "getall"):
+            data = _pick(tags.getall("APIC"))
+            if data:
+                return data
+
+        # M4A / AAC
+        try:
+            covers = tags.get("covr") if hasattr(tags, "get") else None
+        except Exception:
+            covers = None
+        if covers:
+            return bytes(covers[0])
+
+        # WMA
+        try:
+            wm_pictures = tags.get("WM/Picture") if hasattr(tags, "get") else None
+        except Exception:
+            wm_pictures = None
+        if wm_pictures:
+            raw = wm_pictures[0].value
+            # ASF WM/Picture: tipo (1 byte) + tamaño (4) + mime y descripción en
+            # UTF-16 terminados en \0\0; después, los bytes de la imagen.
+            try:
+                pos = 5
+                for _ in range(2):
+                    end = raw.index(b"\x00\x00", pos)
+                    while (end - pos) % 2:
+                        end = raw.index(b"\x00\x00", end + 1)
+                    pos = end + 2
+                return raw[pos:]
+            except ValueError:
+                return None
+
+        return None
+
     @staticmethod
     def extract_cover_bytes(audio_path: str) -> Optional[bytes]:
         """Extrae la portada incrustada del audio usando mutagen y devuelve bytes JPEG."""
@@ -47,16 +129,7 @@ class MediaProcessor:
             if not audio:
                 return None
 
-            image_data = None
-            # Soporte para MP3 (ID3 APIC)
-            if hasattr(audio, 'tags') and audio.tags:
-                for key in audio.tags.keys():
-                    if key.startswith('APIC'):
-                        image_data = audio.tags[key].data
-                        break
-                # Soporte para FLAC / M4A
-                if not image_data and 'covr' in audio.tags:
-                    image_data = audio.tags['covr'][0]
+            image_data = MediaProcessor._find_embedded_cover(audio)
 
             if image_data:
                 # Normalizar imagen a JPEG comprimido (máx 600x600 para web)
