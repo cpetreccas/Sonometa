@@ -84,8 +84,21 @@
 
         <!-- Menú de Acciones -->
         <div id="headerActions" class="header-actions">
-            <button id="btnDashboard" class="btn-primary btn-header" style="display:none;" onclick="switchView('dashboard')">Dashboards</button>
-            <button id="btnTable" class="btn-primary btn-header" onclick="switchView('table')">Colección</button>
+            <!-- Selector de vistas (mismo orden e iconos que la app de escritorio) -->
+            <nav class="view-tabs" aria-label="Vistas">
+                <button class="view-tab" data-view="table" onclick="switchView('table')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h12M3 12h12M3 18h7"/><path d="M19 17V5l2 1.5"/><circle cx="17" cy="17" r="2"/></svg>
+                    <span>Colección</span>
+                </button>
+                <button class="view-tab active" data-view="dashboard" aria-current="page" onclick="switchView('dashboard')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.2 15.9A10 10 0 1 1 8 2.8"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+                    <span>Dashboard</span>
+                </button>
+                <button class="view-tab" data-view="health" onclick="switchView('health')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    <span>Calidad</span>
+                </button>
+            </nav>
             <button id="btnLogout" class="btn-secondary">Salir</button>
         </div>
     </div>
@@ -108,44 +121,6 @@
         <div class="kpi-card">
             <div class="kpi-value" id="kpiTotalTracks">0</div>
             <div class="kpi-label">CANCIONES EN TU COLECCIÓN</div>
-        </div>
-
-        <!-- SECCIÓN DE SALUD DE LA COLECCIÓN -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 24px;">
-            <!-- Tarjeta Health Score -->
-            <div class="chart-card" style="display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; padding: 24px;">
-                <h3 style="margin-bottom: 12px; width: 100%; text-align: left;">SALUD DE LA COLECCIÓN</h3>
-
-                <div style="position: relative; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; margin: 12px 0;">
-                    <svg viewBox="0 0 100 100" style="width: 100%; height: 100%; transform: rotate(-90deg);">
-                        <circle cx="50" cy="50" r="40" fill="none" stroke="#27272A" stroke-width="10" />
-                        <circle id="healthScoreCircle" cx="50" cy="50" r="40" fill="none" stroke="url(#healthGrad)" stroke-width="10" stroke-dasharray="251.3" stroke-dashoffset="251.3" stroke-linecap="round" style="transition: stroke-dashoffset 1s ease-in-out;" />
-                        <defs>
-                            <linearGradient id="healthGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" stop-color="#6366F1"/>
-                                <stop offset="50%" stop-color="#8B5CF6"/>
-                                <stop offset="100%" stop-color="#EC4899"/>
-                            </linearGradient>
-                        </defs>
-                    </svg>
-                    <div style="position: absolute; display: flex; flex-direction: column; align-items: center;">
-                        <span id="healthScoreValue" style="font-size: 32px; font-weight: 800; color: #FFFFFF; line-height: 1;">0%</span>
-                        <span id="healthScoreLabel" style="font-size: 10px; font-weight: 600; color: #A1A1AA; letter-spacing: 1px; margin-top: 4px;">GLOBAL</span>
-                    </div>
-                </div>
-
-                <div id="healthDiagnosis" class="health-diag-grid">
-                    <!-- Se poblará dinámicamente -->
-                </div>
-            </div>
-
-            <!-- Tarjeta Gráfico de Radar -->
-            <div class="chart-card">
-                <h3>INDICADORES DE SALUD</h3>
-                <div style="height: 260px; position: relative;">
-                    <canvas id="healthRadarChart"></canvas>
-                </div>
-            </div>
         </div>
 
         <div class="charts-grid">
@@ -185,6 +160,54 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- HEALTH VIEW -->
+    <div id="healthView" class="view-section" style="display:none;">
+        <!-- SECCIÓN DE CALIDAD DE LA COLECCIÓN -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; ">
+            <!-- Tarjeta Health Score -->
+            <div class="chart-card" style="display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; padding: 24px;">
+                <h3 style="margin-bottom: 12px; width: 100%; text-align: left;">CALIDAD DE LA COLECCIÓN</h3>
+
+                <div style="position: relative; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; margin: 12px 0;">
+                    <svg viewBox="0 0 100 100" style="width: 100%; height: 100%; transform: rotate(-90deg);">
+                        <circle cx="50" cy="50" r="40" fill="none" stroke="#27272A" stroke-width="10" />
+                        <circle id="healthScoreCircle" cx="50" cy="50" r="40" fill="none" stroke="url(#healthGrad)" stroke-width="10" stroke-dasharray="251.3" stroke-dashoffset="251.3" stroke-linecap="round" style="transition: stroke-dashoffset 1s ease-in-out;" />
+                        <defs>
+                            <linearGradient id="healthGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#6366F1"/>
+                                <stop offset="50%" stop-color="#8B5CF6"/>
+                                <stop offset="100%" stop-color="#EC4899"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <div style="position: absolute; display: flex; flex-direction: column; align-items: center;">
+                        <span id="healthScoreValue" style="font-size: 32px; font-weight: 800; color: #FFFFFF; line-height: 1;">0%</span>
+                        <span id="healthScoreLabel" style="font-size: 10px; font-weight: 600; color: #A1A1AA; letter-spacing: 1px; margin-top: 4px;">GLOBAL</span>
+                    </div>
+                </div>
+
+                <div id="healthDiagnosis" class="health-diag-grid">
+                    <!-- Se poblará dinámicamente -->
+                </div>
+
+                <!-- Cobertura del análisis técnico (se hace desde la app de escritorio) -->
+                <div class="health-coverage">
+                    <span id="healthCoverageText">0 de 0 analizadas (0%)</span>
+                    <div class="health-coverage-bar"><div id="healthCoverageFill"></div></div>
+                </div>
+            </div>
+
+            <!-- Tarjeta Gráfico de Radar -->
+            <div class="chart-card">
+                <h3>INDICADORES DE CALIDAD</h3>
+                <div style="height: 320px; position: relative;">
+                    <canvas id="healthRadarChart"></canvas>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- TABLE VIEW -->
@@ -270,7 +293,7 @@
         </div>
         <div class="sheet-footer" style="display: flex; gap: 10px;">
             <button id="btnPlayFromModal" class="btn-primary btn-apply" style="flex: 1;">▶ Reproducir</button>
-            <button id="btnShareFromModal" class="btn-secondary btn-apply" style="flex: 1;">📱 Compartir Cromo</button>
+            <button id="btnShareLinkFromModal" class="btn-secondary btn-apply" style="flex: 1;">🔗 Compartir enlace</button>
         </div>
     </div>
 

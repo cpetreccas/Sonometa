@@ -179,7 +179,7 @@ class App(ctk.CTk):
 
         self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.header_logo_pil)
 
-        # Selector de vista: Colección / Dashboard / Salud comparten el mismo estado
+        # Selector de vista: Colección / Dashboard / Calidad comparten el mismo estado
         # de filtro (GridPanel._advanced_criteria / _health_filter_paths); conmutar
         # solo cambia qué página se muestra en frame_right, ver switch_view(). Es un
         # control segmentado al final de la cabecera (ver view_tab_bar.py), sin fila
@@ -187,7 +187,7 @@ class App(ctk.CTk):
         self._active_view = "collection"
         self.view_tab_bar = ViewTabBar(
             self.header_panel.inner_frame,
-            tabs=[("collection", "Colección"), ("dashboard", "Dashboard"), ("health", "Salud")],
+            tabs=[("collection", "Colección"), ("dashboard", "Dashboard"), ("health", "Calidad")],
             command=self.switch_view
         )
         self.view_tab_bar.set_active("collection")
@@ -195,7 +195,7 @@ class App(ctk.CTk):
         # Indicador de filtro global: única fuente visible del filtro activo, en la
         # cabecera junto al buscador, visible sea cual sea la vista activa. GridPanel
         # lo mantiene sincronizado solo (apply_combined_filters); no hay badges
-        # locales duplicados dentro de Dashboard/Salud.
+        # locales duplicados dentro de Dashboard/Calidad.
         self.filter_indicator = FilterIndicator(self.header_panel.inner_frame, on_clear=self._clear_global_filter)
         self.header_panel.place_navigation(self.view_tab_bar, self.filter_indicator)
 
@@ -224,7 +224,7 @@ class App(ctk.CTk):
         # Reusar la instancia de filtro que vive dentro de GridPanel.
         self.advanced_filter_panel = self.grid_panel.filter_panel
 
-        # Páginas de Dashboard/Salud: se construyen ocultas y se muestran vía
+        # Páginas de Dashboard/Calidad: se construyen ocultas y se muestran vía
         # switch_view(); ambas refrescan sus datos desde grid_panel al activarse.
         self.stats_view = StatsDashboardView(app=self, parent=self.frame_right)
         self.health_view = HealthDashboardView(app=self, parent=self.frame_right)
@@ -332,7 +332,7 @@ class App(ctk.CTk):
             self.logger.info("Panel lateral colapsado.")
 
     def switch_view(self, view_key):
-        """Conmuta entre las 3 vistas de la app (Colección/Dashboard/Salud). Las 3
+        """Conmuta entre las 3 vistas de la app (Colección/Dashboard/Calidad). Las 3
         comparten el mismo estado de filtro (GridPanel._advanced_criteria /
         _health_filter_paths aplicados sobre el Treeview) — conmutar de vista solo
         cambia qué página se muestra en frame_right, nunca recalcula un filtro

@@ -229,7 +229,7 @@ class ToolPanel(ctk.CTkFrame):
                 {"type": "separator"},
                 {"type": "command", "label": "Vista Colección", "command": lambda: app.switch_view("collection")},
                 {"type": "command", "label": "Vista Dashboard", "command": lambda: app.switch_view("dashboard")},
-                {"type": "command", "label": "Vista Salud", "command": lambda: app.switch_view("health")}
+                {"type": "command", "label": "Vista Calidad", "command": lambda: app.switch_view("health")}
             ]),
             ("Preferencias", [
                 {"type": "checkbutton", "label": "Revisar carátulas", "variable": app.review_covers_var, "command": self._on_toggle_review_covers},

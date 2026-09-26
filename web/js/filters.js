@@ -323,6 +323,10 @@ export function handleChartClick(key, label, defaultLabel) {
 }
 
 function showFilterToast(message) {
+    showToast(message);
+}
+
+export function showToast(message) {
     let toast = document.getElementById('filterToast');
     if (!toast) {
         toast = document.createElement('div');

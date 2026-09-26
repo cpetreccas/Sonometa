@@ -83,17 +83,17 @@ Variables globales de la PWA (`:root` en `web/css/styles.css`):
 | Barra del reproductor | fondo `#18181C`, borde superior `#2E2E38` |
 | Pista de barras de progreso | `#27272A` |
 
-### Estados e indicadores de salud
+### Estados e indicadores de calidad
 
 | Estado | Color | Uso |
 | :--- | :--- | :--- |
-| Éxito | `#22C55E` | Salud buena/excelente, chequeo OK |
-| Aviso | `#F59E0B` | Metadato secundario ausente, chequeo en aviso |
-| Peligro | `#EF4444` | Metadato crítico ausente, chequeo crítico |
+| Éxito | `#22C55E` | Calidad buena/excelente, chequeo OK |
+| Aviso | `#F59E0B` | Metadato ausente; volumen fuera de rango o bitrate falso |
+| Peligro | `#EF4444` | Saturación, archivo corrupto o truncado |
 
 ### Degradados de marca
 
-* **Nota global de salud (anillo):** `linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)`.
+* **Nota global de calidad (anillo):** `linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)`.
 * **Botón play del reproductor:** `linear-gradient(135deg, #6366F1, #8B5CF6)`.
 * **Barra de progreso del reproductor:** `linear-gradient(90deg, #6366F1, #EC4899)`.
 * **Línea superior de la tarjeta KPI:** `linear-gradient(90deg, transparent, #8B5CF6, transparent)`, 2px.
@@ -163,10 +163,10 @@ Fuera de estos casos no se usan degradados.
 * **Tartas:** borde entre sectores `1px` del color de la tarjeta.
 * **Barras:** radio `4px`, grosor máximo limitado cuando hay pocas categorías.
 * **Ejes y cuadrícula:** texto de ticks `--text-muted`; líneas de cuadrícula `rgba(255, 255, 255, 0.08)`. El eje Y termina en la primera marca por encima del máximo.
-* **Radar (indicadores de salud):** cuadrícula poligonal `rgba(255, 255, 255, 0.18)`, radios `rgba(255, 255, 255, 0.22)`, relleno `rgba(139, 92, 246, 0.3)`, borde `#8B5CF6` de 2px, puntos `#EC4899` con borde blanco. Primer eje arriba y el resto en sentido horario. Etiquetas de eje `#F4F4F5` `11px/600`.
-* **Anillo de salud global:** degradado de marca sobre pista `--border-color`, extremos redondeados, porcentaje en blanco y estado en MAYÚSCULAS `--text-muted` debajo.
+* **Radar (indicadores de calidad):** cuadrícula poligonal `rgba(255, 255, 255, 0.18)`, radios `rgba(255, 255, 255, 0.22)`, relleno `rgba(139, 92, 246, 0.3)`, borde `#8B5CF6` de 2px, puntos `#EC4899` con borde blanco. Primer eje arriba y el resto en sentido horario. Etiquetas de eje `#F4F4F5` `11px/600`.
+* **Anillo de calidad global:** degradado de marca sobre pista `--border-color`, extremos redondeados, porcentaje en blanco y estado en MAYÚSCULAS `--text-muted` debajo.
 * **Leyenda personalizada:** tabla nombre / cant. / % con cuadrado de color `8px` (radio `2px`), separadores `rgba(255, 255, 255, 0.03)`, cantidades en negrita blanca, porcentaje con 2 decimales. Scroll propio con barra de `4px` en `--border-highlight`. Hover de fila `--surface-hover`.
-* **Diagnóstico de salud:** rejilla de 2 columnas, cada elemento con icono de línea de color, cantidad en `#F4F4F5` `600` y texto `--text-muted`. Colores de icono: carátula `#EC4899`, valoración `#8B5CF6`, cue points `#38BDF8`, género `#A855F7`, etiqueta `#6366F1`, álbum `#C084FC`, año `#3B82F6`.
+* **Diagnóstico de calidad:** rejilla de 2 columnas, cada elemento con icono de línea de color, cantidad en `#F4F4F5` `600` y texto `--text-muted`. Iconos coloreados por gravedad con los colores de estado: ámbar `#F59E0B` para los campos que faltan (carátula, valoración, cue points, género, etiqueta, álbum, año), volumen bajo/excesivo y bitrate falso; rojo `#EF4444` para saturación y archivos corruptos o truncados.
 
 ### 4.7 Reproductor
 
@@ -198,7 +198,7 @@ Fuera de estos casos no se usan degradados.
 
 * Texto secundario ajustado para contraste ≥ 4.5:1 (WCAG AA) sobre `--bg-color` y `--surface-color`: no oscurecer `--text-muted` ni `--text-subtle`.
 * Áreas táctiles de al menos `36px`.
-* El color nunca es el único indicador: los estados de salud llevan icono (`✓`, `⚠`, `✕`) además del color.
+* El color nunca es el único indicador: los estados de calidad llevan icono (`✓`, `⚠`, `✕`) además del color.
 
 ---
 
@@ -222,7 +222,7 @@ Limitaciones conocidas de Tk y cómo se resuelven:
 
 * **Fuente:** Inter no se incluye; se usa `Segoe UI` (y `Segoe UI Black` para el KPI). Solo hay pesos `normal`/`bold`: los pesos intermedios se aproximan a `bold`.
 * **Letter-spacing:** no existe; en títulos en MAYÚSCULAS se aproxima intercalando espacios finos (U+200A).
-* **Degradados, sombras y halos:** Tk no los soporta. Los degradados imprescindibles (tarjeta KPI, anillo de salud) se generan como imagen con Pillow; las sombras y halos se omiten.
+* **Degradados, sombras y halos:** Tk no los soporta. Los degradados imprescindibles (tarjeta KPI, anillo de calidad) se generan como imagen con Pillow; las sombras y halos se omiten.
 * **Borde izquierdo de la fila seleccionada:** `ttk.Treeview` no permite bordes por fila; la selección usa solo el fondo `#2F2643`.
 * **Color de cabecera por columna:** `ttk.Treeview` aplica el mismo estilo a todas las cabeceras; la columna ordenada se indica con la flecha ▲/▼.
 * **Hover de botones secundarios:** CustomTkinter solo cambia el fondo en hover; el cambio de color de texto y borde se hace con eventos `<Enter>`/`<Leave>`.

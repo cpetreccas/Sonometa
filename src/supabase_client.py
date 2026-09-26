@@ -97,7 +97,7 @@ class SupabaseClientManager:
             return False
 
     def upsert_health_batch(self, health_data: List[Dict[str, Any]]) -> bool:
-        """Envía un lote de resultados de 'Evaluar salud' a PostgreSQL mediante un
+        """Envía un lote de resultados de 'Evaluar calidad' a PostgreSQL mediante un
         UPSERT. Mismo patrón que upsert_tracks_batch, tabla "audio_health"."""
         self.last_upsert_status_code = None
         if not self.client or not health_data:

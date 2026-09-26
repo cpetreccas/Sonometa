@@ -4,41 +4,59 @@
 
 import { supabase } from './supabase.js';
 
+const PAGE_STEP = 1000;
+
 /**
- * Realiza peticiones paginadas a Supabase en bloques de 1,000
- * para superar el límite por defecto de PostgREST/Supabase.
- * Retorna el array completo de todas las canciones de la tabla 'tracks'.
+ * Lee todas las filas de una tabla en bloques de 1,000 para superar el límite
+ * por defecto de PostgREST/Supabase. Si un bloque falla, devuelve lo leído hasta ahí.
  *
- * @returns {Promise<Array>} Array de todos los tracks
+ * @param {string} table - Tabla de Supabase
+ * @param {string} columns - Columnas del select
+ * @returns {Promise<Array>} Filas de la tabla
  */
-export async function fetchAllTracks() {
-    let fetchedTracks = [];
+async function fetchAllRows(table, columns) {
+    let rows = [];
     let from = 0;
-    const step = 1000;
-    let hasMore = true;
 
-    while (hasMore) {
+    while (true) {
         const { data, error } = await supabase
-            .from('tracks')
-            .select('id, filename, artist, title, mix_artist, album, genre, publisher, year, duration, cue_count, rating, cover_url, preview_audio_url')
-
-            .range(from, from + step - 1);
+            .from(table)
+            .select(columns)
+            .range(from, from + PAGE_STEP - 1);
 
         if (error) {
-            console.error('Error fetching tracks:', error);
+            console.error(`Error fetching ${table}:`, error);
             break;
         }
+        if (!data || data.length === 0) break;
 
-        if (data && data.length > 0) {
-            fetchedTracks = fetchedTracks.concat(data);
-            from += step;
-            if (data.length < step) {
-                hasMore = false;
-            }
-        } else {
-            hasMore = false;
-        }
+        rows = rows.concat(data);
+        if (data.length < PAGE_STEP) break;
+        from += PAGE_STEP;
     }
 
-    return fetchedTracks;
+    return rows;
+}
+
+/**
+ * Retorna el array completo de todas las canciones de la tabla 'tracks'.
+ * @returns {Promise<Array>} Array de todos los tracks
+ */
+export function fetchAllTracks() {
+    return fetchAllRows(
+        'tracks',
+        'id, filepath_local, filename, artist, title, mix_artist, album, genre, publisher, year, duration, cue_count, rating, cover_url, preview_audio_url'
+    );
+}
+
+/**
+ * Resultados de la auditoría técnica ('Evaluar calidad' en escritorio), tabla 'audio_health'.
+ * Se enlazan con 'tracks' por filepath_local.
+ * @returns {Promise<Array>} Filas de audio_health
+ */
+export function fetchAllHealth() {
+    return fetchAllRows(
+        'audio_health',
+        'filepath_local, integrity_status, has_clipping, lufs_integrated, bitrate_fake'
+    );
 }

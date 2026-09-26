@@ -46,14 +46,14 @@ TEXT_ON_PRIMARY = "#FFFFFF"  # Blanco puro para texto sobre fondo PRIMARY (ej. f
 # ------------------------------------------------------------------
 # Estados e indicadores
 # ------------------------------------------------------------------
-STATUS_SUCCESS = "#22C55E"  # Verde - completo / salud excelente
+STATUS_SUCCESS = "#22C55E"  # Verde - completo / calidad excelente
 STATUS_WARNING = "#F59E0B"  # Ámbar - falta algún metadato secundario
 STATUS_DANGER = "#EF4444"   # Rojo - falta metadato crítico
 STATUS_DANGER_HOVER = "#450A0A"  # Fondo hover sutil para botones destructivos ("transparent" + hover rojizo)
 STATUS_INFO = "#3B82F6"     # Azul - mensajes informativos neutros
 
 # Iconos de show_themed_dialog: verde esmeralda propio para "acción completada",
-# deliberadamente distinto de STATUS_SUCCESS (reservado a indicadores de salud/estado).
+# deliberadamente distinto de STATUS_SUCCESS (reservado a indicadores de calidad/estado).
 MODAL_ICON_SUCCESS = "#10B981"
 
 # ------------------------------------------------------------------

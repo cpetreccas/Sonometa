@@ -230,7 +230,7 @@ class CloudSyncWorker(threading.Thread):
             self._stop_event.wait(0.2)
 
     def _process_pending_health(self):
-        """Sube a la tabla `audio_health` de Postgres los resultados de 'Evaluar salud'
+        """Sube a la tabla `audio_health` de Postgres los resultados de 'Evaluar calidad'
         pendientes (audio_health_cache.synced = 0). Payload ya plano: no requiere
         extraer portadas/previews como sí hace _process_pending_syncs."""
         user_id = self.supabase.get_user_id()
@@ -241,7 +241,7 @@ class CloudSyncWorker(threading.Thread):
         if not pending_health:
             return True, False
 
-        logger.info(f"Sincronizando salud de audio de {len(pending_health)} pista(s) con la nube...")
+        logger.info(f"Sincronizando calidad de audio de {len(pending_health)} pista(s) con la nube...")
 
         payload_batch = []
         synced_filepaths = []
@@ -268,7 +268,7 @@ class CloudSyncWorker(threading.Thread):
         upsert_result = self.supabase.upsert_health_batch(payload_batch)
         if self._is_upsert_ok(upsert_result):
             self.cache_manager.mark_health_synced(file_paths=synced_filepaths)
-            logger.info(f"¡Éxito! Salud de {len(synced_filepaths)} pista(s) sincronizada.")
+            logger.info(f"¡Éxito! Calidad de {len(synced_filepaths)} pista(s) sincronizada.")
             return True, True
         else:
             logger.error("[SYNC] Supabase no confirmó estado OK para upsert masivo de audio_health.")

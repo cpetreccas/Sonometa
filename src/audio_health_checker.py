@@ -42,7 +42,9 @@ logger = logging.getLogger("Sonometa")
 #      un 128 real salía como 160); se guarda el bitrate aparente en el informe.
 #   4: volumen correcto hasta -6 LUFS (música de club); clipping con rachas >= 12
 #      muestras, sin aviso por menos de 3 rachas y crítico a partir del 0.05%.
-ANALYSIS_VERSION = 4
+#   5: errores de decodificación contados una vez (ffmpeg >= 7 repite cada uno en
+#      una segunda línea) y sin penalizar una única trama rota al final del archivo.
+ANALYSIS_VERSION = 5
 
 # Por encima de esta duración, el análisis de señal se hace sobre un muestreo
 # (inicio/medio/final) en vez de decodificar el archivo completo, para no disparar
@@ -101,6 +103,14 @@ LOSSLESS_MODULES = ("flac", "wave", "aiff")
 # (tramas dañadas que se saltan sin alterar la duración).
 DECODE_ERROR_CRITICAL = 10          # nº de errores a partir del cual es crítico
 DECODE_TIMEOUT_SEC = 180
+# Líneas que ffmpeg añade tras el mensaje del decodificador para el mismo fallo
+# (no son errores nuevos).
+DECODE_ERROR_ECHO_MARKERS = ("Error submitting packet to decoder", "Error while decoding stream")
+# Una trama incompleta justo al final (típico al añadir la etiqueta ID3v1 tras
+# recortar el audio) afecta a unos ms del final: si todos los errores caen en
+# este tramo final y no son más de TRAILING_ERROR_MAX, no se penaliza.
+TRAILING_CHECK_SEC = 3
+TRAILING_ERROR_MAX = 1
 
 # Penalización sobre 100 según el status de cada chequeo, para el "health_score" resumen
 # que se persiste en caché/exportación. Ajustable sin tocar la lógica de cada chequeo.
@@ -382,14 +392,13 @@ class AudioHealthChecker:
         return frames, segment.frame_rate
 
     @staticmethod
-    def _count_decode_errors(file_path: str) -> Optional[Tuple[int, str]]:
-        """Decodifica el archivo completo con ffmpeg sin guardar nada (-f null) y
-        cuenta los errores que reporta (tramas dañadas que se saltan sin que cambie la
-        duración). Solo la pista de audio (-map 0:a:0): la carátula embebida no
-        cuenta. Devuelve (nº de errores, primer mensaje) o None si ffmpeg no está
-        disponible o no terminó a tiempo (el chequeo se omite, no se penaliza)."""
+    def _decode_error_lines(file_path: str, input_args=()) -> Optional[list]:
+        """Decodifica con ffmpeg sin guardar nada (-f null) y devuelve un mensaje por
+        error (sin las líneas eco que ffmpeg repite para el mismo fallo). Solo la
+        pista de audio (-map 0:a:0): la carátula embebida no cuenta. None si ffmpeg
+        no está disponible o no terminó a tiempo."""
         converter = getattr(AudioSegment, "converter", None) or "ffmpeg"
-        cmd = [converter, "-nostdin", "-v", "error", "-i", file_path, "-map", "0:a:0", "-f", "null", "-"]
+        cmd = [converter, "-nostdin", "-v", "error", *input_args, "-i", file_path, "-map", "0:a:0", "-f", "null", "-"]
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         try:
             proc = subprocess.run(
@@ -400,7 +409,25 @@ class AudioHealthChecker:
             return None
 
         lines = [line.strip() for line in proc.stderr.decode("utf-8", "replace").splitlines() if line.strip()]
-        return len(lines), (lines[0] if lines else "")
+        return [line for line in lines if not any(marker in line for marker in DECODE_ERROR_ECHO_MARKERS)]
+
+    @staticmethod
+    def _count_decode_errors(file_path: str) -> Optional[Tuple[int, str, bool]]:
+        """Cuenta los errores de decodificación del archivo completo (tramas dañadas
+        que se saltan sin que cambie la duración). Devuelve (nº de errores, primer
+        mensaje, ¿están todos al final?) o None si el chequeo no se pudo hacer (se
+        omite, no se penaliza)."""
+        errors = AudioHealthChecker._decode_error_lines(file_path)
+        if errors is None:
+            return None
+        if not errors:
+            return 0, "", False
+
+        at_end = False
+        if len(errors) <= TRAILING_ERROR_MAX:
+            tail_errors = AudioHealthChecker._decode_error_lines(file_path, ("-sseof", f"-{TRAILING_CHECK_SEC}"))
+            at_end = tail_errors is not None and len(tail_errors) >= len(errors)
+        return len(errors), errors[0], at_end
 
     # ------------------------------------------------------------------
     # Chequeo 1: Integridad
@@ -420,8 +447,16 @@ class AudioHealthChecker:
         if duration.status != "ok":
             problems.append((duration.status, duration.label, duration.detail))
 
-        if decode_errors is not None and decode_errors[0] > 0:
-            count, first_message = decode_errors
+        trailing_note = None
+        if decode_errors is not None and decode_errors[0] > 0 and decode_errors[2]:
+            # Última trama incompleta: unos ms al final del archivo, inaudible.
+            trailing_note = (
+                "Final de archivo recortado (inaudible)",
+                "La última trama de audio está incompleta (unos milisegundos al final del "
+                "archivo, a menudo por añadir etiquetas tras recortarlo). No afecta a la escucha.",
+            )
+        elif decode_errors is not None and decode_errors[0] > 0:
+            count, first_message, _ = decode_errors
             status = "critical" if count >= DECODE_ERROR_CRITICAL else "warning"
             detail = f"ffmpeg reportó {count} error(es) al decodificar el archivo completo"
             if first_message:
@@ -429,6 +464,8 @@ class AudioHealthChecker:
             problems.append((status, f"Errores de decodificación ({count})", detail + "."))
 
         if not problems:
+            if trailing_note and duration.status == "ok":
+                return HealthCheckResult("ok", *trailing_note)
             return duration
 
         worst = "critical" if any(p[0] == "critical" for p in problems) else "warning"

@@ -252,7 +252,7 @@ def _embed_canvas(parent, fig, debounce_ms=RESIZE_DEBOUNCE_MS, bg=theme.BG_CARD_
 
 def _bind_clickable(widget, callback):
     """Bindea clic + cursor de mano sobre un widget y sus hijos directos.
-    Compartido por los chips de diagnóstico/alerta de salud
+    Compartido por los chips de diagnóstico/alerta de calidad
     (health_dashboard_view.py). Sin efecto hover asociado — solo detecta el clic."""
     widget.configure(cursor="hand2")
     widget.bind("<Button-1>", lambda e: callback())
@@ -556,7 +556,7 @@ class _LegendTable:
 def _autohide_scrollbar(scrollable):
     """La barra de scroll de un CTkScrollableFrame solo aparece cuando el contenido
     no cabe (CustomTkinter la muestra siempre, aunque el thumb ocupe todo el alto).
-    Compartido por el Dashboard y la vista de Salud."""
+    Compartido por el Dashboard y la vista de Calidad."""
     scrollbar = scrollable._scrollbar
     canvas = scrollable._parent_canvas
 
@@ -776,7 +776,7 @@ class StatsDashboardView(ctk.CTkFrame):
     PWA (web/js/dashboard.js). Cada tarjeta copia la anatomía de la versión móvil
     (título, gráfico a todo el ancho, tabla con scroll debajo) y el escritorio solo
     las reparte en una rejilla de 3/2/1 columnas según el ancho. La auditoría de
-    salud vive en la pestaña Salud (health_dashboard_view.py). Acotada a la vista
+    calidad vive en la pestaña Calidad (health_dashboard_view.py). Acotada a la vista
     actual de la grilla (respeta filtros/búsqueda activos). Filtrar desde aquí
     (clic en una fila de tabla) NO cambia de pestaña: el filtro se aplica sobre el
     motor de la grilla y GridPanel.apply_combined_filters llama a self.refresh().

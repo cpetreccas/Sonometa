@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sonometa-v2.0';
+const CACHE_NAME = 'sonometa-v2.2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -29,7 +29,8 @@ self.addEventListener('activate', (e) => {
 // Estrategia Stale-While-Revalidate
 self.addEventListener('fetch', (e) => {
   // Ignorar peticiones a Supabase o CDN para no cachear datos mutables/tokens
-  if (e.request.url.includes('supabase.co') || e.request.method !== 'GET') {
+  if (e.request.url.includes('supabase.co') || e.request.method !== 'GET' ||
+      new URL(e.request.url).pathname.startsWith('/t/')) {
     return;
   }
 

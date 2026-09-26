@@ -228,7 +228,7 @@ class AdvancedFilterPanel(ctk.CTkFrame):
                         tree.focus(children[0])
         else:
             # 2. MOSTRAR PANEL: encima de la página activa (Colección, Dashboard o
-            # Salud). Las páginas se re-empaquetan al cambiar de vista y quedan
+            # Calidad). Las páginas se re-empaquetan al cambiar de vista y quedan
             # siempre detrás de él; el tree_container no se toca.
             page = self.app.get_active_page() if hasattr(self.app, "get_active_page") else None
             if page is not None:

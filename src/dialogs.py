@@ -6,6 +6,7 @@ import ctypes
 import logging
 import queue
 import threading
+import time
 import urllib.request
 from datetime import datetime
 import tkinter as tk
@@ -706,15 +707,22 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     """Modal de progreso para operaciones pesadas con actualización segura desde hilos."""
 
     def __init__(self, parent, title_text="Procesando", message="Iniciando...", total=0, on_cancel=None,
-                 file_prefix="Leyendo", item_noun="canciones"):
+                 file_prefix="Leyendo", item_noun="canciones", show_eta=False):
         super().__init__(parent)
         DialogManager.hide_until_ready(self)
         # `parent` puede ser una vista o un modal (p. ej. 'Analizar pendientes' desde
-        # la vista Salud): se centra sobre él, pero icono y colores salen de la App.
+        # la vista Calidad): se centra sobre él, pero icono y colores salen de la App.
         self._host = parent
         self.app = parent._root()
         self._file_prefix = file_prefix
         self._item_noun = item_noun
+        # Tiempo restante estimado (opcional): ritmo medio desde el primer elemento
+        # completado; entre elementos la cuenta atrás avanza sola cada segundo.
+        self._show_eta = show_eta
+        self._eta_origin = None        # (instante, nº completados) al completar el primero
+        self._eta_seconds = None       # estimación en el último elemento completado
+        self._eta_stamp = None         # instante de esa estimación
+        self._eta_after_id = None
         self._total = max(0, int(total or 0))
         self._current = 0
         self._ui_queue = queue.Queue()
@@ -752,6 +760,12 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
     def _on_destroy_cleanup(self, event=None):
         """Detiene cualquier temporizador activo cuando Tkinter destruye el widget."""
         self._is_closed = True
+        if self._eta_after_id is not None:
+            try:
+                self.after_cancel(self._eta_after_id)
+            except Exception:
+                pass
+            self._eta_after_id = None
         if self._ui_pump_after_id is not None:
             try:
                 self.after_cancel(self._ui_pump_after_id)
@@ -851,18 +865,72 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
             self.lbl_counter.configure(text=counter_text)
 
     def set_counter(self, current, total=None, current_file=""):
+        previous = self._current
         self._current = max(0, int(current or 0))
         if total is not None:
             self._total = max(0, int(total or 0))
 
-        counter_text = f"Procesando {self._current:,} / {self._total:,} {self._item_noun}..."
+        if self._show_eta and self._current > previous:
+            self._update_eta_estimate()
+
         message = None
         if current_file:
             message = f"{self._file_prefix}: {os.path.basename(current_file)}"
 
         progress_value = (self._current / self._total) if self._total > 0 else 0.0
-        self.set_text(message=message, counter_text=counter_text)
+        self.set_text(message=message, counter_text=self._counter_text())
         self.set_progress(progress_value)
+
+    def _counter_text(self):
+        text = f"Procesando {self._current:,} / {self._total:,} {self._item_noun}..."
+        if self._show_eta and self._current < self._total:
+            text += f"  ·  {self._eta_text()}"
+        return text
+
+    def _update_eta_estimate(self):
+        """Recalcula el tiempo restante al completar un elemento. El primero solo
+        fija el origen: su duración incluye el arranque y no es representativa."""
+        now = time.monotonic()
+        if self._eta_origin is None:
+            self._eta_origin = (now, self._current)
+            self._schedule_eta_tick()
+            return
+        start, start_count = self._eta_origin
+        done = self._current - start_count
+        if done <= 0:
+            return
+        per_item = (now - start) / done
+        self._eta_seconds = per_item * max(0, self._total - self._current)
+        self._eta_stamp = now
+
+    def _eta_text(self):
+        if self._eta_seconds is None:
+            return "Calculando tiempo restante…"
+        remaining = max(0.0, self._eta_seconds - (time.monotonic() - self._eta_stamp))
+        return f"Quedan {self._format_eta(remaining)}"
+
+    @staticmethod
+    def _format_eta(seconds):
+        if seconds < 10:
+            return "unos segundos"
+        if seconds < 60:
+            return f"~{int(round(seconds / 5.0) * 5)} s"
+        minutes = int(round(seconds / 60.0))
+        if minutes < 60:
+            return f"~{minutes} min"
+        hours, minutes = divmod(minutes, 60)
+        return f"~{hours} h {minutes:02d} min"
+
+    def _schedule_eta_tick(self):
+        """Refresca la cuenta atrás cada segundo mientras el diálogo esté abierto."""
+        if self._is_closed:
+            return
+        try:
+            if self.winfo_exists():
+                self.lbl_counter.configure(text=self._counter_text())
+                self._eta_after_id = self.after(1000, self._schedule_eta_tick)
+        except Exception:
+            self._eta_after_id = None
 
     def set_progress_threadsafe(self, value):
         if not self._is_closed:
@@ -912,7 +980,7 @@ class ProgressDialog(SilentTitlebarMixin, ctk.CTkToplevel):
 
 
 class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
-    """Muestra el resultado de 'Evaluar salud' (audio_health_checker.HealthReport):
+    """Muestra el resultado de 'Evaluar calidad' (audio_health_checker.HealthReport):
     una fila por chequeo (Integridad, Clipping, Volumen LUFS, Corte real de frecuencia)
     con una insignia de color verde/ámbar/rojo según su status."""
 
@@ -950,7 +1018,7 @@ class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
 
         ctk.CTkLabel(
             frame,
-            text="Salud del Archivo",
+            text="Calidad del Archivo",
             anchor="w",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_H1, weight="bold"),
             text_color=theme.TEXT_MAIN
@@ -1075,7 +1143,7 @@ def _build_metric_chip(parent, label, count, color):
 
 
 class BatchHealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
-    """Resumen de 'Evaluar salud' para una selección múltiple o un lote de pendientes:
+    """Resumen de 'Evaluar calidad' para una selección múltiple o un lote de pendientes:
     métricas rápidas + lista de pistas. Doble clic en una fila abre su
     HealthReportModal individual (vía on_open_detail)."""
 
@@ -1250,7 +1318,7 @@ class DialogManager:
         filename = os.path.basename(file_path)
 
         progress = DialogManager.show_progress_dialog(
-            host, title_text="Evaluando Salud", message=f"Analizando {filename}...",
+            host, title_text="Evaluando Calidad", message=f"Analizando {filename}...",
         )
         progress.lbl_counter.configure(text="Esto puede tardar unos segundos en temas largos.")
         progress.progress.configure(mode="indeterminate")
@@ -1299,7 +1367,7 @@ class DialogManager:
 
     @staticmethod
     def run_batch_health_check(app, file_paths, parent=None, on_complete=None):
-        """Orquesta 'Evaluar salud' para varios archivos: ProgressDialog determinado y
+        """Orquesta 'Evaluar calidad' para varios archivos: ProgressDialog determinado y
         cancelable, un hilo secundario que salta los que ya tienen caché válida, y al
         terminar un BatchHealthReportModal con el resumen. Punto de entrada único
         compartido por la selección múltiple de grid_panel y el botón 'Analizar
@@ -1318,12 +1386,13 @@ class DialogManager:
 
         progress = DialogManager.show_progress_dialog(
             host,
-            title_text="Evaluando Salud",
+            title_text="Evaluando Calidad",
             message="Preparando análisis por lotes...",
             total=total,
             on_cancel=cancel_event.set,
             file_prefix="Analizando",
             item_noun="archivos",
+            show_eta=True,
         )
         progress.set_counter(0, total)
 

@@ -4,7 +4,7 @@ import theme
 
 class FilterIndicator(ctk.CTkFrame):
     """Píldora de filtro global en la barra de navegación superior, a la derecha de
-    las pestañas Colección/Dashboard/Salud. Refleja el estado de filtro único
+    las pestañas Colección/Dashboard/Calidad. Refleja el estado de filtro único
     (GridPanel._advanced_criteria / _health_filter_paths) sea cual sea la vista
     activa — no hay badges locales duplicados dentro de cada vista — y permite
     limpiarlo con un clic. GridPanel.apply_combined_filters llama a set_summary()

@@ -1,8 +1,8 @@
 import { checkSession, login, logout } from './auth.js';
 import { updateDashboard, populateFilterDropdowns } from './dashboard.js';
 import { context } from './app_context.js';
-import { fetchAllTracks } from './data_loader.js';
-import { shareTrackCard } from './share.js';
+import { fetchAllTracks, fetchAllHealth } from './data_loader.js';
+import { shareTrackLink } from './share.js';
 import {
     sortByColumn,
     loadTableData,
@@ -93,7 +93,11 @@ async function showApp() {
  */
 async function loadInitialCollection() {
     try {
-        context.allTracks = await fetchAllTracks();
+        const [tracks, healthRows] = await Promise.all([fetchAllTracks(), fetchAllHealth()]);
+        // Auditoría técnica de cada pista (null si aún no se ha analizado en escritorio)
+        const healthByPath = new Map(healthRows.map(h => [h.filepath_local, h]));
+        tracks.forEach(t => { t.health = healthByPath.get(t.filepath_local) || null; });
+        context.allTracks = tracks;
         populateFilterDropdowns(context.allTracks);
         renderColumnPicker();
         applyFilters();
@@ -182,24 +186,21 @@ export function syncMobileSearch(val) {
 
 window.syncMobileSearch = syncMobileSearch;
 
+const VIEW_SECTIONS = { table: 'tableView', dashboard: 'dashboardView', health: 'healthView' };
+
 export async function switchView(view) {
-    const isDashboard = view === 'dashboard';
-    const dashView = document.getElementById('dashboardView');
-    const tblView = document.getElementById('tableView');
-    const btnDash = document.getElementById('btnDashboard');
-    const btnTbl = document.getElementById('btnTable');
+    const nextView = document.getElementById(VIEW_SECTIONS[view]);
+    const currentView = Object.values(VIEW_SECTIONS)
+        .map(id => document.getElementById(id))
+        .find(el => el && el !== nextView && el.style.display !== 'none');
 
-    const currentView = isDashboard ? tblView : dashView;
-    const nextView = isDashboard ? dashView : tblView;
-
-    // Si la vista solicitada ya se está mostrando, no ejecutar
-    if (nextView && nextView.style.display !== 'none' && !nextView.classList.contains('hidden')) {
-        return;
-    }
-
-    // Actualizar visibilidad de botones en la cabecera
-    if (btnDash) btnDash.style.display = isDashboard ? 'none' : 'inline-block';
-    if (btnTbl) btnTbl.style.display = isDashboard ? 'inline-block' : 'none';
+    // Marcar la vista activa en el selector de la cabecera
+    document.querySelectorAll('.view-tab').forEach(tab => {
+        const isActive = tab.dataset.view === view;
+        tab.classList.toggle('active', isActive);
+        if (isActive) tab.setAttribute('aria-current', 'page');
+        else tab.removeAttribute('aria-current');
+    });
 
     // Cerrar menú hamburguesa al cambiar de vista en móvil
     const actions = document.getElementById('headerActions');
@@ -207,26 +208,29 @@ export async function switchView(view) {
         actions.classList.remove('show');
     }
 
-    if (currentView && nextView) {
-        // 1. Animación de salida (Fade Out)
-        currentView.classList.add('fade-out');
-        await new Promise(resolve => setTimeout(resolve, 250));
-
-        // 2. Ocultar la vista actual y preparar la entrada de la nueva
-        currentView.style.display = 'none';
-        currentView.classList.remove('fade-out');
-
-        nextView.classList.add('fade-in-prepare');
-        nextView.style.display = 'block';
-
-        // Forzar Reflow para que el navegador procese el estado inicial antes de transicionar
-        void nextView.offsetWidth;
-
-        // 3. Animación de entrada (Fade In)
-        nextView.classList.remove('fade-in-prepare');
+    // Sin vista visible distinta de la pedida: ya se está mostrando, no hacer nada
+    if (!nextView || !currentView) {
+        return;
     }
+
+    // 1. Animación de salida (Fade Out)
+    currentView.classList.add('fade-out');
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    // 2. Ocultar la vista actual y preparar la entrada de la nueva
+    currentView.style.display = 'none';
+    currentView.classList.remove('fade-out');
+
+    nextView.classList.add('fade-in-prepare');
+    nextView.style.display = 'block';
+
+    // Forzar Reflow para que el navegador procese el estado inicial antes de transicionar
+    void nextView.offsetWidth;
+
+    // 3. Animación de entrada (Fade In)
+    nextView.classList.remove('fade-in-prepare');
 }
 
 window.switchView = switchView;
 
-window.shareTrackCard = shareTrackCard;
+window.shareTrackLink = shareTrackLink;

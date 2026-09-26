@@ -104,6 +104,25 @@ body.has-player {
 
 .header-actions { display: flex; align-items: center; gap: 8px; }
 
+/* Selector de vistas segmentado (Colección / Dashboard / Calidad), como en escritorio:
+   contenedor tipo input y el segmento activo con estilo de chip activo. */
+.view-tabs {
+    display: flex; align-items: center; gap: 2px; padding: 3px;
+    background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 10px;
+}
+.view-tab {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border: 1px solid transparent; border-radius: 8px;
+    background: transparent; color: var(--text-muted);
+    font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.view-tab svg { width: 15px; height: 15px; flex-shrink: 0; }
+.view-tab:hover { background: var(--surface-hover); color: var(--text-main); }
+.view-tab.active { background: #2D2342; border-color: var(--primary-purple); color: #FFFFFF; }
+.view-tab.active svg { color: #A78BFA; }
+.view-tab:focus-visible { outline: 2px solid var(--primary-purple); outline-offset: 1px; }
+
 .btn-menu-toggle {
     display: none;
     background: transparent;
@@ -143,8 +162,19 @@ body.has-player {
         display: flex;
     }
 
-    .header-actions .btn-header {
-        width: 100%;
+    .header-actions {
+        min-width: 200px;
+        align-items: stretch;
+    }
+
+    .header-actions .view-tabs {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .header-actions .view-tab {
+        padding: 10px 12px;
+        font-size: 14px;
     }
 }
 
@@ -597,6 +627,43 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* En móvil, los textos largos ("con volumen excesivo") pasan a una segunda línea
+   en vez de cortarse con puntos suspensivos. */
+@media (max-width: 480px) {
+    .health-diag-grid div {
+        white-space: normal;
+        line-height: 1.25;
+    }
+}
+
+/* Cobertura del análisis técnico al pie de la tarjeta de calidad */
+.health-coverage {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.health-coverage-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-hover);
+    overflow: hidden;
+}
+
+.health-coverage-bar div {
+    width: 0;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--primary-purple);
+    transition: width 0.6s ease;
 }
 
 /* FOOTER SEMÁNTICO & LANDMARKS */

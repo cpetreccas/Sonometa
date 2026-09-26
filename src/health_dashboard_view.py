@@ -41,52 +41,52 @@ GLYPH_CALENDAR = "\uE787"
 GLYPH_GAUGE = "\uEC4A"
 GLYPH_WARNING = "\uE7BA"
 GLYPH_ERROR = "\uEA39"
-GLYPH_VOLUME = "\uE767"
+GLYPH_VOLUME_LOW = "\uE993"
+GLYPH_VOLUME_HIGH = "\uE995"
 
-# (dimensión, icono, color, texto) en el mismo orden que la lista de la PWA.
+# (dimensión, icono, color, texto) en el mismo orden que la lista de la PWA. Color por
+# gravedad (guía de estilos): un campo que falta es un aviso (ámbar).
 DIAG_ITEMS = [
-    ("cover", GLYPH_PHOTO, "#EC4899", "sin carátula"),
-    ("rating", GLYPH_STAR, "#8B5CF6", "sin valoración"),
-    ("cues", GLYPH_HEADPHONE, "#38BDF8", "sin Cue points"),
-    ("genre", GLYPH_MUSIC, "#A855F7", "sin género"),
-    ("publisher", GLYPH_TAG, "#6366F1", "sin etiqueta"),
-    ("album", GLYPH_ALBUM, "#C084FC", "sin álbum"),
-    ("year", GLYPH_CALENDAR, "#3B82F6", "sin año"),
+    ("cover", GLYPH_PHOTO, theme.STATUS_WARNING, "sin carátula"),
+    ("rating", GLYPH_STAR, theme.STATUS_WARNING, "sin valoración"),
+    ("cues", GLYPH_HEADPHONE, theme.STATUS_WARNING, "sin Cue points"),
+    ("genre", GLYPH_MUSIC, theme.STATUS_WARNING, "sin género"),
+    ("publisher", GLYPH_TAG, theme.STATUS_WARNING, "sin etiqueta"),
+    ("album", GLYPH_ALBUM, theme.STATUS_WARNING, "sin álbum"),
+    ("year", GLYPH_CALENDAR, theme.STATUS_WARNING, "sin año"),
 ]
 
-# Problemas técnicos de la auditoría de audio (solo escritorio): (flag, icono, color, texto).
+# Avisos de la auditoría técnica que se suman al diagnóstico de la colección:
+# (flag, icono, color, texto, clave del resumen de get_health_summary_for_files).
+# Solo se listan los que tienen alguna pista; el clic filtra por ese flag.
 AUDIT_ITEMS = [
-    ("bitrate_fake", GLYPH_GAUGE, theme.STATUS_WARNING, "con bitrate falso"),
-    ("clipping", GLYPH_WARNING, theme.STATUS_DANGER, "con clipping"),
-    ("loudness", GLYPH_VOLUME, theme.STATUS_WARNING, "fuera de rango de volumen"),
-    ("integrity_issue", GLYPH_ERROR, theme.STATUS_DANGER, "corruptos o truncados"),
+    ("clipping", GLYPH_WARNING, theme.STATUS_DANGER, "con saturación", "clipping_count"),
+    ("loudness_low", GLYPH_VOLUME_LOW, theme.STATUS_WARNING, "con volumen bajo", "lufs_low_count"),
+    ("loudness_high", GLYPH_VOLUME_HIGH, theme.STATUS_WARNING, "con volumen excesivo", "lufs_high_count"),
+    ("bitrate_fake", GLYPH_GAUGE, theme.STATUS_WARNING, "con bitrate falso", "bitrate_fake_count"),
+    ("integrity_issue", GLYPH_ERROR, theme.STATUS_DANGER, "corruptos o truncados", "integrity_issue_count"),
 ]
-AUDIT_SUMMARY_KEYS = {
-    "bitrate_fake": "bitrate_fake_count",
-    "clipping": "clipping_count",
-    "loudness": "lufs_out_of_range_count",
-    "integrity_issue": "integrity_issue_count",
-}
-# Etiqueta con la que se muestra el filtro de salud en el indicador de filtro global.
+# Etiqueta con la que se muestra el filtro de calidad en el indicador de filtro global.
 AUDIT_FILTER_LABELS = {
+    "clipping": "Saturación",
+    "loudness_low": "Volumen bajo",
+    "loudness_high": "Volumen excesivo",
     "bitrate_fake": "Bitrate falso",
-    "clipping": "Clipping",
-    "loudness": "Volumen fuera de rango",
     "integrity_issue": "Corruptos/truncados",
 }
-# Ejes del radar de indicadores técnicos (sentido horario desde arriba): % de las
-# pistas analizadas que PASAN cada chequeo = 100 - % con el problema.
+# Ejes técnicos del radar, a continuación de los 7 de completitud: % de las pistas
+# analizadas que PASAN cada chequeo = 100 - % con el problema. (clave del resumen, etiqueta)
 AUDIT_RADAR_AXES = [
-    ("integrity_issue", "Integridad"),
-    ("clipping", "Sin clipping"),
-    ("loudness", "Volumen"),
-    ("bitrate_fake", "Bitrate real"),
+    ("integrity_issue_count", "Integridad"),
+    ("clipping_count", "Sin saturación"),
+    ("lufs_out_of_range_count", "Volumen"),
+    ("bitrate_fake_count", "Bitrate real"),
 ]
 
-# Alto de las dos tarjetas superiores (Salud de la colección / Indicadores de salud).
-# Alto de las 4 tarjetas (dos filas: completitud y auditoría técnica). Cabe el
-# anillo + hasta 4 filas de diagnóstico (7 dimensiones en 2 columnas).
-HEALTH_CARD_HEIGHT = 318
+# Alto de las dos tarjetas (Calidad de la colección / Indicadores de calidad). Cabe
+# el anillo, hasta 6 filas de diagnóstico (7 campos + 5 avisos técnicos en 2
+# columnas) y la fila de cobertura del análisis técnico.
+HEALTH_CARD_HEIGHT = 440
 RING_SIZE = 120
 RING_THICKNESS = 12
 RING_TRACK_COLOR = theme.BORDER_QUIET
@@ -115,6 +115,30 @@ def _health_status_color(score):
     if score >= 40:
         return theme.STATUS_WARNING
     return theme.STATUS_DANGER
+
+
+def _compute_quality(metrics, summary):
+    """Combina completitud de datos y auditoría técnica. La técnica (media de sus ejes
+    del radar) pesa la mitad del score multiplicada por la cobertura del análisis:
+    50/50 con todo analizado, y casi nada con pocas pistas analizadas, para que un
+    puñado de análisis no mueva el anillo. Sin pistas analizadas solo cuenta la parte
+    de datos y el radar no lleva ejes técnicos."""
+    analyzed = summary.get("total_analyzed", 0) or 0
+    labels, values = list(metrics["labels"]), list(metrics["values"])
+    if not analyzed:
+        return {"overall": metrics["overall"], "labels": labels, "values": values}
+
+    tech_values = [
+        round(100 * (analyzed - (summary.get(key, 0) or 0)) / analyzed) for key, _ in AUDIT_RADAR_AXES
+    ]
+    tech_score = sum(tech_values) / len(tech_values)
+    total = summary.get("total_library", 0) or analyzed
+    tech_weight = 0.5 * min(1.0, analyzed / total)
+    return {
+        "overall": round(metrics["overall"] * (1 - tech_weight) + tech_score * tech_weight),
+        "labels": labels + [label for _, label in AUDIT_RADAR_AXES],
+        "values": values + tech_values,
+    }
 
 
 def _icon_font_family():
@@ -424,19 +448,21 @@ class _RadarChart:
 
 
 class HealthDashboardView(ctk.CTkFrame):
-    """Vista de salud de la colección, calcada de la PWA: contador de pistas,
-    tarjeta "Salud de la colección" (anillo de score + diagnóstico de campos que
-    faltan) y tarjeta "Indicadores de salud" (radar de completitud). Debajo, con la
-    misma anatomía y solo en escritorio, "Auditoría técnica de audio" (anillo con la
-    salud media, problemas detectados, cobertura de análisis) e "Indicadores
-    técnicos" (radar: % de pistas analizadas que pasan cada chequeo).
+    """Vista de calidad de la colección, calcada de la PWA: contador de pistas,
+    tarjeta "Calidad de la colección" y tarjeta "Indicadores de calidad".
+
+    La calidad combina completitud de datos (7 campos) y auditoría técnica de audio
+    (integridad, saturación, volumen, bitrate real): en el anillo la técnica pesa la
+    mitad en proporción a la cobertura del análisis (ver _compute_quality), la lista suma a los campos que faltan los avisos técnicos, y el radar
+    tiene un eje por cada uno. Al pie de la primera tarjeta, la cobertura del
+    análisis técnico y el botón "Analizar pendientes".
 
     Acotada a la vista actual de la grilla (respeta filtros/búsqueda activos). Se
     embebe como una de las 3 pestañas conmutables (App.switch_view en gui.py) y se
     refresca sola al cambiar el filtro (GridPanel.apply_combined_filters), así que
-    no tiene botón "Actualizar". Clic en un elemento de diagnóstico o de auditoría
-    filtra la colección sin salir de la pestaña (la vista se recalcula sobre las
-    pistas filtradas y el filtro se ve en el indicador de la cabecera).
+    no tiene botón "Actualizar". Clic en un elemento de la lista filtra la colección
+    sin salir de la pestaña (la vista se recalcula sobre las pistas filtradas y el
+    filtro se ve en el indicador de la cabecera).
 
     Mismo esquema de pintado que StatsDashboardView: la estructura se construye una
     vez, refresh() actualiza en sitio y no hace nada si datos y ancho no cambiaron;
@@ -471,11 +497,9 @@ class HealthDashboardView(ctk.CTkFrame):
         self._grid.bind("<Configure>", self._on_grid_configure)
         self._build_collection_health_card()
         self._build_indicators_card()
-        self._build_audit_card()
-        self._build_audit_indicators_card()
         self._layout_cards(single_column=False)
 
-        self._overlay = _LoadingOverlay(self, self._scale, "Preparando salud de la colección…")
+        self._overlay = _LoadingOverlay(self, self._scale, "Preparando calidad de la colección…")
 
         self.refresh()
 
@@ -483,35 +507,16 @@ class HealthDashboardView(ctk.CTkFrame):
     # Construcción (una sola vez)
     # ------------------------------------------------------------------
     def _build_collection_health_card(self):
+        s = self._scale
         self._health_card, content = _build_card_shell(
-            self._grid, "Salud de la colección", self._scale, height=HEALTH_CARD_HEIGHT
+            self._grid, "Calidad de la colección", s, height=HEALTH_CARD_HEIGHT
         )
-        self._ring = _ScoreRing(content, self._scale)
-        self._ring.canvas.pack(pady=(round(10 * self._scale), round(10 * self._scale)))
-        self._diag_list = _MetricList(content, self._scale, columns=2, on_click=self._apply_diag_filter)
+        self._ring = _ScoreRing(content, s)
+        self._ring.canvas.pack(pady=(round(10 * s), round(10 * s)))
+        self._diag_list = _MetricList(content, s, columns=2, on_click=self._on_diag_click)
         self._diag_list.frame.pack()  # centrado bajo el anillo
 
-    def _build_indicators_card(self):
-        self._indicators_card, content = _build_card_shell(
-            self._grid, "Indicadores de salud", self._scale, height=HEALTH_CARD_HEIGHT
-        )
-        area = tk.Frame(content, bg=CARD_BG, bd=0, highlightthickness=0)
-        area.pack(fill="both", expand=True, pady=(round(8 * self._scale), 0))
-        self._radar = _RadarChart(area, self._tooltip)
-
-    def _build_audit_card(self):
-        """Misma anatomía que "Salud de la colección": anillo con la salud media,
-        lista de problemas (con clic para filtrar) y, abajo, cobertura + botón."""
-        s = self._scale
-        self._audit_card, content = _build_card_shell(
-            self._grid, "Auditoría técnica de audio", s, height=HEALTH_CARD_HEIGHT
-        )
-        self._audit_ring = _ScoreRing(content, s)
-        self._audit_ring.canvas.pack(pady=(round(10 * s), round(10 * s)))
-        self._audit_list = _MetricList(content, s, columns=2, on_click=self._filter_by_health_flag)
-        self._audit_list.frame.pack()  # centrado bajo el anillo
-
-        # Cobertura en una sola línea: texto · barra · botón.
+        # Cobertura del análisis técnico en una sola línea: texto · barra · botón.
         coverage_row = tk.Frame(content, bg=CARD_BG, bd=0, highlightthickness=0)
         coverage_row.pack(side="bottom", fill="x")
         coverage_row.grid_columnconfigure(1, weight=1)
@@ -534,13 +539,13 @@ class HealthDashboardView(ctk.CTkFrame):
         )
         self.btn_analyze_pending.grid(row=0, column=2, sticky="e")
 
-    def _build_audit_indicators_card(self):
-        self._audit_indicators_card, content = _build_card_shell(
-            self._grid, "Indicadores técnicos", self._scale, height=HEALTH_CARD_HEIGHT
+    def _build_indicators_card(self):
+        self._indicators_card, content = _build_card_shell(
+            self._grid, "Indicadores de calidad", self._scale, height=HEALTH_CARD_HEIGHT
         )
         area = tk.Frame(content, bg=CARD_BG, bd=0, highlightthickness=0)
         area.pack(fill="both", expand=True, pady=(round(8 * self._scale), 0))
-        self._audit_radar = _RadarChart(area, self._tooltip)
+        self._radar = _RadarChart(area, self._tooltip)
 
     # ------------------------------------------------------------------
     # Rejilla responsive
@@ -554,7 +559,7 @@ class HealthDashboardView(ctk.CTkFrame):
         self._single_column = single_column
         gap = round(theme.SPACE_SM * self._scale)
         self._grid.grid_columnconfigure(0, weight=1, uniform="health")
-        cards = (self._health_card, self._indicators_card, self._audit_card, self._audit_indicators_card)
+        cards = (self._health_card, self._indicators_card)
         if single_column:
             self._grid.grid_columnconfigure(1, weight=0, uniform="")
             cells = [(card, i, 0, 1) for i, card in enumerate(cards)]
@@ -617,47 +622,34 @@ class HealthDashboardView(ctk.CTkFrame):
     def _render(self, metrics, summary, signature):
         self._hero.set_value(metrics["total"])
         self._hero.render_now()
-        self._ring.set_score(metrics["overall"])
+
+        quality = _compute_quality(metrics, summary)
+        self._ring.set_score(quality["overall"])
 
         missing = metrics["missing"]
-        self._diag_list.set_items(
-            [
-                (key, glyph, color, missing[key], text, True)
-                for key, glyph, color, text in DIAG_ITEMS if key in missing
-            ],
-            empty_text="✨ Colección 100% completada",
-        )
+        items = [
+            (key, glyph, color, missing[key], text, True)
+            for key, glyph, color, text in DIAG_ITEMS if key in missing
+        ]
+        for key, glyph, color, text, summary_key in AUDIT_ITEMS:
+            count = summary.get(summary_key, 0) or 0
+            if count:
+                items.append((key, glyph, color, count, text, True))
+        self._diag_list.set_items(items, empty_text="✨ Colección 100% completada")
 
         self._radar.sync_size()
-        self._radar.draw(metrics["labels"], metrics["values"])
+        self._radar.draw(quality["labels"], quality["values"])
 
-        self._render_audit(summary)
+        self._render_coverage(summary)
 
         self._rendered_signature = signature
         self._rendered_width = self.master.winfo_width()
         self._overlay.hide()
 
-    def _render_audit(self, summary):
+    def _render_coverage(self, summary):
         total_library = summary.get("total_library", 0)
         total_analyzed = summary.get("total_analyzed", 0)
-        avg_score = summary.get("avg_health_score")
         coverage = (total_analyzed / total_library) if total_library else 0
-
-        self._audit_ring.set_score(avg_score if total_analyzed else None, suffix="")
-
-        counts = {key: summary.get(AUDIT_SUMMARY_KEYS[key], 0) or 0 for key in AUDIT_SUMMARY_KEYS}
-        self._audit_list.set_items([
-            (key, glyph, color if counts[key] else theme.TEXT_SUBTLE, counts[key], text, counts[key] > 0)
-            for key, glyph, color, text in AUDIT_ITEMS
-        ])
-
-        labels = [label for _, label in AUDIT_RADAR_AXES]
-        self._audit_radar.sync_size()
-        if total_analyzed:
-            values = [round(100 * (total_analyzed - counts[key]) / total_analyzed) for key, _ in AUDIT_RADAR_AXES]
-            self._audit_radar.draw(labels, values)
-        else:
-            self._audit_radar.draw(labels, [0] * len(labels), empty_text="Sin pistas analizadas")
 
         self._coverage_text.configure(
             text=f"{total_analyzed} de {total_library} analizadas ({round(coverage * 100)}%)"
@@ -681,8 +673,15 @@ class HealthDashboardView(ctk.CTkFrame):
     # ------------------------------------------------------------------
     # Acciones
     # ------------------------------------------------------------------
+    def _on_diag_click(self, key):
+        """Campos que faltan -> filtro avanzado; avisos técnicos -> filtro por flag."""
+        if key in DIAG_FILTER_ACTIONS:
+            self._apply_diag_filter(key)
+        else:
+            self._filter_by_health_flag(key)
+
     def _filter_by_health_flag(self, flag_key):
-        """Cross-filtering: clic en un problema de la auditoría filtra la grilla a
+        """Cross-filtering: clic en un aviso técnico filtra la grilla a
         las pistas (de self.file_paths, la vista actual) que lo tienen."""
         cache_manager = getattr(self.app, "cache_manager", None)
         grid = getattr(self.app, "grid_panel", None)
@@ -705,7 +704,7 @@ class HealthDashboardView(ctk.CTkFrame):
         ]
         if not pending_paths:
             DialogManager.show_themed_dialog(
-                self.app, "Sin pendientes", "Todas las pistas visibles ya tienen un análisis de salud.",
+                self.app, "Sin pendientes", "Todas las pistas visibles ya tienen un análisis de calidad.",
                 level="info", parent=self
             )
             return

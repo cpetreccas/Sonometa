@@ -1,0 +1,6 @@
+# Despliegue de la PWA en Netlify (sitio conectado al repositorio de GitHub).
+# La PWA es estática (web/); la única parte de servidor es la página pública
+# /t/<token>, que genera las etiquetas Open Graph de cada pista compartida.
+[build]
+  publish = "web"
+  functions = "netlify/functions"

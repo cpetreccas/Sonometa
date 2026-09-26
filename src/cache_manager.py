@@ -126,7 +126,7 @@ class CacheManager:
                     """
                 )
 
-                # Tabla: audio_health_cache (resultados de "Evaluar salud")
+                # Tabla: audio_health_cache (resultados de "Evaluar calidad")
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS audio_health_cache (
@@ -595,7 +595,7 @@ class CacheManager:
             return None
 
     # ========================================================================
-    # 4. Caché de Salud de Audio (Tabla: audio_health_cache)
+    # 4. Caché de Calidad de Audio (Tabla: audio_health_cache)
     # ========================================================================
 
     def get_cached_health(self, file_path: str):
@@ -639,11 +639,11 @@ class CacheManager:
                 return None
 
         except Exception as e:
-            logger.debug(f"[CACHE] Error leyendo salud cacheada de {os.path.basename(file_path)}: {str(e)}")
+            logger.debug(f"[CACHE] Error leyendo calidad cacheada de {os.path.basename(file_path)}: {str(e)}")
             return None
 
     def save_health_report(self, file_path: str, report) -> bool:
-        """Inserta o actualiza el resultado de 'Evaluar salud' de un archivo.
+        """Inserta o actualiza el resultado de 'Evaluar calidad' de un archivo.
         `report` es un audio_health_checker.HealthReport."""
         if not os.path.exists(file_path):
             logger.warning(f"[CACHE] Archivo no existe: {file_path}")
@@ -691,15 +691,15 @@ class CacheManager:
                 conn.commit()
                 conn.close()
 
-            logger.debug(f"[CACHE] Salud guardada: {os.path.basename(file_path)}")
+            logger.debug(f"[CACHE] Calidad guardada: {os.path.basename(file_path)}")
             return True
 
         except Exception as e:
-            logger.error(f"[CACHE] Error guardando salud de {file_path}: {str(e)}")
+            logger.error(f"[CACHE] Error guardando calidad de {file_path}: {str(e)}")
             return False
 
     def get_unsynced_health(self, limit: int = 50) -> list:
-        """Registros de salud pendientes de subir (synced = 0), listos para el
+        """Registros de calidad pendientes de subir (synced = 0), listos para el
         pipeline de exportación a Postgres (mismo patrón que get_unsynced_tracks)."""
         try:
             with self._lock:
@@ -731,7 +731,7 @@ class CacheManager:
                      lufs_integrated, cutoff_khz, bitrate_fake, analyzed_at) in rows
             ]
         except Exception as e:
-            logger.error(f"[CACHE] Error obteniendo salud no sincronizada: {str(e)}")
+            logger.error(f"[CACHE] Error obteniendo calidad no sincronizada: {str(e)}")
             return []
 
     def mark_health_synced(self, file_paths: Optional[list] = None) -> int:
@@ -753,11 +753,11 @@ class CacheManager:
                 conn.close()
             return affected
         except Exception as e:
-            logger.error(f"[CACHE] Error marcando salud como sincronizada: {str(e)}")
+            logger.error(f"[CACHE] Error marcando calidad como sincronizada: {str(e)}")
             return 0
 
     def invalidate_health_cache(self, file_path: str) -> None:
-        """Elimina el registro de salud cacheado para un archivo específico."""
+        """Elimina el registro de calidad cacheado para un archivo específico."""
         try:
             with self._lock:
                 conn = self._get_connection()
@@ -766,11 +766,11 @@ class CacheManager:
                 conn.commit()
                 conn.close()
         except Exception as e:
-            logger.debug(f"[CACHE] Error invalidando salud de {file_path}: {str(e)}")
+            logger.debug(f"[CACHE] Error invalidando calidad de {file_path}: {str(e)}")
 
     def get_health_summary_for_files(self, file_paths: list) -> Dict:
         """Métricas agregadas de audio_health_cache acotadas a `file_paths` (la vista
-        actual del grid, respetando filtros/búsqueda), para el Dashboard de Salud de
+        actual del grid, respetando filtros/búsqueda), para el Dashboard de Calidad de
         la Colección. `total_library` es len(file_paths) -no un COUNT global-, para
         que la cobertura reportada coincida exactamente con lo que se ve en pantalla.
         Usa json_each(?) en vez de un IN (...) con un placeholder por ruta, para no
@@ -787,6 +787,8 @@ class CacheManager:
             "clipping_count": 0,
             "integrity_issue_count": 0,
             "lufs_out_of_range_count": 0,
+            "lufs_low_count": 0,
+            "lufs_high_count": 0,
         }
         if not file_paths:
             return summary
@@ -805,19 +807,22 @@ class CacheManager:
                         SUM(CASE WHEN has_clipping = 1 THEN 1 ELSE 0 END),
                         SUM(CASE WHEN integrity_status IN ('warning', 'critical') THEN 1 ELSE 0 END),
                         SUM(CASE WHEN lufs_integrated IS NOT NULL AND
-                                 (lufs_integrated < ? OR lufs_integrated > ?) THEN 1 ELSE 0 END)
+                                 (lufs_integrated < ? OR lufs_integrated > ?) THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN lufs_integrated IS NOT NULL AND lufs_integrated < ? THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN lufs_integrated IS NOT NULL AND lufs_integrated > ? THEN 1 ELSE 0 END)
                     FROM audio_health_cache
                     WHERE file_path IN (SELECT value FROM json_each(?))
                       AND {current}
                     """.format(current=_current_health_sql()),
-                    (LUFS_OK_MIN, LUFS_OK_MAX, json.dumps(file_paths)),
+                    (LUFS_OK_MIN, LUFS_OK_MAX, LUFS_OK_MIN, LUFS_OK_MAX, json.dumps(file_paths)),
                 )
                 row = cursor.fetchone()
                 conn.close()
 
             if row:
                 (total_analyzed, avg_score, critical_count, bitrate_fake_count,
-                 clipping_count, integrity_issue_count, lufs_out_of_range_count) = row
+                 clipping_count, integrity_issue_count, lufs_out_of_range_count,
+                 lufs_low_count, lufs_high_count) = row
                 summary["total_analyzed"] = total_analyzed or 0
                 summary["avg_health_score"] = round(avg_score) if avg_score is not None else None
                 summary["critical_count"] = critical_count or 0
@@ -825,16 +830,18 @@ class CacheManager:
                 summary["clipping_count"] = clipping_count or 0
                 summary["integrity_issue_count"] = integrity_issue_count or 0
                 summary["lufs_out_of_range_count"] = lufs_out_of_range_count or 0
+                summary["lufs_low_count"] = lufs_low_count or 0
+                summary["lufs_high_count"] = lufs_high_count or 0
 
         except Exception as e:
-            logger.error(f"[CACHE] Error calculando resumen de salud para la vista actual: {str(e)}")
+            logger.error(f"[CACHE] Error calculando resumen de calidad para la vista actual: {str(e)}")
 
         return summary
 
     def get_health_fields_for_files(self, file_paths: list) -> Dict[str, Dict]:
         """Campos crudos de audio_health_cache para `file_paths` en una sola query
         (evita el patrón N+1 de get_cached_health, que además hace os.stat() por
-        archivo). Usado para pintar las columnas de salud de la grilla en lote:
+        archivo). Usado para pintar las columnas de calidad de la grilla en lote:
         {file_path: {health_score, integrity_status, overall_status, has_clipping,
         lufs_integrated, cutoff_khz, bitrate_fake, apparent_kbps, declared_kbps, lossless}}. Rutas sin análisis no aparecen
         en el dict devuelto."""
@@ -880,7 +887,7 @@ class CacheManager:
                      apparent_kbps, declared_kbps, lossless) in rows
             }
         except Exception as e:
-            logger.error(f"[CACHE] Error obteniendo campos de salud en lote: {str(e)}")
+            logger.error(f"[CACHE] Error obteniendo campos de calidad en lote: {str(e)}")
             return {}
 
     _HEALTH_FLAG_CONDITIONS = {
@@ -892,18 +899,19 @@ class CacheManager:
     def get_paths_by_health_flag(self, file_paths: list, flag: str) -> list:
         """Rutas (acotadas a `file_paths`, la vista actual del grid) cuyo registro en
         audio_health_cache cumple `flag` ('bitrate_fake' | 'clipping' |
-        'integrity_issue' | 'loudness' — mismas condiciones que get_health_summary_for_files).
-        Usado por el cross-filtering del Dashboard de Salud."""
+        'integrity_issue' | 'loudness' | 'loudness_low' | 'loudness_high' — mismas
+        condiciones que get_health_summary_for_files).
+        Usado por el cross-filtering del Dashboard de Calidad."""
         condition = self._HEALTH_FLAG_CONDITIONS.get(flag)
-        if flag == "loudness":
-            # Mismo rango que lufs_out_of_range_count en get_health_summary_for_files.
+        if flag in ("loudness", "loudness_low", "loudness_high"):
+            # Mismo rango que los conteos lufs_* de get_health_summary_for_files.
             from audio_health_checker import LUFS_OK_MIN, LUFS_OK_MAX
-            condition = (
-                f"lufs_integrated IS NOT NULL AND "
-                f"(lufs_integrated < {float(LUFS_OK_MIN)} OR lufs_integrated > {float(LUFS_OK_MAX)})"
-            )
+            low = f"lufs_integrated < {float(LUFS_OK_MIN)}"
+            high = f"lufs_integrated > {float(LUFS_OK_MAX)}"
+            range_condition = {"loudness": f"({low} OR {high})", "loudness_low": low, "loudness_high": high}[flag]
+            condition = f"lufs_integrated IS NOT NULL AND {range_condition}"
         if condition is None:
-            raise ValueError(f"Flag de salud desconocido: {flag}")
+            raise ValueError(f"Flag de calidad desconocido: {flag}")
 
         scoped_paths = [p for p in (file_paths or []) if p]
         if not scoped_paths:
@@ -927,7 +935,7 @@ class CacheManager:
                 conn.close()
             return [row[0] for row in rows]
         except Exception as e:
-            logger.error(f"[CACHE] Error obteniendo rutas por indicador de salud '{flag}': {str(e)}")
+            logger.error(f"[CACHE] Error obteniendo rutas por indicador de calidad '{flag}': {str(e)}")
             return []
 
     def get_paths_pending_health_analysis(self, file_paths: Optional[list] = None, limit: Optional[int] = None) -> list:
@@ -968,6 +976,6 @@ class CacheManager:
                 conn.close()
             return [row[0] for row in rows]
         except Exception as e:
-            logger.error(f"[CACHE] Error obteniendo pendientes de análisis de salud: {str(e)}")
+            logger.error(f"[CACHE] Error obteniendo pendientes de análisis de calidad: {str(e)}")
             return []
 

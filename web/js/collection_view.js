@@ -385,11 +385,11 @@ export function openTrackDetailModal(trackId) {
         };
     }
 
-    const shareBtn = document.getElementById('btnShareFromModal');
-    if (shareBtn) {
-        shareBtn.onclick = () => {
-            if (typeof window.shareTrackCard === 'function') {
-                window.shareTrackCard(track);
+    const shareLinkBtn = document.getElementById('btnShareLinkFromModal');
+    if (shareLinkBtn) {
+        shareLinkBtn.onclick = () => {
+            if (typeof window.shareTrackLink === 'function') {
+                window.shareTrackLink(track);
             }
         };
     }
