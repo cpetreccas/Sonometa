@@ -265,7 +265,7 @@ def _set_combo_filter(app, field, value):
     """Aplica un filtro sobre el motor de la grilla (panel de filtro avanzado,
     src/advanced_filter_panel.py) sin cambiar de pestaña ni abrir el panel: el
     filtro se ve en el indicador de la cabecera. Compartido por las leyendas de
-    StatsDashboardView y el diagnóstico de HealthDashboardView."""
+    StatsDashboardView y el diagnóstico de QualitySection."""
     panel = app.advanced_filter_panel
     panel.combo_vars[field].set(value)
     panel._trigger_filter()
@@ -775,9 +775,10 @@ class StatsDashboardView(ctk.CTkFrame):
     género, etiqueta, año, valoración), réplica de escritorio del dashboard de la
     PWA (web/js/dashboard.js). Cada tarjeta copia la anatomía de la versión móvil
     (título, gráfico a todo el ancho, tabla con scroll debajo) y el escritorio solo
-    las reparte en una rejilla de 3/2/1 columnas según el ancho. La auditoría de
-    calidad vive en la pestaña Calidad (health_dashboard_view.py). Acotada a la vista
-    actual de la grilla (respeta filtros/búsqueda activos). Filtrar desde aquí
+    las reparte en una rejilla de 3/2/1 columnas según el ancho. Encabezan la vista
+    las dos tarjetas de calidad de la colección (QualitySection, en
+    health_dashboard_view.py). Acotada a la vista actual de la grilla (respeta
+    filtros/búsqueda activos). Filtrar desde aquí
     (clic en una fila de tabla) NO cambia de pestaña: el filtro se aplica sobre el
     motor de la grilla y GridPanel.apply_combined_filters llama a self.refresh().
 
@@ -821,6 +822,10 @@ class StatsDashboardView(ctk.CTkFrame):
             text_color=theme.TEXT_SUBTLE, font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BODY)
         )
         self._hero = _HeroCounter(self.scroll, self._scale, "Pistas en la vista actual")
+
+        # Import diferido: health_dashboard_view importa utilidades de este módulo.
+        from health_dashboard_view import QualitySection
+        self._quality = QualitySection(app, self.scroll, self._scale, self._tooltip, host=self)
 
         self._build_distribution_shell()
         self._overlay = _LoadingOverlay(self, self._scale, "Preparando dashboard…")
@@ -929,13 +934,16 @@ class StatsDashboardView(ctk.CTkFrame):
         if not tracks:
             self._overlay.hide()
             self._hero.canvas.pack_forget()
+            self._quality.frame.pack_forget()
             self._grid.pack_forget()
             self._empty_label.pack(pady=theme.SPACE_XL)
             self._rendered_signature = None
             return
 
         data = self._compute_chart_data(tracks)
-        signature = (len(tracks), repr(data))
+        quality = self._quality.compute(tracks, self.app.grid_panel.get_visible_file_paths())
+        metrics, summary, clean_count = quality
+        signature = (len(tracks), repr(data), repr(metrics), repr(sorted(summary.items())), clean_count)
         width = self.master.winfo_width()
         if signature == self._rendered_signature and width == self._rendered_width:
             self._overlay.hide()
@@ -945,14 +953,16 @@ class StatsDashboardView(ctk.CTkFrame):
         self._hero.set_value(len(tracks))
         gap = round(theme.SPACE_SM * self._scale)
         self._hero.canvas.pack(fill="x", padx=gap, pady=(gap, 0))
+        self._quality.frame.pack(fill="x")
         self._grid.pack(fill="both", expand=True)
-        self._pending_data = (signature, data)
+        self._pending_data = (signature, data, quality)
 
         if reveal:
             self._overlay.show()
             generation = self._render_generation
             self.after(40, lambda: self._render_step(generation, 0))
         else:
+            self._quality.render(*quality)
             for key_name in data:
                 self._render_slot(key_name, data[key_name])
             self._finish_render()
@@ -962,9 +972,10 @@ class StatsDashboardView(ctk.CTkFrame):
         para que el spinner siga girando y la geometría termine de asentarse."""
         if generation != self._render_generation or not self.winfo_exists():
             return
+        _, data, quality = self._pending_data
         if index == 0:
             self.update_idletasks()
-        _, data = self._pending_data
+            self._quality.render(*quality)
         keys = list(data)
         if index < len(keys):
             self._render_slot(keys[index], data[keys[index]])
@@ -974,13 +985,14 @@ class StatsDashboardView(ctk.CTkFrame):
         # tamaños antes de destapar (nunca mostrar un gráfico a medio redimensionar).
         self.update_idletasks()
         self._hero.render_now()
+        self._quality.resync()
         for slot in self._chart_slots.values():
             if self._sync_figure_size(slot):
                 slot["canvas"].draw()
         self._finish_render()
 
     def _finish_render(self):
-        signature, _ = self._pending_data
+        signature = self._pending_data[0]
         self._rendered_signature = signature
         self._rendered_width = self.master.winfo_width()
         self._overlay.hide()

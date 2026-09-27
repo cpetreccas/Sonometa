@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import logging
@@ -111,6 +112,15 @@ DECODE_ERROR_ECHO_MARKERS = ("Error submitting packet to decoder", "Error while 
 # este tramo final y no son más de TRAILING_ERROR_MAX, no se penaliza.
 TRAILING_CHECK_SEC = 3
 TRAILING_ERROR_MAX = 1
+
+# Formatos PCM de salida de ffmpeg según los bits de la fuente (mismo criterio que
+# pydub): muestras enteras que luego se normalizan a [-1, 1].
+PCM_FORMATS = {
+    8: ("pcm_u8", "u8", np.uint8),
+    16: ("pcm_s16le", "s16le", np.int16),
+    32: ("pcm_s32le", "s32le", np.int32),
+}
+LOSSY_FLOAT_CODECS = ("mp3", "mp4", "aac", "webm", "ogg", "vorbis", "opus", "wmav2", "wmapro")
 
 # Penalización sobre 100 según el status de cada chequeo, para el "health_score" resumen
 # que se persiste en caché/exportación. Ajustable sin tocar la lógica de cada chequeo.
@@ -278,19 +288,22 @@ class AudioHealthChecker:
             return HealthReport.failed(file_path, f"No se pudo leer la cabecera del archivo: {e}")
 
         try:
-            sample_segment, decoded_full_duration, end_decoded_duration = AudioHealthChecker._load_signal_sample(
-                file_path, declared_duration
+            probe = AudioHealthChecker._probe_audio(file_path)
+            frames, sample_rate, decoded_full_duration, end_decoded_duration, error_lines = (
+                AudioHealthChecker._load_signal(file_path, declared_duration, probe)
             )
         except Exception as e:
             logger.warning(f"HealthCheck: no se pudo decodificar '{file_path}': {e}")
             return HealthReport.failed(file_path, f"No se pudo decodificar el audio: {e}")
 
-        decode_errors = AudioHealthChecker._count_decode_errors(file_path)
+        if error_lines is None:
+            # Archivo largo muestreado: los errores se cuentan en una pasada aparte.
+            error_lines = AudioHealthChecker._decode_error_lines(file_path, probe["input_args"])
+        decode_errors = AudioHealthChecker._summarize_decode_errors(file_path, error_lines, probe["input_args"])
         integrity = AudioHealthChecker._check_integrity(
-            declared_duration, decoded_full_duration, end_decoded_duration, decode_errors
+            declared_duration, decoded_full_duration, end_decoded_duration, decode_errors,
+            nonstandard_container=probe["forced_format"],
         )
-
-        frames, sample_rate = AudioHealthChecker._segment_to_float_array(sample_segment)
 
         clipping = AudioHealthChecker._check_clipping(frames)
         loudness, lufs_value = AudioHealthChecker._check_loudness(frames, sample_rate)
@@ -340,70 +353,147 @@ class AudioHealthChecker:
         return codec.startswith("alac") or "lossless" in codec_name
 
     # ------------------------------------------------------------------
-    # Decodificación (pydub/ffmpeg), con muestreo para archivos largos
+    # Decodificación (ffmpeg directo), con muestreo para archivos largos
     # ------------------------------------------------------------------
     @staticmethod
-    def _load_signal_sample(file_path: str, declared_duration: Optional[float]):
-        """Devuelve (segmento_para_analisis, duracion_decodificada_total_o_None,
-        duracion_decodificada_del_tramo_final).
+    def _ffmpeg_tools() -> Tuple[str, str]:
+        """(ffmpeg, ffprobe): los de bin/ que configura preview_generator, o los del PATH."""
+        converter = getattr(AudioSegment, "converter", None) or "ffmpeg"
+        prober = getattr(AudioSegment, "ffprobe", None)
+        if not prober:
+            sibling = os.path.join(os.path.dirname(converter), "ffprobe.exe")
+            prober = sibling if os.path.isfile(sibling) else "ffprobe"
+        return converter, prober
 
-        Archivos <= LONG_FILE_THRESHOLD_SEC: se decodifican por completo (permite
-        comparar duración total para el chequeo de integridad).
-        Archivos más largos (mixes/DJ sets): se decodifican solo 3 tramos de
-        SAMPLE_SEGMENT_SEC (inicio, medio, final) vía ffmpeg -ss/-t, para no cargar
-        el archivo entero en memoria ni demorar el análisis.
+    @staticmethod
+    def _run_tool(cmd, timeout=DECODE_TIMEOUT_SEC):
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        return subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=creationflags)
+
+    @staticmethod
+    def _probe_audio(file_path: str) -> dict:
+        """Canales, frecuencia y bits de la pista de audio (ffprobe). Si un .mp3 no
+        se puede abrir tal cual, se reintenta forzando el formato MP3: hay archivos
+        con un MP3 dentro de un contenedor WAV (RIFF) y una etiqueta ID3 delante, que
+        ffmpeg intenta leer como WAV y rechaza ("invalid start code ID3 in RIFF
+        header"), aunque el audio esté bien."""
+        _, prober = AudioHealthChecker._ffmpeg_tools()
+        attempts = [()]
+        if file_path.lower().endswith(".mp3"):
+            attempts.append(("-f", "mp3"))
+
+        last_error = ""
+        for input_args in attempts:
+            proc = AudioHealthChecker._run_tool([
+                prober, "-v", "error", *input_args, "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name,sample_fmt,sample_rate,channels",
+                "-of", "json", file_path,
+            ], timeout=60)
+            try:
+                streams = json.loads(proc.stdout.decode("utf-8", "replace") or "{}").get("streams") or []
+            except ValueError:
+                streams = []
+            if proc.returncode == 0 and streams:
+                stream = streams[0]
+                return {
+                    "input_args": input_args,
+                    "forced_format": bool(input_args),
+                    "channels": max(1, int(stream.get("channels") or 1)),
+                    "sample_rate": int(stream.get("sample_rate") or 44100),
+                    "bits": AudioHealthChecker._pcm_bits(stream),
+                }
+            last_error = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] or ["sin pista de audio"]
+            last_error = last_error[0]
+        raise ValueError(f"ffprobe no pudo leer el archivo: {last_error}")
+
+    @staticmethod
+    def _pcm_bits(stream: dict) -> int:
+        """Bits de las muestras PCM a pedir a ffmpeg (8, 16 o 32), como hacía pydub:
+        los códecs con pérdida decodifican en coma flotante y se piden a 16 bits; las
+        fuentes de 24 bits se piden a 32 (misma escala relativa al fondo de escala)."""
+        sample_fmt = str(stream.get("sample_fmt") or "")
+        codec = str(stream.get("codec_name") or "")
+        if sample_fmt.startswith("u8"):
+            return 8
+        if sample_fmt.startswith("s16"):
+            return 16
+        if sample_fmt.startswith(("flt", "dbl")) and codec in LOSSY_FLOAT_CODECS:
+            return 16
+        return 32
+
+    @staticmethod
+    def _decode_pcm(file_path: str, probe: dict, start: Optional[float] = None, duration: Optional[float] = None):
+        """Decodifica con ffmpeg a PCM por tubería (sin archivos temporales) y
+        devuelve (frames float32 normalizados a [-1, 1] con forma (n, canales),
+        líneas de error). En la misma pasada se recogen los errores de decodificación,
+        así que no hace falta decodificar el archivo otra vez para contarlos."""
+        converter, _ = AudioHealthChecker._ffmpeg_tools()
+        acodec, raw_format, dtype = PCM_FORMATS[probe["bits"]]
+        cmd = [converter, "-nostdin", "-v", "error", *probe["input_args"]]
+        if start:
+            cmd += ["-ss", f"{start:.3f}"]
+        cmd += ["-i", file_path]
+        if duration:
+            cmd += ["-t", f"{duration:.3f}"]
+        cmd += ["-map", "0:a:0", "-vn", "-acodec", acodec, "-f", raw_format, "-"]
+
+        proc = AudioHealthChecker._run_tool(cmd)
+        stderr_lines = [line.strip() for line in proc.stderr.decode("utf-8", "replace").splitlines() if line.strip()]
+        if proc.returncode != 0 or not proc.stdout:
+            raise ValueError(stderr_lines[-1] if stderr_lines else f"ffmpeg terminó con código {proc.returncode}")
+
+        channels = probe["channels"]
+        raw = np.frombuffer(proc.stdout, dtype=dtype)
+        raw = raw[: len(raw) - len(raw) % channels].reshape((-1, channels))
+        if dtype is np.uint8:
+            frames = (raw.astype(np.float32) - 128.0) / 128.0
+        else:
+            frames = raw.astype(np.float32) / float(2 ** (8 * np.dtype(dtype).itemsize - 1))
+
+        errors = [line for line in stderr_lines if not any(marker in line for marker in DECODE_ERROR_ECHO_MARKERS)]
+        return frames, errors
+
+    @staticmethod
+    def _load_signal(file_path: str, declared_duration: Optional[float], probe: dict):
+        """Devuelve (frames, sample_rate, duracion_decodificada_total_o_None,
+        duracion_decodificada_del_tramo_final, errores_o_None).
+
+        Archivos <= LONG_FILE_THRESHOLD_SEC: se decodifican por completo en una sola
+        pasada, que sirve también para contar los errores de decodificación.
+        Archivos más largos (mixes/DJ sets): solo 3 tramos de SAMPLE_SEGMENT_SEC
+        (inicio, medio, final), buscando cada uno directamente en la entrada; los
+        errores se cuentan aparte (errores = None).
         """
+        sample_rate = probe["sample_rate"]
         if not declared_duration or declared_duration <= LONG_FILE_THRESHOLD_SEC:
-            full = AudioSegment.from_file(file_path)
-            decoded_full = len(full) / 1000.0
-            end_start = max(0.0, decoded_full - SAMPLE_SEGMENT_SEC)
-            end_decoded = decoded_full - end_start
-            return full, decoded_full, end_decoded
+            frames, errors = AudioHealthChecker._decode_pcm(file_path, probe)
+            decoded_full = len(frames) / sample_rate
+            end_decoded = min(decoded_full, SAMPLE_SEGMENT_SEC)
+            return frames, sample_rate, decoded_full, end_decoded, errors
 
         starts = (
             0.0,
             max(0.0, declared_duration / 2.0 - SAMPLE_SEGMENT_SEC / 2.0),
             max(0.0, declared_duration - SAMPLE_SEGMENT_SEC),
         )
-
         segments = [
-            AudioSegment.from_file(file_path, start_second=start, duration=SAMPLE_SEGMENT_SEC)
+            AudioHealthChecker._decode_pcm(file_path, probe, start=start, duration=SAMPLE_SEGMENT_SEC)[0]
             for start in starts
         ]
-        end_decoded = len(segments[-1]) / 1000.0
-
-        combined = segments[0]
-        for extra in segments[1:]:
-            combined += extra
-
-        return combined, None, end_decoded
+        end_decoded = len(segments[-1]) / sample_rate
+        return np.concatenate(segments), sample_rate, None, end_decoded, None
 
     @staticmethod
-    def _segment_to_float_array(segment: AudioSegment) -> Tuple[np.ndarray, int]:
-        """Convierte un AudioSegment a un array numpy float64 normalizado a [-1, 1]
-        con forma (frames, canales). Devuelve (frames, sample_rate). Los canales se
-        conservan por separado: promediarlos a mono ocultaba la saturación de un solo
-        canal (el pico quedaba a la mitad) y falseaba la medida LUFS estéreo."""
-        raw = np.array(segment.get_array_of_samples())
-        channels = max(1, segment.channels)
-        max_value = float(2 ** (8 * segment.sample_width - 1))
-
-        frames = raw.reshape((-1, channels)).astype(np.float64) / max_value
-        return frames, segment.frame_rate
-
-    @staticmethod
-    def _decode_error_lines(file_path: str, input_args=()) -> Optional[list]:
+    def _decode_error_lines(file_path: str, input_args=(), seek_args=()) -> Optional[list]:
         """Decodifica con ffmpeg sin guardar nada (-f null) y devuelve un mensaje por
         error (sin las líneas eco que ffmpeg repite para el mismo fallo). Solo la
         pista de audio (-map 0:a:0): la carátula embebida no cuenta. None si ffmpeg
         no está disponible o no terminó a tiempo."""
-        converter = getattr(AudioSegment, "converter", None) or "ffmpeg"
-        cmd = [converter, "-nostdin", "-v", "error", *input_args, "-i", file_path, "-map", "0:a:0", "-f", "null", "-"]
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        converter, _ = AudioHealthChecker._ffmpeg_tools()
+        cmd = [converter, "-nostdin", "-v", "error", *input_args, *seek_args,
+               "-i", file_path, "-map", "0:a:0", "-f", "null", "-"]
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, timeout=DECODE_TIMEOUT_SEC, creationflags=creationflags
-            )
+            proc = AudioHealthChecker._run_tool(cmd)
         except (OSError, subprocess.TimeoutExpired) as e:
             logger.debug(f"HealthCheck: chequeo de decodificación omitido para '{file_path}': {e}")
             return None
@@ -412,12 +502,11 @@ class AudioHealthChecker:
         return [line for line in lines if not any(marker in line for marker in DECODE_ERROR_ECHO_MARKERS)]
 
     @staticmethod
-    def _count_decode_errors(file_path: str) -> Optional[Tuple[int, str, bool]]:
-        """Cuenta los errores de decodificación del archivo completo (tramas dañadas
+    def _summarize_decode_errors(file_path: str, errors: Optional[list], input_args=()) -> Optional[Tuple[int, str, bool]]:
+        """Resume los errores de decodificación del archivo completo (tramas dañadas
         que se saltan sin que cambie la duración). Devuelve (nº de errores, primer
         mensaje, ¿están todos al final?) o None si el chequeo no se pudo hacer (se
         omite, no se penaliza)."""
-        errors = AudioHealthChecker._decode_error_lines(file_path)
         if errors is None:
             return None
         if not errors:
@@ -425,7 +514,9 @@ class AudioHealthChecker:
 
         at_end = False
         if len(errors) <= TRAILING_ERROR_MAX:
-            tail_errors = AudioHealthChecker._decode_error_lines(file_path, ("-sseof", f"-{TRAILING_CHECK_SEC}"))
+            tail_errors = AudioHealthChecker._decode_error_lines(
+                file_path, input_args, ("-sseof", f"-{TRAILING_CHECK_SEC}")
+            )
             at_end = tail_errors is not None and len(tail_errors) >= len(errors)
         return len(errors), errors[0], at_end
 
@@ -438,10 +529,21 @@ class AudioHealthChecker:
         decoded_full_duration: Optional[float],
         end_decoded_duration: float,
         decode_errors: Optional[Tuple[int, str]] = None,
+        nonstandard_container: bool = False,
     ) -> HealthCheckResult:
-        """Combina dos señales: duración (¿está truncado?) y errores de decodificación
-        (¿tiene tramas dañadas a mitad?). El resultado es el peor de los dos."""
+        """Combina tres señales: duración (¿está truncado?), errores de decodificación
+        (¿tiene tramas dañadas a mitad?) y contenedor no estándar (MP3 dentro de un
+        WAV/RIFF con ID3 delante, que solo se lee forzando MP3). El resultado es el
+        peor de ellos."""
         problems = []  # (status, label, detail)
+
+        if nonstandard_container:
+            problems.append((
+                "warning", "Contenedor no estándar",
+                "Es un MP3 guardado dentro de un contenedor WAV (RIFF) con la etiqueta ID3 delante. "
+                "Se ha analizado forzando la lectura como MP3; algunos reproductores y programas de DJ "
+                "pueden no abrirlo. Volver a guardarlo como MP3 normal lo soluciona.",
+            ))
 
         duration = AudioHealthChecker._check_duration(declared_duration, decoded_full_duration, end_decoded_duration)
         if duration.status != "ok":
@@ -678,6 +780,14 @@ class AudioHealthChecker:
         # agudos, o formato sin pérdida con el espectro completo.
         has_encoder_cut = not natural_rolloff and not (is_lossless and cutoff_khz >= 19.5)
         return HealthCheckResult(status, label, label), float(cutoff_khz), (apparent_kbps if has_encoder_cut else None)
+
+
+def analyze_file_worker(file_path: str) -> dict:
+    """Punto de entrada para analizar en un proceso aparte (ProcessPoolExecutor en
+    DialogManager.run_batch_health_check). Devuelve el informe como dict, que es lo
+    que viaja entre procesos; el guardado en caché lo hace el proceso principal."""
+    import subprocess_no_window  # noqa: F401  (sin ventanas de consola en el proceso hijo)
+    return AudioHealthChecker._run_analysis(file_path).to_dict()
 
 
 def estimate_kbps_from_cutoff(cutoff_khz: float) -> int:

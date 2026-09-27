@@ -32,3 +32,6 @@ Thumbs.db
 *.spec.bak
 
 /web
+
+# Local Netlify folder
+.netlify

@@ -103,6 +103,8 @@ class CatalogManager:
             with open(self.settings_file_path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
             self.manual_cover_selection = data.get("manual_cover_selection", True)
+            # Token personal de Discogs guardado desde Preferencias > Discogs.
+            self.discogs_token = str(data.get("discogs_token") or "").strip()
 
             raw_columns = data.get("visible_columns")
             self.visible_columns = list(raw_columns) if isinstance(raw_columns, list) else None
@@ -117,6 +119,7 @@ class CatalogManager:
             data = {
                 "manual_cover_selection": getattr(self, "manual_cover_selection", True),
                 "visible_columns": getattr(self, "visible_columns", None),
+                "discogs_token": getattr(self, "discogs_token", "") or "",
             }
             with open(self.settings_file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

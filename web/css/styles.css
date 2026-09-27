@@ -621,21 +621,45 @@ tr.selected-row td:first-child { border-left: 3px solid var(--primary-purple); }
     margin-top: 12px;
 }
 
-.health-diag-grid div {
+.health-diag-grid .diag-item {
     display: flex;
     align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 6px;
+    margin: -4px -6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.85rem;
+    text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
 }
+.health-diag-grid .diag-item:hover { background: var(--surface-hover); color: var(--text-main); }
+.health-diag-grid .diag-item:focus-visible { outline: 2px solid var(--primary-purple); outline-offset: 1px; }
+.health-diag-grid .diag-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.health-diag-grid .diag-num { color: var(--text-main); font-weight: 600; }
 
 /* En móvil, los textos largos ("con volumen excesivo") pasan a una segunda línea
    en vez de cortarse con puntos suspensivos. */
 @media (max-width: 480px) {
-    .health-diag-grid div {
+    .health-diag-grid .diag-item {
         white-space: normal;
         line-height: 1.25;
     }
+}
+
+/* "X de Y pistas sin problemas" bajo el anillo de calidad */
+.health-clean-text {
+    margin: 0 0 4px;
+    font-size: 13px;
+    color: var(--text-muted);
 }
 
 /* Cobertura del análisis técnico al pie de la tarjeta de calidad */

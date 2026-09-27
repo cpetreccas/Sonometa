@@ -34,6 +34,26 @@ const LUFS_OK_MIN = -16;
 const LUFS_OK_MAX = -6;
 
 /**
+ * ¿Tiene la pista este aviso de la auditoría técnica? Lo usan el recuento de la
+ * tarjeta de calidad y el filtro de calidad (filters.js), para que coincidan.
+ * @param {Object} track - Pista con `health` (fila de audio_health) o null
+ * @param {string} key - clipping | loudLow | loudHigh | bitrateFake | integrity
+ */
+export function trackHasQualityIssue(track, key) {
+    const h = track.health;
+    if (!h) return false;
+    const hasLufs = h.lufs_integrated !== null && h.lufs_integrated !== undefined;
+    switch (key) {
+        case 'clipping': return Boolean(h.has_clipping);
+        case 'loudLow': return hasLufs && h.lufs_integrated < LUFS_OK_MIN;
+        case 'loudHigh': return hasLufs && h.lufs_integrated > LUFS_OK_MAX;
+        case 'bitrateFake': return Boolean(h.bitrate_fake);
+        case 'integrity': return ['warning', 'critical'].includes(h.integrity_status);
+        default: return false;
+    }
+}
+
+/**
  * Mapea el porcentaje de calidad a un texto descriptivo de estado
  * @param {number} score - Porcentaje global de calidad (0 - 100)
  * @returns {string} Texto representativo del estado
@@ -154,23 +174,34 @@ function renderCustomLegend(legendId, labels, dataVals, keyName, defaultLabel, c
 
 /**
  * Calidad de la colección: completitud de 7 campos + auditoría técnica de audio
- * (integridad, saturación, volumen, bitrate real). En el score global la parte
- * técnica pesa la mitad multiplicada por la cobertura del análisis (50/50 con todo
- * analizado) y el radar lleva un eje por indicador. Mismo cálculo que
- * _compute_quality() en src/health_dashboard_view.py (escritorio).
+ * (integridad, saturación, volumen, bitrate real). El anillo es el % de pistas sin
+ * ningún problema (los 7 campos completos y ningún aviso técnico; las pistas sin
+ * analizar cuentan solo por sus datos) y el radar lleva un eje por indicador.
+ * Mismo cálculo que _compute_quality() en src/health_dashboard_view.py (escritorio).
  */
 function renderCollectionHealth(tracks = []) {
     const total = tracks.length;
     if (total === 0) return;
 
+    // Qué campos tiene cada pista (mismo criterio para los recuentos y el anillo)
+    const FIELD_CHECKS = {
+        album: t => t.album && String(t.album).trim() !== '' && t.album !== 'Sin Álbum',
+        genre: t => t.genre && String(t.genre).trim() !== '' && t.genre !== 'Sin Género',
+        publisher: t => t.publisher && String(t.publisher).trim() !== '' && t.publisher !== 'Sin Etiqueta',
+        cues: t => t.cue_count && Number(t.cue_count) > 0,
+        rating: t => t.rating && Number(t.rating) > 0,
+        cover: t => t.cover_url || t.cover_blob,
+        year: t => t.year && String(t.year).trim() !== '' && t.year !== 'Sin Año'
+    };
+
     // Conteo de tracks que tienen datos en cada uno de los 7 campos
-    const hasAlbum = tracks.filter(t => t.album && String(t.album).trim() !== '' && t.album !== 'Sin Álbum').length;
-    const hasGenre = tracks.filter(t => t.genre && String(t.genre).trim() !== '' && t.genre !== 'Sin Género').length;
-    const hasPublisher = tracks.filter(t => t.publisher && String(t.publisher).trim() !== '' && t.publisher !== 'Sin Etiqueta').length;
-    const hasCues = tracks.filter(t => t.cue_count && Number(t.cue_count) > 0).length;
-    const hasRating = tracks.filter(t => t.rating && Number(t.rating) > 0).length;
-    const hasCover = tracks.filter(t => t.cover_url || t.cover_blob).length;
-    const hasYear = tracks.filter(t => t.year && String(t.year).trim() !== '' && t.year !== 'Sin Año').length;
+    const hasAlbum = tracks.filter(FIELD_CHECKS.album).length;
+    const hasGenre = tracks.filter(FIELD_CHECKS.genre).length;
+    const hasPublisher = tracks.filter(FIELD_CHECKS.publisher).length;
+    const hasCues = tracks.filter(FIELD_CHECKS.cues).length;
+    const hasRating = tracks.filter(FIELD_CHECKS.rating).length;
+    const hasCover = tracks.filter(FIELD_CHECKS.cover).length;
+    const hasYear = tracks.filter(FIELD_CHECKS.year).length;
 
     // Cálculo de porcentaje por dimensión
     const metrics = {
@@ -183,22 +214,14 @@ function renderCollectionHealth(tracks = []) {
         year: Math.round((hasYear / total) * 100)
     };
 
-    // Parte de datos: promedio de los 7 campos
-    const dataScore = Math.round(
-        (metrics.album + metrics.genre + metrics.publisher + metrics.cues + metrics.rating + metrics.cover + metrics.year) / 7
-    );
 
     // Parte técnica: solo sobre las pistas ya analizadas
     const analyzed = tracks.filter(t => t.health);
     const nAnalyzed = analyzed.length;
-    const hasLufs = h => h.lufs_integrated !== null && h.lufs_integrated !== undefined;
-    const audit = {
-        clipping: analyzed.filter(t => t.health.has_clipping).length,
-        loudLow: analyzed.filter(t => hasLufs(t.health) && t.health.lufs_integrated < LUFS_OK_MIN).length,
-        loudHigh: analyzed.filter(t => hasLufs(t.health) && t.health.lufs_integrated > LUFS_OK_MAX).length,
-        bitrateFake: analyzed.filter(t => t.health.bitrate_fake).length,
-        integrity: analyzed.filter(t => ['warning', 'critical'].includes(t.health.integrity_status)).length
-    };
+    const audit = {};
+    ['clipping', 'loudLow', 'loudHigh', 'bitrateFake', 'integrity'].forEach(key => {
+        audit[key] = analyzed.filter(t => trackHasQualityIssue(t, key)).length;
+    });
     const passPct = count => Math.round(((nAnalyzed - count) / nAnalyzed) * 100);
     const techAxes = nAnalyzed ? [
         ['Integridad', passPct(audit.integrity)],
@@ -206,13 +229,14 @@ function renderCollectionHealth(tracks = []) {
         ['Volumen', passPct(audit.loudLow + audit.loudHigh)],
         ['Bitrate real', passPct(audit.bitrateFake)]
     ] : [];
-    const techScore = nAnalyzed ? techAxes.reduce((sum, [, v]) => sum + v, 0) / techAxes.length : null;
 
-    // Score Global: la técnica pesa 50% × cobertura (solo datos si no hay nada analizado)
-    const techWeight = 0.5 * (nAnalyzed / total);
-    const overallScore = techScore === null
-        ? dataScore
-        : Math.round(dataScore * (1 - techWeight) + techScore * techWeight);
+    // Score Global: % de pistas sin ningún problema (campos completos y sin avisos técnicos)
+    const QUALITY_KEYS = ['clipping', 'loudLow', 'loudHigh', 'bitrateFake', 'integrity'];
+    const cleanCount = tracks.filter(t =>
+        Object.values(FIELD_CHECKS).every(check => check(t)) &&
+        !QUALITY_KEYS.some(key => trackHasQualityIssue(t, key))
+    ).length;
+    const overallScore = Math.round((cleanCount / total) * 100);
 
     // 1. Actualizar Círculo SVG y Texto de Estado
     const scoreValElem = document.getElementById('healthScoreValue');
@@ -220,6 +244,8 @@ function renderCollectionHealth(tracks = []) {
     const scoreLabelElem = document.getElementById('healthScoreLabel');
 
     if (scoreValElem) scoreValElem.textContent = `${overallScore}%`;
+    const cleanElem = document.getElementById('healthCleanText');
+    if (cleanElem) cleanElem.textContent = `${cleanCount.toLocaleString('es-ES')} de ${total.toLocaleString('es-ES')} pistas sin problemas`;
     if (scoreLabelElem) scoreLabelElem.textContent = getHealthStatusText(overallScore);
     if (scoreCircle) {
         const circumference = 251.3;
@@ -248,28 +274,30 @@ function renderCollectionHealth(tracks = []) {
             integrity: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`
         };
 
-        const createBadge = (iconSvg, count, label) => `
-            <div class="diag-item" style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #A1A1AA;">
-                <span class="diag-icon" style="display: flex; align-items: center; justify-content: center;">${iconSvg}</span>
-                <strong class="diag-num" style="color: #F4F4F5; font-weight: 600;">${count.toLocaleString('es-ES')}</strong>
+        // Cada elemento es un botón: al pulsarlo filtra la colección por ese problema
+        // (applyQualityFilter en filters.js), como en la app de escritorio.
+        const createBadge = (key, iconSvg, count, label) => `
+            <button type="button" class="diag-item" onclick="applyQualityFilter('${key}')" title="Filtrar: ${label}">
+                <span class="diag-icon">${iconSvg}</span>
+                <strong class="diag-num">${count.toLocaleString('es-ES')}</strong>
                 <span>${label}</span>
-            </div>
+            </button>
         `;
 
-        if (hasCover < total) diagHtml += createBadge(DIAG_ICONS.cover, total - hasCover, 'sin carátula');
-        if (hasRating < total) diagHtml += createBadge(DIAG_ICONS.rating, total - hasRating, 'sin valoración');
-        if (hasCues < total) diagHtml += createBadge(DIAG_ICONS.cues, total - hasCues, 'sin Cue points');
-        if (hasGenre < total) diagHtml += createBadge(DIAG_ICONS.genre, total - hasGenre, 'sin género');
-        if (hasPublisher < total) diagHtml += createBadge(DIAG_ICONS.publisher, total - hasPublisher, 'sin etiqueta');
-        if (hasAlbum < total) diagHtml += createBadge(DIAG_ICONS.album, total - hasAlbum, 'sin álbum');
-        if (hasYear < total) diagHtml += createBadge(DIAG_ICONS.year, total - hasYear, 'sin año');
+        if (hasCover < total) diagHtml += createBadge('cover', DIAG_ICONS.cover, total - hasCover, 'sin carátula');
+        if (hasRating < total) diagHtml += createBadge('rating', DIAG_ICONS.rating, total - hasRating, 'sin valoración');
+        if (hasCues < total) diagHtml += createBadge('cues', DIAG_ICONS.cues, total - hasCues, 'sin Cue points');
+        if (hasGenre < total) diagHtml += createBadge('genre', DIAG_ICONS.genre, total - hasGenre, 'sin género');
+        if (hasPublisher < total) diagHtml += createBadge('publisher', DIAG_ICONS.publisher, total - hasPublisher, 'sin etiqueta');
+        if (hasAlbum < total) diagHtml += createBadge('album', DIAG_ICONS.album, total - hasAlbum, 'sin álbum');
+        if (hasYear < total) diagHtml += createBadge('year', DIAG_ICONS.year, total - hasYear, 'sin año');
 
         // Avisos de la auditoría técnica
-        if (audit.clipping) diagHtml += createBadge(DIAG_ICONS.clipping, audit.clipping, 'con saturación');
-        if (audit.loudLow) diagHtml += createBadge(DIAG_ICONS.loudLow, audit.loudLow, 'con volumen bajo');
-        if (audit.loudHigh) diagHtml += createBadge(DIAG_ICONS.loudHigh, audit.loudHigh, 'con volumen excesivo');
-        if (audit.bitrateFake) diagHtml += createBadge(DIAG_ICONS.bitrateFake, audit.bitrateFake, 'con bitrate falso');
-        if (audit.integrity) diagHtml += createBadge(DIAG_ICONS.integrity, audit.integrity, 'corruptos o truncados');
+        if (audit.clipping) diagHtml += createBadge('clipping', DIAG_ICONS.clipping, audit.clipping, 'con saturación');
+        if (audit.loudLow) diagHtml += createBadge('loudLow', DIAG_ICONS.loudLow, audit.loudLow, 'con volumen bajo');
+        if (audit.loudHigh) diagHtml += createBadge('loudHigh', DIAG_ICONS.loudHigh, audit.loudHigh, 'con volumen excesivo');
+        if (audit.bitrateFake) diagHtml += createBadge('bitrateFake', DIAG_ICONS.bitrateFake, audit.bitrateFake, 'con bitrate falso');
+        if (audit.integrity) diagHtml += createBadge('integrity', DIAG_ICONS.integrity, audit.integrity, 'corruptos o truncados');
 
         if (diagHtml === '') diagHtml = '<div style="color:#10B981; grid-column: span 2;">✨ Colección 100% completada</div>';
         diagElem.innerHTML = diagHtml;

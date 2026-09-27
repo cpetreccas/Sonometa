@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
@@ -38,6 +39,27 @@ class DiscogsClient:
         if token and not token.startswith("NO_TOKEN"):
             headers["Authorization"] = f"Discogs token={token}"
         return headers
+
+    IDENTITY_URL = "https://api.discogs.com/oauth/identity"
+
+    def verify_token(self, token: str) -> Tuple[Optional[bool], str]:
+        """Comprueba un token personal contra /oauth/identity. Devuelve
+        (True, usuario) si es válido, (False, motivo) si Discogs lo rechaza y
+        (None, motivo) si no se pudo comprobar (sin conexión, Discogs caído...)."""
+        req = urllib.request.Request(self.IDENTITY_URL, headers={
+            "User-Agent": "SonometaTagApp/1.0 (Mozilla/5.0 Windows NT 10.0; Win64; x64)",
+            "Authorization": f"Discogs token={token}",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=8) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            return True, str(data.get("username") or "tu cuenta")
+        except urllib.error.HTTPError as e:
+            if e.code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
+                return False, "Discogs no acepta este token. Revisa que lo hayas copiado completo."
+            return None, f"Discogs respondió con el código {e.code}"
+        except Exception as e:
+            return None, f"no se pudo conectar con Discogs: {e}"
 
     def search_release(self, query: str) -> Tuple[str, str, str, str]:
         """Busca un lanzamiento en Discogs y devuelve (artist, title, year, cover_url)."""

@@ -228,14 +228,14 @@ class ToolPanel(ctk.CTkFrame):
                 {"type": "command", "label": "Restablecer Zoom", "accelerator": "Ctrl+0", "command": lambda: app.grid_panel._on_key_zoom_reset(None)},
                 {"type": "separator"},
                 {"type": "command", "label": "Vista Colección", "command": lambda: app.switch_view("collection")},
-                {"type": "command", "label": "Vista Dashboard", "command": lambda: app.switch_view("dashboard")},
-                {"type": "command", "label": "Vista Calidad", "command": lambda: app.switch_view("health")}
+                {"type": "command", "label": "Vista Dashboard", "command": lambda: app.switch_view("dashboard")}
             ]),
             ("Preferencias", [
                 {"type": "checkbutton", "label": "Revisar carátulas", "variable": app.review_covers_var, "command": self._on_toggle_review_covers},
                 {"type": "checkbutton", "label": "Ver detalles", "variable": app.show_detail_panel_var, "command": app.toggle_detail_panel},
                 {"type": "separator"},
-                {"type": "command", "label": "Gestión de Catálogos…", "command": lambda: DialogManager.open_unified_catalog_manager(app)}
+                {"type": "command", "label": "Gestión de Catálogos…", "command": lambda: DialogManager.open_unified_catalog_manager(app)},
+                {"type": "command", "label": "Discogs…", "command": app.open_discogs_settings}
             ]),
             ("Ayuda", [
                 {"type": "command", "label": "Ver logs", "command": lambda: DialogManager.show_logs_dialog(app)},

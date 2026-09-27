@@ -192,33 +192,139 @@ Buenas practicas al extenderlo:
 
 ### Patrones de uso
 - `UiUtils.load_app_icons(app)` carga iconos principales y devuelve referencias PIL/CTkImage.
-- `gui.py` puede generar `app_icon_temp.ico` dinamicamente desde PNG para `iconbitmap`.
+- `gui.py` usa `assets/logo_relleno.ico` para `iconbitmap` (ventana y dialogos). No se escribe nada junto al ejecutable: en `Program Files` no hay permisos de escritura.
 - Algunos modulos acceden rutas relativas directas (`assets/...`), por lo que en build es obligatorio incluir assets en bundle.
 
-## 5. Build a ejecutable con PyInstaller
+## 5. Build del escritorio e instalador (Windows)
 
-No se observa archivo `.spec` versionado en la raiz. El flujo habitual es CLI directa sobre `src/gui.py`.
+El empaquetado tiene dos fases: PyInstaller genera la app en `dist\Sonometa` (modo onedir) e Inno Setup la convierte en un instalador.
 
-### Comando base (Windows, modo windowed)
+### 5.1 Requisitos
+
+- Python con las dependencias de `docs/requirements.txt` (incluye `pyinstaller`).
+- Inno Setup 7: `C:\Users\cpetreccas\AppData\Local\Programs\Inno Setup 7\ISCC.exe`.
+- `bin\ffmpeg.exe` y `bin\ffprobe.exe` en el proyecto (se empaquetan; los usan el analisis de calidad y las previews).
+
+Ficheros de configuracion:
+- `Sonometa.spec`: build de PyInstaller. Incluye `assets`, `scripts` y `bin`.
+- `installer/installer_Script.iss`: script de Inno Setup.
+
+### 5.2 Paso a paso
+
+Todos los comandos se ejecutan en PowerShell desde la raiz del proyecto.
+
+**0. Commit de los cambios.** Recomendado, para que cada instalador corresponda a un commit.
+
+**1. Subir la version** (solo si cambia; para recompilar la misma version, saltar este paso) en los cuatro sitios donde aparece:
+- `src/gui.py`: titulo de la ventana (`"Sonometa v2.0 - Audio Tag Suite"`).
+- `src/header_panel.py`: etiqueta `"v2.0"` de la cabecera.
+- `installer/installer_Script.iss`: `#define MyAppVersion` y `OutputBaseFilename=Installer_Sonometa_vX.Y`.
+
+No cambiar nunca el `AppId` del `.iss`: es lo que permite que el instalador actualice la version instalada en vez de crear una segunda.
+
+**2. Cerrar Sonometa y empaquetar:**
 
 ```powershell
-pyinstaller --noconfirm --windowed --name Sonometa --icon .\assets\logo_relleno.ico --paths . --add-data ".\assets;assets" --add-data ".\scripts;scripts" --add-data ".\bin;bin" .\src\gui.py
+python -m PyInstaller --noconfirm --clean Sonometa.spec
 ```
 
-### Puntos a validar en build
-- `--add-data` en Windows usa `;` como separador.
-- Incluir `assets` y `scripts` para:
-  - logos/iconos
-  - portada fallback
-  - `chart.min.js` en export HTML
-- Probar `DialogManager` y carga de imagenes en entorno empaquetado.
-- Validar que `UiUtils.get_resource_path` encuentre recursos dentro de `_MEIPASS`.
+Genera `dist\Sonometa\Sonometa.exe` y `dist\Sonometa\_internal`.
 
-### Onefile vs onedir
-- `--onefile`: distribucion simple, mayor tiempo de arranque.
-- `--onedir` (por defecto): mas facil de depurar recursos y rutas durante QA.
+**3. Probar el ejecutable** antes de crear el instalador:
 
-## 6. Flujo de datos (resumen operativo)
+```powershell
+.\dist\Sonometa\Sonometa.exe
+```
+
+Comprobar:
+- Carga de una carpeta y caratulas.
+- "Evaluar calidad" funciona y no abre ventanas de consola (usa el ffmpeg de `bin`).
+- Vistas Dashboard y Calidad.
+- El registro muestra "Token de Discogs activo" y el login en la nube funciona (ver 5.3).
+- Ventanas y dialogos con el logo de Sonometa.
+
+**4. Generar el instalador:**
+
+```powershell
+& "C:\Users\cpetreccas\AppData\Local\Programs\Inno Setup 7\ISCC.exe" .\installer\installer_Script.iss
+```
+
+Deja `Installer_Sonometa_vX.Y.exe` en la raiz del proyecto. El instalador esta cifrado con la contrasena de `Password=` del `.iss`.
+
+**5. Instalar y probar.** Actualiza la version instalada. Los datos de usuario (`%APPDATA%\Sonometa`) no se tocan. Si se subio `ANALYSIS_VERSION` en `audio_health_checker.py`, los analisis de calidad anteriores quedan pendientes y hay que relanzarlos con "Analizar pendientes".
+
+### 5.3 Configuracion en el equipo destino (.env)
+
+`src/app_env.py` carga el `.env` desde, por orden:
+1. `%APPDATA%\Sonometa\.env` (app instalada y desarrollo).
+2. La raiz del proyecto (solo en desarrollo).
+
+Las variables definidas en el sistema tienen prioridad.
+
+- Supabase funciona sin `.env`: `src/supabase_client.py` incluye la URL y la clave anon (publicas por diseno) como valores por defecto.
+- Discogs necesita un token personal, que **no** va en el instalador. Cada usuario lo configura desde la app en *Preferencias > Discogs...*: pega su token (se genera en discogs.com > Ajustes > Desarrolladores), la app lo comprueba contra la API y lo guarda en `%APPDATA%\Sonometa\settings.json`. Si no hay token guardado, se usa `DISCOGS_TOKEN` del entorno o del `.env` (util en desarrollo).
+
+### 5.4 Distribuir sin instalador
+
+Copiar la carpeta `dist\Sonometa` completa (`Sonometa.exe` + `_internal`) funciona en cualquier Windows 10/11 de 64 bits sin instalar Python. El `.exe` solo no arranca. Configuracion y datos se preparan como en 5.3; para llevarse caches y catalogos, copiar tambien `%APPDATA%\Sonometa`.
+
+### 5.5 Problemas conocidos
+
+- **"Windows protegio su PC" (SmartScreen):** el ejecutable no esta firmado. Pulsar *Mas informacion > Ejecutar de todas formas*. Si llega en un ZIP descargado: *Propiedades > Desbloquear* antes de descomprimir. Solo se elimina firmando con un certificado de firma de codigo.
+- **Defender lo pone en cuarentena:** falso positivo conocido de PyInstaller; se puede enviar a Microsoft Security Intelligence para revision.
+- **Ventanas de consola al analizar:** resuelto con `src/subprocess_no_window.py`, que debe seguir siendo el primer import de `gui.py`.
+- **Analisis de calidad en paralelo:** el lote usa procesos (`ProcessPoolExecutor`, hasta 3). En el `.exe` esos procesos arrancan el mismo ejecutable; `multiprocessing.freeze_support()` al inicio del bloque `__main__` de `gui.py` es imprescindible o cada proceso abriria otra ventana de la app.
+- **Archivos antiguos en `_internal` al actualizar:** el instalador no borra lo que ya no existe en la nueva version. Si da problemas, anadir al `.iss`:
+
+```
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+```
+
+## 6. Despliegue de la PWA (Netlify)
+
+La PWA (`web/`) es estatica y se sirve desde Netlify (`https://sunny-mermaid-d3544a.netlify.app`). La unica parte de servidor es la funcion `netlify/functions/share.mjs`, que genera la pagina publica `/t/<token>` con las etiquetas Open Graph de las pistas compartidas. `netlify.toml` indica que se publica `web` y donde estan las funciones.
+
+**No desplegar arrastrando un zip de `web/`:** ese metodo no publica funciones y los enlaces compartidos darian 404.
+
+### 6.1 Requisitos (una sola vez)
+
+- Node.js (se usa `npx`, no hace falta instalar nada mas).
+- Supabase: haber ejecutado `supabase/shared_tracks.sql` en el SQL Editor (tabla `shared_tracks` y funciones `create_track_share` / `get_shared_track`).
+- Iniciar sesion y enlazar la carpeta con el sitio:
+
+```powershell
+npx netlify-cli login
+```
+
+```powershell
+npx netlify-cli link
+```
+
+En `link`, elegir *Search by full or partial project name* y buscar `sunny-mermaid`. (La opcion *Use current git remote origin* no sirve mientras el sitio no este conectado a GitHub.) Crea la carpeta `.netlify/`, ya ignorada en git.
+
+### 6.2 Paso a paso
+
+**1. Si cambian `index.html`, CSS o JS:** subir la version de `CACHE_NAME` en `web/sw.js` (p. ej. `sonometa-v2.2` -> `sonometa-v2.3`) para que los moviles descarguen los archivos nuevos.
+
+**2. Desplegar a produccion:**
+
+```powershell
+npx netlify-cli deploy --prod --no-build
+```
+
+`--no-build` evita el paso de build de Netlify, que no hace falta (no hay compilacion) y que falla en algunas redes al consultar las extensiones del sitio. En el resumen debe aparecer `1 functions`.
+
+**3. Comprobar:**
+- La PWA carga e inicia sesion.
+- Un enlace compartido (`/t/<token>`) muestra la tarjeta. Un token inexistente muestra "Enlace no disponible".
+- WhatsApp guarda la vista previa de cada URL: para probar cambios, anadir `?v=N` al enlace o compartir otra pista.
+
+### 6.3 Alternativa: despliegue automatico desde GitHub
+
+En Netlify, *Site configuration > Build & deploy > Link repository* y elegir `cpetreccas/Sonometa`. A partir de ahi cada `git push` a `main` despliega solo (Netlify lee `netlify.toml`). Requiere que `netlify/`, `netlify.toml` y `web/` esten en el repositorio.
+
+## 7. Flujo de datos (resumen operativo)
 
 1. Usuario selecciona carpeta.
 2. `AudioManager.scan_audio_files` extrae metadata por archivo.
@@ -228,7 +334,7 @@ pyinstaller --noconfirm --windowed --name Sonometa --icon .\assets\logo_relleno.
 6. `CatalogManager` mantiene catalogos/settings.
 7. `HTMLExporter` puede generar informe de la coleccion.
 
-## 7. Convenciones y guias de mantenimiento
+## 8. Convenciones y guias de mantenimiento
 
 - Nombres: `snake_case` (funciones/atributos), `CamelCase` (clases).
 - Logging contextual (`[PROCESS]`, `[DISCOGS]`, `[GRID]`, etc.).
@@ -236,10 +342,12 @@ pyinstaller --noconfirm --windowed --name Sonometa --icon .\assets\logo_relleno.
 - Priorizar utilidades compartidas para columnas/mapeos de fila.
 - En cambios de layout de filtros, preservar `trace_add`, bindings y foco inicial.
 
-## 8. Rutas de persistencia local
+## 9. Rutas de persistencia local
 
 - Catalogos: `%APPDATA%\Sonometa\catalogos.json`
 - Settings: `%APPDATA%\Sonometa\settings.json`
+- Cache (metadatos y analisis de calidad): `%APPDATA%\Sonometa\cache.db`
+- Configuracion y tokens: `%APPDATA%\Sonometa\.env` (ver 5.3)
 
 Esto desacopla datos de usuario del codigo fuente y facilita despliegues/actualizaciones.
 

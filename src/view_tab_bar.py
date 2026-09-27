@@ -9,12 +9,11 @@ ICON_FONT_CANDIDATES = ("Segoe Fluent Icons", "Segoe MDL2 Assets")
 VIEW_ICONS = {
     "collection": "\uE90B",  # lista con nota musical
     "dashboard": "\uEB05",   # gráfico circular
-    "health": "\uE95E",      # pulso / calidad
 }
 
 
 class ViewTabBar(ctk.CTkFrame):
-    """Selector de vista segmentado (Colección / Dashboard / Calidad) que vive al
+    """Selector de vista segmentado (Colección / Dashboard) que vive al
     final de la cabecera. Un contenedor tipo input (BG_INPUT, borde, radio 10) con un segmento
     por vista: icono + texto. El activo usa el estilo de "chip activo" de la guía
     (fondo CHIP_ACTIVE_BG, borde morado, texto blanco), igual que el indicador de

@@ -111,13 +111,13 @@ body {
   border-radius: 16px; padding: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.35);
 }
 .cover {
-  display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px;
+  display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: contain; border-radius: 12px;
   background: #2D2D35;
 }
 .cover-empty { display: flex; align-items: center; justify-content: center; }
 .cover-empty .brand-icon { width: 30%; height: auto; opacity: 0.5; }
-h1 { margin: 18px 0 4px; font-size: 22px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
-.artist { margin: 0; font-size: 16px; color: #B3B3AD; font-weight: 500; overflow-wrap: anywhere; }
+.artist { margin: 18px 0 4px; font-size: 16px; color: #B3B3AD; font-weight: 500; overflow-wrap: anywhere; }
+h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
 .remix { margin: 6px 0 0; font-size: 13px; color: #A78BFA; }
 dl {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px;
@@ -160,9 +160,6 @@ function renderTrack(track, pageUrl, origin) {
     const artist = clean(track.artist) || 'Artista desconocido';
     const remix = clean(track.mix_artist);
     const details = [
-        ['Álbum', clean(track.album)],
-        ['Sello', clean(track.publisher)],
-        ['Género', clean(track.genre)],
         ['Año', clean(track.year)],
         ['Duración', formatDuration(track.duration)],
     ].filter(([, value]) => value);
@@ -170,7 +167,7 @@ function renderTrack(track, pageUrl, origin) {
     const coverUrl = clean(track.cover_url);
     const imageUrl = coverUrl || `${origin}/assets/icono_iphone_512.png`;
     const ogTitle = `${artist} – ${title}`;
-    const ogDescription = [remix && `Remix: ${remix}`, clean(track.publisher), clean(track.year), clean(track.genre)]
+    const ogDescription = [remix, clean(track.year), formatDuration(track.duration)]
         .filter(Boolean).join(' · ') || 'Compartido desde Sonometa';
 
     const head = `
@@ -200,9 +197,9 @@ function renderTrack(track, pageUrl, origin) {
     const body = `
 <main class="card">
   ${cover}
-  <h1>${esc(title)}</h1>
   <p class="artist">${esc(artist)}</p>
-  ${remix ? `<p class="remix">Remix: ${esc(remix)}</p>` : ''}
+  <h1>${esc(title)}</h1>
+  ${remix ? `<p class="remix">${esc(remix)}</p>` : ''}
   ${grid}
   <div class="brand">${ISOTYPE_SVG}<strong>Sonometa</strong><span>Cloud</span></div>
 </main>`;

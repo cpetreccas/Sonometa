@@ -10,8 +10,7 @@ from dialogs import DialogManager
 from stats_dashboard_view import (
     CARD_BG, _new_figure, _embed_canvas, _figure_matches_size, _set_combo_filter,
     _set_toggle_filter, _parse_rating, _parse_cues, _has_cover, _hex_rgb, _tracked_title,
-    _autohide_scrollbar, _build_card_shell, _HeroCounter, _LoadingOverlay, _ChartTooltip,
-    _show_tooltip_near,
+    _build_card_shell, _show_tooltip_near, _format_count,
 )
 import theme
 
@@ -117,29 +116,63 @@ def _health_status_color(score):
     return theme.STATUS_DANGER
 
 
-def _compute_quality(metrics, summary):
-    """Combina completitud de datos y auditoría técnica. La técnica (media de sus ejes
-    del radar) pesa la mitad del score multiplicada por la cobertura del análisis:
-    50/50 con todo analizado, y casi nada con pocas pistas analizadas, para que un
-    puñado de análisis no mueva el anillo. Sin pistas analizadas solo cuenta la parte
-    de datos y el radar no lleva ejes técnicos."""
-    analyzed = summary.get("total_analyzed", 0) or 0
+def _track_has_data_gap(track):
+    """¿Le falta a la pista alguno de los 7 campos de completitud?"""
+    return not (
+        str(track.get("Album", "")).strip()
+        and str(track.get("Genre", "")).strip()
+        and str(track.get("Publisher", "")).strip()
+        and _parse_cues(track.get("Cues", "")) > 0
+        and _parse_rating(track.get("Rating", "")) > 0
+        and _has_cover(track.get("Cover", ""))
+        and str(track.get("Year", "")).strip()
+    )
+
+
+def _health_has_issue(health, lufs_ok_min, lufs_ok_max):
+    """¿Tiene el análisis técnico algún aviso de los que lista la tarjeta?"""
+    lufs = health.get("lufs_integrated")
+    return bool(
+        health.get("has_clipping")
+        or health.get("bitrate_fake")
+        or health.get("integrity_status") in ("warning", "critical")
+        or (lufs is not None and (lufs < lufs_ok_min or lufs > lufs_ok_max))
+    )
+
+
+def _count_clean_tracks(tracks, paths, health_by_path):
+    """Pistas sin ningún problema: los 7 campos completos y ningún aviso técnico.
+    Las pistas sin análisis técnico vigente cuentan solo por sus datos."""
+    from audio_health_checker import LUFS_OK_MIN, LUFS_OK_MAX
+
+    clean = 0
+    for track, path in zip(tracks, paths):
+        if _track_has_data_gap(track):
+            continue
+        health = health_by_path.get(path) if path else None
+        if health and _health_has_issue(health, LUFS_OK_MIN, LUFS_OK_MAX):
+            continue
+        clean += 1
+    return clean
+
+
+def _compute_quality(metrics, summary, clean_count):
+    """Anillo: % de pistas sin ningún problema (ver _count_clean_tracks). Así se lee
+    directamente ("el X % de la colección está perfecta") y un problema frecuente no
+    se diluye entre indicadores casi perfectos, como pasaba al promediarlos.
+    El radar sigue mostrando cada indicador por separado: los 7 campos y, si hay
+    pistas analizadas, los 4 ejes técnicos (% de analizadas que pasan cada chequeo)."""
+    total = metrics["total"]
     labels, values = list(metrics["labels"]), list(metrics["values"])
-    if not analyzed:
-        return {"overall": metrics["overall"], "labels": labels, "values": values}
+    overall = round(100 * clean_count / total) if total else 0
 
-    tech_values = [
-        round(100 * (analyzed - (summary.get(key, 0) or 0)) / analyzed) for key, _ in AUDIT_RADAR_AXES
-    ]
-    tech_score = sum(tech_values) / len(tech_values)
-    total = summary.get("total_library", 0) or analyzed
-    tech_weight = 0.5 * min(1.0, analyzed / total)
-    return {
-        "overall": round(metrics["overall"] * (1 - tech_weight) + tech_score * tech_weight),
-        "labels": labels + [label for _, label in AUDIT_RADAR_AXES],
-        "values": values + tech_values,
-    }
-
+    analyzed = summary.get("total_analyzed", 0) or 0
+    if analyzed:
+        labels += [label for _, label in AUDIT_RADAR_AXES]
+        values += [
+            round(100 * (analyzed - (summary.get(key, 0) or 0)) / analyzed) for key, _ in AUDIT_RADAR_AXES
+        ]
+    return {"overall": overall, "clean": clean_count, "total": total, "labels": labels, "values": values}
 
 def _icon_font_family():
     families = set(tkfont.families())
@@ -385,10 +418,17 @@ class _RadarChart:
         self.canvas.mpl_connect("figure_leave_event", lambda e: self._tooltip.hide())
 
     def sync_size(self):
+        """Ajusta la figura al tamaño del widget. Devuelve True si ha cambiado."""
         w, h = self.widget.winfo_width(), self.widget.winfo_height()
         if w > 1 and h > 1 and not _figure_matches_size(self.fig, w, h):
             from types import SimpleNamespace
             self.canvas.resize(SimpleNamespace(width=w, height=h))
+            return True
+        return False
+
+    def redraw(self):
+        if self._labels:
+            self.draw(self._labels, self._values)
 
     @staticmethod
     def _xy(angle, radius):
@@ -447,61 +487,40 @@ class _RadarChart:
         self._tooltip.hide()
 
 
-class HealthDashboardView(ctk.CTkFrame):
-    """Vista de calidad de la colección, calcada de la PWA: contador de pistas,
-    tarjeta "Calidad de la colección" y tarjeta "Indicadores de calidad".
+class QualitySection:
+    """Tarjetas "Calidad de la colección" e "Indicadores de calidad", que encabezan
+    el Dashboard (StatsDashboardView las coloca bajo el contador y encima de las
+    gráficas de distribución). Antes eran una pestaña propia ("Calidad").
 
     La calidad combina completitud de datos (7 campos) y auditoría técnica de audio
     (integridad, saturación, volumen, bitrate real): en el anillo la técnica pesa la
-    mitad en proporción a la cobertura del análisis (ver _compute_quality), la lista suma a los campos que faltan los avisos técnicos, y el radar
-    tiene un eje por cada uno. Al pie de la primera tarjeta, la cobertura del
-    análisis técnico y el botón "Analizar pendientes".
+    mitad en proporción a la cobertura del análisis (ver _compute_quality), la lista
+    suma a los campos que faltan los avisos técnicos, y el radar tiene un eje por
+    cada uno. Al pie de la primera tarjeta, la cobertura del análisis técnico y el
+    botón "Analizar pendientes".
 
-    Acotada a la vista actual de la grilla (respeta filtros/búsqueda activos). Se
-    embebe como una de las 3 pestañas conmutables (App.switch_view en gui.py) y se
-    refresca sola al cambiar el filtro (GridPanel.apply_combined_filters), así que
-    no tiene botón "Actualizar". Clic en un elemento de la lista filtra la colección
-    sin salir de la pestaña (la vista se recalcula sobre las pistas filtradas y el
-    filtro se ve en el indicador de la cabecera).
+    Clic en un elemento de la lista filtra la colección sin cambiar de pestaña:
+    campos que faltan -> filtro avanzado (DIAG_FILTER_ACTIONS); avisos técnicos ->
+    filtro por rutas (GridPanel.apply_health_path_filter). El Dashboard se recalcula
+    sobre las pistas filtradas y el filtro se ve en el indicador de la cabecera.
 
-    Mismo esquema de pintado que StatsDashboardView: la estructura se construye una
-    vez, refresh() actualiza en sitio y no hace nada si datos y ancho no cambiaron;
-    al mostrar la pestaña con datos nuevos se tapa con un overlay hasta tenerlo
-    todo dibujado a su tamaño final."""
+    No es un widget: construye sus tarjetas en `self.frame` (que coloca el host) y
+    expone compute()/render() para que el host decida cuándo pintar."""
 
-    def __init__(self, app, parent):
-        super().__init__(parent, fg_color=theme.BG_MAIN, corner_radius=0)
+    def __init__(self, app, parent, scale, tooltip, host):
         self.app = app
+        self._host = host
+        self._scale = scale
+        self._tooltip = tooltip
         self.file_paths = []
-        self._scale = ctk.ScalingTracker.get_widget_scaling(self)
-        self._tooltip = _ChartTooltip(self)
-        self._rendered_signature = None
-        self._rendered_width = None
-        self._render_generation = 0
         self._single_column = None
 
-        self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.scroll.pack(fill="both", expand=True, padx=theme.SPACE_SM, pady=theme.SPACE_SM)
-        try:
-            _autohide_scrollbar(self.scroll)
-        except Exception:
-            pass
-
-        self._empty_label = ctk.CTkLabel(
-            self.scroll, text="No hay pistas visibles en la tabla (revisa los filtros aplicados).",
-            text_color=theme.TEXT_SUBTLE, font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BODY)
-        )
-        self._hero = _HeroCounter(self.scroll, self._scale, "Pistas en la vista actual")
-
-        self._grid = tk.Frame(self.scroll, bg=theme.BG_MAIN, bd=0, highlightthickness=0)
+        self.frame = tk.Frame(parent, bg=theme.BG_MAIN, bd=0, highlightthickness=0)
+        self._grid = self.frame
         self._grid.bind("<Configure>", self._on_grid_configure)
         self._build_collection_health_card()
         self._build_indicators_card()
         self._layout_cards(single_column=False)
-
-        self._overlay = _LoadingOverlay(self, self._scale, "Preparando calidad de la colección…")
-
-        self.refresh()
 
     # ------------------------------------------------------------------
     # Construcción (una sola vez)
@@ -512,7 +531,12 @@ class HealthDashboardView(ctk.CTkFrame):
             self._grid, "Calidad de la colección", s, height=HEALTH_CARD_HEIGHT
         )
         self._ring = _ScoreRing(content, s)
-        self._ring.canvas.pack(pady=(round(10 * s), round(10 * s)))
+        self._ring.canvas.pack(pady=(round(10 * s), round(4 * s)))
+        self._clean_text = tk.Label(
+            content, bg=CARD_BG, fg=theme.TEXT_MUTED,
+            font=tkfont.Font(family=theme.FONT_FAMILY, size=-round(13 * s))
+        )
+        self._clean_text.pack(pady=(0, round(10 * s)))
         self._diag_list = _MetricList(content, s, columns=2, on_click=self._on_diag_click)
         self._diag_list.frame.pack()  # centrado bajo el anillo
 
@@ -570,61 +594,27 @@ class HealthDashboardView(ctk.CTkFrame):
             card.grid(row=row, column=col, columnspan=span, sticky="nsew", padx=gap, pady=gap)
 
     # ------------------------------------------------------------------
-    # Refresco
+    # Datos y pintado (los decide el host)
     # ------------------------------------------------------------------
-    def refresh(self, reveal=False):
-        """Recalcula completitud y auditoría sobre la vista actual de la grilla.
-        reveal=True cuando la pestaña se acaba de mostrar (App.switch_view): si hay
-        que repintar, se hace tapado por el overlay."""
-        if not self.winfo_exists():
-            return
-        self._tooltip.hide()
-        self._render_generation += 1
-
-        tracks = self.app.grid_panel.get_visible_tracks_data()
-        self.file_paths = self.app.grid_panel.get_visible_file_paths()
+    def compute(self, tracks, file_paths):
+        """(métricas de completitud, resumen de la auditoría, nº de pistas sin
+        problemas) de las pistas visibles."""
+        self.file_paths = file_paths
         metrics = _compute_health_metrics(tracks)
-        if metrics is None:
-            self._overlay.hide()
-            self._hero.canvas.pack_forget()
-            self._grid.pack_forget()
-            self._empty_label.pack(pady=theme.SPACE_XL)
-            self._rendered_signature = None
-            return
-
         cache_manager = getattr(self.app, "cache_manager", None)
-        summary = cache_manager.get_health_summary_for_files(self.file_paths) if cache_manager else {}
+        summary = cache_manager.get_health_summary_for_files(file_paths) if cache_manager else {}
 
-        signature = (repr(metrics), repr(sorted(summary.items())))
-        width = self.master.winfo_width()
-        if signature == self._rendered_signature and width == self._rendered_width:
-            self._overlay.hide()
-            return
+        aligned_paths = self.app.grid_panel.get_visible_paths_aligned()
+        health_by_path = cache_manager.get_health_fields_for_files(file_paths) if cache_manager else {}
+        clean_count = _count_clean_tracks(tracks, aligned_paths, health_by_path)
+        return metrics, summary, clean_count
 
-        self._empty_label.pack_forget()
-        gap = round(theme.SPACE_SM * self._scale)
-        self._hero.canvas.pack(fill="x", padx=gap, pady=(gap, 0))
-        self._grid.pack(fill="both", expand=True)
-
-        if reveal:
-            self._overlay.show()
-            generation = self._render_generation
-            self.after(40, lambda: self._deferred_render(generation, metrics, summary, signature))
-        else:
-            self._render(metrics, summary, signature)
-
-    def _deferred_render(self, generation, metrics, summary, signature):
-        if generation != self._render_generation or not self.winfo_exists():
-            return
-        self.update_idletasks()
-        self._render(metrics, summary, signature)
-
-    def _render(self, metrics, summary, signature):
-        self._hero.set_value(metrics["total"])
-        self._hero.render_now()
-
-        quality = _compute_quality(metrics, summary)
+    def render(self, metrics, summary, clean_count):
+        quality = _compute_quality(metrics, summary, clean_count)
         self._ring.set_score(quality["overall"])
+        self._clean_text.configure(
+            text=f"{_format_count(quality['clean'])} de {_format_count(quality['total'])} pistas sin problemas"
+        )
 
         missing = metrics["missing"]
         items = [
@@ -642,9 +632,10 @@ class HealthDashboardView(ctk.CTkFrame):
 
         self._render_coverage(summary)
 
-        self._rendered_signature = signature
-        self._rendered_width = self.master.winfo_width()
-        self._overlay.hide()
+    def resync(self):
+        """Tras asentarse el layout: redibuja el radar si su tamaño cambió."""
+        if self._radar.sync_size():
+            self._radar.redraw()
 
     def _render_coverage(self, summary):
         total_library = summary.get("total_library", 0)
@@ -705,12 +696,12 @@ class HealthDashboardView(ctk.CTkFrame):
         if not pending_paths:
             DialogManager.show_themed_dialog(
                 self.app, "Sin pendientes", "Todas las pistas visibles ya tienen un análisis de calidad.",
-                level="info", parent=self
+                level="info", parent=self._host
             )
             return
 
         DialogManager.run_batch_health_check(
-            self.app, pending_paths, parent=self, on_complete=lambda results, cancelled: self.refresh()
+            self.app, pending_paths, parent=self._host, on_complete=lambda results, cancelled: self._host.refresh()
         )
 
     def _apply_diag_filter(self, dim_key):

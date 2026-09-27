@@ -65,6 +65,7 @@ export const context = {
         year: '',
         noCues: false,
         noCover: false,
-        noRating: false
+        noRating: false,
+        quality: ''          // aviso técnico: clipping | loudLow | loudHigh | bitrateFake | integrity
     }
 };

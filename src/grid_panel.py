@@ -119,7 +119,7 @@ class GridPanel:
         self._setup_styles()
 
         # Instanciación del Panel de Filtro Avanzado: hijo de frame_right (no de la
-        # grilla) para poder mostrarse también sobre Dashboard y Calidad.
+        # grilla) para poder mostrarse también sobre el Dashboard.
         self.filter_panel = AdvancedFilterPanel(
             parent=self.parent,
             app=self.app,
@@ -354,15 +354,13 @@ class GridPanel:
         self.logger.info(f"Filtro combinado y ordenación aplicados: {len(visible_rows)} de {len(all_rows)}.")
 
         # Único punto por el que pasa cualquier cambio de filtro (clic en leyenda,
-        # buscador, panel avanzado, filtro de calidad...): la vista activa (Dashboard
-        # o Calidad) se refresca sola — ya no depende de un botón "Actualizar" manual —
+        # buscador, panel avanzado, filtro de calidad...): el Dashboard, si está
+        # activo, se refresca solo — ya no depende de un botón "Actualizar" manual —
         # y el indicador de filtro global de la barra de navegación se actualiza
         # sea cual sea la vista activa.
         active_view = getattr(self.app, "_active_view", None)
         if active_view == "dashboard" and hasattr(self.app, "stats_view"):
             self.app.stats_view.refresh()
-        elif active_view == "health" and hasattr(self.app, "health_view"):
-            self.app.health_view.refresh()
 
         if hasattr(self.app, "filter_indicator"):
             self.app.filter_indicator.set_summary(self.get_active_filter_summary())
@@ -1726,6 +1724,12 @@ class GridPanel:
             for row_id in self.tree.get_children("")
             if self.app.file_paths_map.get(row_id)
         ]
+
+    def get_visible_paths_aligned(self) -> list:
+        """Ruta de cada fila visible (None si no tiene), en el mismo orden que
+        get_visible_tracks_data: permite cruzar los metadatos de cada pista con su
+        análisis de calidad (QualitySection)."""
+        return [self.app.file_paths_map.get(row_id) for row_id in self.tree.get_children("")]
 
     def get_visible_tracks_data(self) -> list:
         """Metadatos (por nombre de columna) de las filas actualmente visibles en la

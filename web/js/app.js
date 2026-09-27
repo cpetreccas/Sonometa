@@ -20,7 +20,8 @@ import {
     resetAllFilters,
     openFilterModal,
     closeFilterModal,
-    handleChartClick
+    handleChartClick,
+    applyQualityFilter
 } from './filters.js';
 import {
     playTrack,
@@ -147,6 +148,7 @@ window.resetAllFilters = resetAllFilters;
 window.openFilterModal = openFilterModal;
 window.closeFilterModal = closeFilterModal;
 window.handleChartClick = handleChartClick;
+window.applyQualityFilter = applyQualityFilter;
 
 // Exponer funciones de colección/tabla
 window.sortByColumn = sortByColumn;
@@ -186,7 +188,7 @@ export function syncMobileSearch(val) {
 
 window.syncMobileSearch = syncMobileSearch;
 
-const VIEW_SECTIONS = { table: 'tableView', dashboard: 'dashboardView', health: 'healthView' };
+const VIEW_SECTIONS = { table: 'tableView', dashboard: 'dashboardView' };
 
 export async function switchView(view) {
     const nextView = document.getElementById(VIEW_SECTIONS[view]);

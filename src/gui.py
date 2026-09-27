@@ -1,3 +1,7 @@
+# Antes que cualquier import que arrastre pydub: sin esto, cada ffmpeg/ffprobe
+# abre una ventana de consola en la app empaquetada (ver subprocess_no_window.py).
+import subprocess_no_window  # noqa: F401
+
 try:
     import audioop
 except ImportError:
@@ -30,7 +34,6 @@ from process_manager import ProcessManager
 from header_panel import HeaderPanel
 from undo_manager import UndoManager
 from stats_dashboard_view import StatsDashboardView
-from health_dashboard_view import HealthDashboardView
 from view_tab_bar import ViewTabBar
 from filter_indicator import FilterIndicator
 import theme
@@ -142,11 +145,15 @@ class App(ctk.CTk):
 
         self.DEFAULT_COVER_PATH = UiUtils.get_resource_path("assets/no_cover_art.jpg")
 
-        self.discogs_token = os.getenv("DISCOGS_TOKEN", "").strip()
-
         self.catalog_manager = CatalogManager(self)
         self.catalog_manager.load_catalog_values()
         self.catalog_manager.load_settings()
+
+        # Token de Discogs: el guardado en Preferencias > Discogs (settings.json) y, si
+        # no hay, DISCOGS_TOKEN del entorno/.env (desarrollo).
+        self.discogs_token = (
+            getattr(self.catalog_manager, "discogs_token", "") or os.getenv("DISCOGS_TOKEN", "")
+        ).strip()
 
         # 'Revisar carátulas' activado por defecto
         manual_rev = getattr(self.catalog_manager, "manual_cover_selection", True)
@@ -162,16 +169,24 @@ class App(ctk.CTk):
         self.app_icon_photo = None
         self.logo_pil, self.header_logo_pil, self.broom_icon, self.process_icon = UiUtils.load_app_icons(self)
 
-        if self.logo_pil:
-            try:
-                icon_path = UiUtils.get_resource_path("app_icon_temp.ico")
+        # Icono .ico para la ventana y los diálogos (DialogManager.apply_popup_style).
+        # Se usa el que va incluido en assets; generarlo junto al programa fallaba en
+        # la versión instalada (Program Files no admite escritura sin permisos de
+        # administrador) y los diálogos salían sin logo. Solo si faltara, se genera
+        # en la carpeta de datos del usuario.
+        icon_path = UiUtils.get_resource_path("assets/logo_relleno.ico")
+        try:
+            if not os.path.exists(icon_path) and self.logo_pil:
+                icon_path = os.path.join(os.path.dirname(CacheManager.CACHE_DB_PATH), "app_icon.ico")
                 if not os.path.exists(icon_path):
+                    os.makedirs(os.path.dirname(icon_path), exist_ok=True)
                     self.logo_pil.save(icon_path, format="ICO", sizes=[(32, 32), (48, 48), (64, 64)])
 
+            if os.path.exists(icon_path):
                 self.app_icon_ico = icon_path
                 self.iconbitmap(self.app_icon_ico)
-            except Exception as e:
-                self.logger.warning(f"No se pudo establecer el icono de la app: {e}")
+        except Exception as e:
+            self.logger.warning(f"No se pudo establecer el icono de la app: {e}")
 
     def _setup_ui(self):
         self.tool_panel = ToolPanel(self)
@@ -179,7 +194,7 @@ class App(ctk.CTk):
 
         self.header_panel = HeaderPanel(parent=self, app=self, logo_pil=self.header_logo_pil)
 
-        # Selector de vista: Colección / Dashboard / Calidad comparten el mismo estado
+        # Selector de vista: Colección / Dashboard comparten el mismo estado
         # de filtro (GridPanel._advanced_criteria / _health_filter_paths); conmutar
         # solo cambia qué página se muestra en frame_right, ver switch_view(). Es un
         # control segmentado al final de la cabecera (ver view_tab_bar.py), sin fila
@@ -187,7 +202,7 @@ class App(ctk.CTk):
         self._active_view = "collection"
         self.view_tab_bar = ViewTabBar(
             self.header_panel.inner_frame,
-            tabs=[("collection", "Colección"), ("dashboard", "Dashboard"), ("health", "Calidad")],
+            tabs=[("collection", "Colección"), ("dashboard", "Dashboard")],
             command=self.switch_view
         )
         self.view_tab_bar.set_active("collection")
@@ -195,7 +210,7 @@ class App(ctk.CTk):
         # Indicador de filtro global: única fuente visible del filtro activo, en la
         # cabecera junto al buscador, visible sea cual sea la vista activa. GridPanel
         # lo mantiene sincronizado solo (apply_combined_filters); no hay badges
-        # locales duplicados dentro de Dashboard/Calidad.
+        # locales duplicados dentro del Dashboard.
         self.filter_indicator = FilterIndicator(self.header_panel.inner_frame, on_clear=self._clear_global_filter)
         self.header_panel.place_navigation(self.view_tab_bar, self.filter_indicator)
 
@@ -224,10 +239,10 @@ class App(ctk.CTk):
         # Reusar la instancia de filtro que vive dentro de GridPanel.
         self.advanced_filter_panel = self.grid_panel.filter_panel
 
-        # Páginas de Dashboard/Calidad: se construyen ocultas y se muestran vía
-        # switch_view(); ambas refrescan sus datos desde grid_panel al activarse.
+        # Página del Dashboard (incluye la calidad de la colección): se construye
+        # oculta y se muestra vía switch_view(); refresca sus datos desde grid_panel
+        # al activarse.
         self.stats_view = StatsDashboardView(app=self, parent=self.frame_right)
-        self.health_view = HealthDashboardView(app=self, parent=self.frame_right)
 
         self._setup_footer()
 
@@ -332,7 +347,7 @@ class App(ctk.CTk):
             self.logger.info("Panel lateral colapsado.")
 
     def switch_view(self, view_key):
-        """Conmuta entre las 3 vistas de la app (Colección/Dashboard/Calidad). Las 3
+        """Conmuta entre las 2 vistas de la app (Colección/Dashboard). Ambas
         comparten el mismo estado de filtro (GridPanel._advanced_criteria /
         _health_filter_paths aplicados sobre el Treeview) — conmutar de vista solo
         cambia qué página se muestra en frame_right, nunca recalcula un filtro
@@ -341,7 +356,6 @@ class App(ctk.CTk):
         pages = {
             "collection": self.grid_panel.frame_grid,
             "dashboard": self.stats_view,
-            "health": self.health_view,
         }
         if view_key not in pages:
             return
@@ -360,12 +374,9 @@ class App(ctk.CTk):
             # Editar metadatos de una pista no tiene sentido viendo un dashboard
             # agregado; se oculta sin tocar la preferencia del checkbox.
             self.detail_panel.frame_sidebar.pack_forget()
-            if view_key == "dashboard":
-                # reveal=True: si hay que repintar, la vista se tapa con un overlay
-                # de carga hasta que todos los gráficos tienen su tamaño final.
-                self.stats_view.refresh(reveal=True)
-            else:
-                self.health_view.refresh(reveal=True)
+            # reveal=True: si hay que repintar, la vista se tapa con un overlay
+            # de carga hasta que todos los gráficos tienen su tamaño final.
+            self.stats_view.refresh(reveal=True)
 
     def _clear_global_filter(self):
         """Botón '✕' del indicador de filtro global: reset_filters() ya dispara
@@ -494,7 +505,6 @@ class App(ctk.CTk):
         pages = {
             "collection": self.grid_panel.frame_grid,
             "dashboard": self.stats_view,
-            "health": self.health_view,
         }
         return pages.get(getattr(self, "_active_view", "collection"))
 
@@ -510,12 +520,31 @@ class App(ctk.CTk):
 
         DialogManager.show_replace_filename_dialog(self, target_items)
 
+    def open_discogs_settings(self):
+        """Preferencias > Discogs…: diálogo para pegar y comprobar el token personal."""
+        from discogs_token_dialog import DiscogsTokenDialog
+        self.wait_window(DiscogsTokenDialog(self))
+
+    def set_discogs_token(self, token):
+        """Guarda el token de Discogs en settings.json y lo aplica en caliente
+        (DiscogsClient lo lee en cada petición vía token_getter)."""
+        token = (token or "").strip()
+        self.discogs_token = token
+        self.catalog_manager.discogs_token = token
+        self.catalog_manager.save_settings()
+        if token:
+            self.logger.info("Token de Discogs activo ✓")
+        else:
+            self.logger.warning("Discogs desconectado: no se completarán año ni carátulas desde Discogs.")
+
     def _check_initial_status(self):
         self.logger.info("Aplicación Sonometa iniciada correctamente.")
         if self.discogs_token:
             self.logger.info("Token de Discogs activo ✓")
         else:
-            self.logger.warning("No hay token de Discogs configurado.")
+            self.logger.warning(
+                "No hay token de Discogs configurado: conéctalo en Preferencias › Discogs…"
+            )
 
         if self.supabase_manager.is_authenticated():
             self.on_user_logged_in()
@@ -780,6 +809,12 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    # Imprescindible en el .exe de PyInstaller: los procesos del análisis de calidad
+    # por lotes arrancan el mismo ejecutable, y esto los desvía a su tarea en vez de
+    # abrir otra ventana de la app.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('sonometa.audiotagsuite.1.0')
     except Exception:

@@ -1129,7 +1129,7 @@ class HealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
 
 def _build_metric_chip(parent, label, count, color):
     """Tarjeta 'número grande + etiqueta' reutilizada por BatchHealthReportModal y
-    HealthDashboardView (health_dashboard_view.py) para sus métricas rápidas."""
+    QualitySection (health_dashboard_view.py) para sus métricas rápidas."""
     chip = ctk.CTkFrame(parent, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL)
     ctk.CTkLabel(
         chip, text=str(count), text_color=color,
@@ -1144,10 +1144,21 @@ def _build_metric_chip(parent, label, count, color):
 
 class BatchHealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
     """Resumen de 'Evaluar calidad' para una selección múltiple o un lote de pendientes:
-    métricas rápidas + lista de pistas. Doble clic en una fila abre su
-    HealthReportModal individual (vía on_open_detail)."""
+    métricas rápidas + tabla de pistas, las peores primero. Doble clic en una fila
+    abre su HealthReportModal individual (vía on_open_detail).
 
-    _STATUS_COLORS = HealthReportModal._STATUS_COLORS
+    La tabla es un ttk.Treeview (mismo estilo que la grilla) y no una fila de widgets
+    CTk por pista: con miles de pistas (p. ej. 'Analizar pendientes' de toda la
+    colección) eso eran decenas de miles de widgets y la ventana no llegaba a pintarse."""
+
+    _STATUS_ICONS = {"ok": "✓", "warning": "⚠", "critical": "✕"}
+    # Nombre de cada chequeo en la columna "Problemas" (mismos términos que los dashboards).
+    _CHECK_NAMES = (
+        ("integrity", "Integridad"),
+        ("clipping", "Saturación"),
+        ("loudness", "Volumen"),
+        ("cutoff", "Bitrate falso"),
+    )
 
     def __init__(self, app, results, was_cancelled=False, on_open_detail=None, parent=None):
         host = parent if parent is not None else app
@@ -1195,15 +1206,11 @@ class BatchHealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
             ("Avisos", warn_count, theme.STATUS_WARNING),
             ("Críticos", crit_count, theme.STATUS_DANGER),
             ("Bitrate falso", fake_count, theme.STATUS_WARNING),
-            ("Clipping", clip_count, theme.STATUS_DANGER),
+            ("Saturación", clip_count, theme.STATUS_DANGER),
         ):
             _build_metric_chip(metrics, label, count, color).pack(side="left", padx=(0, theme.SPACE_SM))
 
-        list_container = ctk.CTkScrollableFrame(frame, fg_color=theme.BG_CARD, corner_radius=0, height=260)
-        list_container.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
-
-        for file_path, report in results:
-            self._build_track_row(list_container, file_path, report)
+        self._build_results_table(frame)
 
         btns = ctk.CTkFrame(frame, fg_color="transparent")
         btns.pack(pady=(0, 20))
@@ -1215,39 +1222,61 @@ class BatchHealthReportModal(SilentTitlebarMixin, ctk.CTkToplevel):
         ).pack()
 
         self.update_idletasks()
-        width = 520
-        height = max(420, min(680, frame.winfo_reqheight()))
+        width = 680
+        height = max(460, min(680, frame.winfo_reqheight()))
         DialogManager.center_popup_on_parent(self, self._host, width=width, height=height)
         DialogManager.apply_popup_style(self.app, self, is_modal=True, owner=self._host)
 
-    def _build_track_row(self, parent, file_path, report):
-        row = ctk.CTkFrame(parent, fg_color=theme.BG_CARD_HOVER, corner_radius=theme.RADIUS_CONTROL, cursor="hand2")
-        row.pack(fill="x", pady=(0, theme.SPACE_XS))
-        row.grid_columnconfigure(1, weight=1)
+    def _problems_text(self, report):
+        if report.error:
+            return "No se pudo analizar"
+        return ", ".join(name for key, name in self._CHECK_NAMES if getattr(report, key).status in ("warning", "critical"))
 
-        color = self._STATUS_COLORS.get(report.overall_status, theme.TEXT_MUTED)
-        badge = ctk.CTkLabel(row, text="", width=10, height=10, corner_radius=5, fg_color=color)
-        badge.grid(row=0, column=0, padx=(theme.SPACE_SM, theme.SPACE_SM), pady=theme.SPACE_SM)
+    def _build_results_table(self, parent):
+        from tkinter import ttk
 
-        lbl_name = ctk.CTkLabel(
-            row, text=os.path.basename(file_path), anchor="w", text_color=theme.TEXT_MAIN,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE)
-        )
-        lbl_name.grid(row=0, column=1, sticky="ew", pady=theme.SPACE_SM)
+        table_frame = ctk.CTkFrame(parent, fg_color=theme.BG_CARD, border_width=1,
+                                   border_color=theme.BORDER_QUIET, corner_radius=theme.RADIUS_CONTROL)
+        table_frame.pack(fill="both", expand=True, padx=theme.SPACE_MD, pady=(0, theme.SPACE_SM))
 
-        lbl_score = ctk.CTkLabel(
-            row, text=f"{report.health_score}/100", anchor="e", text_color=theme.TEXT_MUTED,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_BADGE, weight="bold")
-        )
-        lbl_score.grid(row=0, column=2, padx=(theme.SPACE_SM, theme.SPACE_MD), pady=theme.SPACE_SM)
+        columns = ("status", "file", "score", "problems")
+        tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse", height=12)
+        for col, title, width, anchor, stretch in (
+            ("status", "", 34, "center", False),
+            ("file", "ARCHIVO", 330, "w", True),
+            ("score", "CALIDAD", 70, "center", False),
+            ("problems", "PROBLEMAS", 190, "w", False),
+        ):
+            tree.heading(col, text=title, anchor=anchor)
+            tree.column(col, width=width, minwidth=width if not stretch else 120, anchor=anchor, stretch=stretch)
+
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y", padx=(0, 2), pady=2)
+        tree.pack(side="left", fill="both", expand=True, padx=(2, 0), pady=2)
+
+        # Peores primero: lo que interesa tras un lote grande son los problemas.
+        ordered = sorted(self.results, key=lambda item: (item[1].health_score, os.path.basename(item[0]).lower()))
+        self._rows = {}
+        for index, (file_path, report) in enumerate(ordered):
+            row_id = tree.insert("", "end", values=(
+                self._STATUS_ICONS.get(report.overall_status, "?"),
+                os.path.basename(file_path),
+                report.health_score,
+                self._problems_text(report),
+            ), tags=("even" if index % 2 == 0 else "odd",))
+            self._rows[row_id] = (file_path, report)
+        tree.tag_configure("odd", background=theme.BG_CARD_ZEBRA)
 
         def _open_detail(event=None):
-            if callable(self.on_open_detail):
+            row_id = tree.identify_row(event.y) if event is not None else tree.focus()
+            item = self._rows.get(row_id)
+            if item and callable(self.on_open_detail):
+                file_path, report = item
                 self.on_open_detail(report, file_path, self)
 
-        for widget in (row, badge, lbl_name, lbl_score):
-            widget.bind("<Double-Button-1>", _open_detail)
-
+        tree.bind("<Double-Button-1>", _open_detail)
+        tree.bind("<Return>", lambda e: _open_detail())
 
 class DialogManager:
     """Clase especializada en la gestión de ventanas emergentes, diálogos y popups de la aplicación."""
@@ -1371,7 +1400,12 @@ class DialogManager:
         cancelable, un hilo secundario que salta los que ya tienen caché válida, y al
         terminar un BatchHealthReportModal con el resumen. Punto de entrada único
         compartido por la selección múltiple de grid_panel y el botón 'Analizar
-        pendientes' de HealthDashboardView (health_dashboard_view.py)."""
+        pendientes' del Dashboard (QualitySection, health_dashboard_view.py).
+
+        Los archivos sin caché se analizan en paralelo en procesos aparte
+        (ProcessPoolExecutor, ver _health_worker_count): parte del análisis es Python
+        puro y con hilos no se reparte entre núcleos. El proceso principal recibe cada
+        informe y lo guarda en caché."""
         existing_paths = [p for p in file_paths if p and os.path.exists(p)]
         if not existing_paths:
             DialogManager.show_themed_dialog(
@@ -1390,36 +1424,57 @@ class DialogManager:
             message="Preparando análisis por lotes...",
             total=total,
             on_cancel=cancel_event.set,
-            file_prefix="Analizando",
+            file_prefix="Analizado",
             item_noun="archivos",
             show_eta=True,
         )
         progress.set_counter(0, total)
 
         def _worker():
-            from audio_health_checker import AudioHealthChecker, HealthReport
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            from audio_health_checker import HealthReport, analyze_file_worker
 
             cache_manager = getattr(app, "cache_manager", None)
             results = []
+            pending = []
 
-            for idx, file_path in enumerate(existing_paths, start=1):
+            # 1. Los que ya tienen un análisis vigente en caché no se repiten.
+            for file_path in existing_paths:
                 if cancel_event.is_set():
                     break
-
-                progress.set_counter_threadsafe(idx - 1, total, current_file=file_path)
-
                 cached = cache_manager.get_cached_health(file_path) if cache_manager else None
                 if cached is not None:
-                    report = cached
+                    results.append((file_path, cached))
+                    progress.set_counter_threadsafe(len(results), total, current_file=file_path)
                 else:
-                    try:
-                        report = AudioHealthChecker.analyze(file_path, cache_manager=cache_manager)
-                    except Exception as e:
-                        logger.error(f"HealthCheck lote: fallo analizando '{file_path}': {e}")
-                        report = HealthReport.failed(file_path, str(e))
+                    pending.append(file_path)
 
-                results.append((file_path, report))
-                progress.set_counter_threadsafe(idx, total, current_file=file_path)
+            # 2. El resto, en paralelo. Cada informe se guarda en caché al llegar, así que
+            #    cancelar a medias conserva lo ya analizado.
+            if pending and not cancel_event.is_set():
+                with ProcessPoolExecutor(max_workers=DialogManager._health_worker_count(len(pending))) as pool:
+                    futures = {pool.submit(analyze_file_worker, file_path): file_path for file_path in pending}
+                    for future in as_completed(futures):
+                        file_path = futures[future]
+                        try:
+                            report = HealthReport.from_dict(future.result())
+                        except Exception as e:
+                            logger.error(f"HealthCheck lote: fallo analizando '{file_path}': {e}")
+                            report = HealthReport.failed(file_path, str(e))
+
+                        if cache_manager is not None:
+                            try:
+                                cache_manager.save_health_report(file_path, report)
+                            except Exception as e:
+                                logger.warning(f"HealthCheck: no se pudo guardar en caché '{file_path}': {e}")
+
+                        results.append((file_path, report))
+                        progress.set_counter_threadsafe(len(results), total, current_file=file_path)
+
+                        if cancel_event.is_set():
+                            # Los que ya están en marcha terminan; los que no han empezado se descartan.
+                            pool.shutdown(wait=False, cancel_futures=True)
+                            break
 
             was_cancelled = cancel_event.is_set()
             app.after(0, lambda: _on_done(results, was_cancelled))
@@ -1450,6 +1505,14 @@ class DialogManager:
                 on_complete(results, was_cancelled)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    @staticmethod
+    def _health_worker_count(pending_count):
+        """Procesos para el análisis por lotes: la mitad de los núcleos, como mucho 3.
+        Cada análisis carga la pista entera en memoria (cientos de MB en un tema de
+        varios minutos), así que más procesos a la vez disparan el consumo de RAM."""
+        cores = os.cpu_count() or 2
+        return max(1, min(3, cores // 2, pending_count))
 
     @staticmethod
     def hide_until_ready(win):

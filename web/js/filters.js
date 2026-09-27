@@ -8,7 +8,7 @@
  */
 
 import { context } from './app_context.js';
-import { updateDashboard } from './dashboard.js';
+import { updateDashboard, trackHasQualityIssue } from './dashboard.js';
 import { loadTableData } from './collection_view.js';
 
 let lastFiltersCache = null;
@@ -157,6 +157,11 @@ export function updateFilterSummaryBar() {
         }
     });
 
+    if (context.currentFilters.quality) {
+        activeCount++;
+        activeNames.push(`Calidad: ${QUALITY_FILTER_LABELS[context.currentFilters.quality] || context.currentFilters.quality}`);
+    }
+
     if (context.currentFilters.noCues) { activeCount++; activeNames.push('Sin Cues'); }
     if (context.currentFilters.noCover) { activeCount++; activeNames.push('Sin Carátula'); }
 
@@ -245,6 +250,9 @@ export function applyFilters() {
         if (context.currentFilters.noCues && Number(t.cue_count || 0) > 0) return false;
         if (context.currentFilters.noCover && t.cover_url && String(t.cover_url).trim() !== '') return false;
 
+        // Aviso de la auditoría técnica (clic en la tarjeta de calidad del dashboard)
+        if (context.currentFilters.quality && !trackHasQualityIssue(t, context.currentFilters.quality)) return false;
+
         // Rating
         if (context.currentFilters.noRating && Number(t.rating || 0) > 0) return false;
         if (context.currentFilters.rating && String(t.rating) !== String(context.currentFilters.rating)) return false;
@@ -279,7 +287,8 @@ export function resetAllFilters() {
         rating: '',
         noCues: false,
         noCover: false,
-        noRating: false
+        noRating: false,
+        quality: ''
     };
     const sInput = document.getElementById('searchInput');
     const sMobile = document.getElementById('searchInputMobile');
@@ -303,6 +312,38 @@ export function closeFilterModal() {
 /**
  * Maneja el clic sobre elementos de las gráficas del Dashboard (Cross-Filtering)
  */
+const QUALITY_FILTER_LABELS = {
+    clipping: 'Saturación',
+    loudLow: 'Volumen bajo',
+    loudHigh: 'Volumen excesivo',
+    bitrateFake: 'Bitrate falso',
+    integrity: 'Corruptos/truncados'
+};
+
+/**
+ * Clic en un elemento de la tarjeta "Calidad de la colección": filtra por el campo
+ * que falta o por el aviso técnico correspondiente (mismo criterio que el recuento).
+ * @param {string} key - cover | rating | cues | genre | publisher | album | year |
+ *                       clipping | loudLow | loudHigh | bitrateFake | integrity
+ */
+export function applyQualityFilter(key) {
+    const f = context.currentFilters;
+    const labels = {
+        cover: 'Sin carátula', rating: 'Sin valoración', cues: 'Sin Cue points',
+        genre: 'Sin género', publisher: 'Sin etiqueta', album: 'Sin álbum', year: 'Sin año'
+    };
+
+    if (key === 'cover') f.noCover = true;
+    else if (key === 'cues') f.noCues = true;
+    else if (key === 'rating') { f.noRating = true; f.rating = ''; }
+    else if (['genre', 'publisher', 'album', 'year'].includes(key)) f[key] = '__EMPTY__';
+    else if (QUALITY_FILTER_LABELS[key]) f.quality = key;
+    else return;
+
+    applyFilters();
+    showFilterToast(`Filtro aplicado: ${labels[key] || QUALITY_FILTER_LABELS[key]}`);
+}
+
 export function handleChartClick(key, label, defaultLabel) {
     const filterValue = (label === defaultLabel) ? '__EMPTY__' : label;
 

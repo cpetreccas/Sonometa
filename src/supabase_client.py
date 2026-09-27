@@ -1,16 +1,28 @@
 import os
 import logging
 from typing import Optional, Dict, Any, List
-from dotenv import load_dotenv
 from supabase import create_client, Client
+
+try:
+    from app_env import load_app_env
+except ImportError:  # importado como src.supabase_client sin src/ en sys.path
+    from src.app_env import load_app_env
 
 logger = logging.getLogger("Sonometa")
 
-load_dotenv()
+load_app_env()
 
-# Se cargan desde el archivo .env local (no versionado) o variables de entorno del sistema
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+# Proyecto de Supabase por defecto: URL y clave "anon", que son públicas por diseño
+# (la PWA las publica en web/js/supabase.js; los datos los protegen el login y las
+# políticas RLS). Se pueden sustituir con variables de entorno o con el .env.
+DEFAULT_SUPABASE_URL = "https://iwgpfqnyhjewuufrqali.supabase.co"
+DEFAULT_SUPABASE_KEY = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3Z3BmcW55aGpld3V1ZnJxYWxpIiwicm9sZSI6"
+    "ImFub24iLCJpYXQiOjE3ODkzMjcxNzAsImV4cCI6MjEwNDkwMzE3MH0.3cHCKKVaqrU2-NhKHFzNU7-SuFRIjWhv3h0by8hQOdE"
+)
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or DEFAULT_SUPABASE_KEY
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     logger.warning(
